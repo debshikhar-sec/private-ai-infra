@@ -33,7 +33,7 @@ app.config["MAX_CONTENT_LENGTH"] = int(
 # Fail-closed: the gateway refuses to start without an auth token (enforced in
 # __main__). The documented development default lives in the launcher / .env,
 # never baked into the server itself.
-_DEV_DEFAULT_TOKEN = "private-portfolio-token"
+_DEV_DEFAULT_TOKEN = "private-portfolio-token"  # documented dev default, not a secret  # nosec B105
 AUTH_TOKEN = os.environ.get("PRIVATE_AI_AUTH_TOKEN", "").strip()
 
 # Project root is three levels up: src/private_ai_gateway/app.py -> <root>

@@ -23,6 +23,10 @@ __pycache__/
 .DS_Store
 .pytest_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # Local editor state
 .vscode/

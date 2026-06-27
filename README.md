@@ -1,5 +1,11 @@
 # Private AI Gateway
 
+<!-- If the GitHub slug differs from debsqui/private-ai-infra, update it in the badge URLs below. -->
+[![CI](https://github.com/debsqui/private-ai-infra/actions/workflows/ci.yml/badge.svg)](https://github.com/debsqui/private-ai-infra/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/debsqui/private-ai-infra/actions/workflows/codeql.yml/badge.svg)](https://github.com/debsqui/private-ai-infra/actions/workflows/codeql.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+
 A **local-first AI governance plane** for Apple Silicon (MLX): an OpenAI-compatible gateway that
 mediates access to local models with **policy-as-code identity, authorization, output guardrails,
 and a structured decision audit** — behind an nginx loopback boundary.

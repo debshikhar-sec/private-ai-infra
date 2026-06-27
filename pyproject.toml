@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.6", "pytest>=8.0"]
+dev = ["ruff>=0.6", "pytest>=8.0", "pytest-cov>=5.0", "bandit>=1.7", "pip-audit>=2.7"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/private_ai_gateway"]
@@ -35,3 +35,13 @@ ignore = ["E501"]
 addopts = "-q --import-mode=importlib"
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["private_ai_gateway"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.bandit]
+exclude_dirs = ["tests"]

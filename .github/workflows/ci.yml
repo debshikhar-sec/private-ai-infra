@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  lint-and-test:
+  lint-and-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,10 +14,16 @@ jobs:
           python-version: "3.12"
 
       - name: Install tooling
-        run: pip install ruff pytest
+        run: pip install ruff bandit pip-audit
 
       - name: Ruff lint
         run: ruff check src tests
+
+      - name: Bandit (Python SAST)
+        run: bandit -r src -q
+
+      - name: pip-audit (dependency CVEs)
+        run: pip-audit -r requirements.txt
 
       - name: Shell script syntax
         run: |
@@ -26,6 +32,18 @@ jobs:
             bash -n "$f"
           done
 
-      - name: Unit tests
-        # MLX-dependent tests auto-skip off Apple Silicon (importorskip).
-        run: pytest
+  test:
+    # Apple Silicon runner so MLX installs and the tests actually run
+    # (they importorskip MLX and would otherwise all skip on Linux).
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests with coverage
+        run: pytest --cov=private_ai_gateway --cov-report=term-missing --cov-fail-under=50

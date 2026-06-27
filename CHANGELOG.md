@@ -28,6 +28,12 @@ All notable changes to this project are documented here. Format based on
   comparison, Authorization header no longer logged, and a request-body size limit
   (`MAX_CONTENT_LENGTH`).
 
+### Tooling
+- CI split into a lint/scan job (ruff, Bandit SAST, pip-audit dependency CVE scan, shellcheck)
+  and a test+coverage job on Apple-Silicon runners (so MLX tests actually execute).
+- CodeQL security analysis workflow; coverage gate (`make cov`), `make sast`, `make audit`,
+  and `make check`; README CI/CodeQL/Python/License badges.
+
 ## [0.1.0] - 2026-06-27
 
 ### Added

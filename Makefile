@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-dev start stop status test lint fmt
+.PHONY: help install install-dev start stop status test cov lint fmt sast audit check
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -9,7 +9,7 @@ help: ## Show available targets
 install: ## Install runtime dependencies (Apple Silicon / MLX)
 	pip install -r requirements.txt
 
-install-dev: ## Install dev dependencies (ruff, pytest)
+install-dev: ## Install dev dependencies (ruff, pytest, bandit, pip-audit)
 	pip install -r requirements-dev.txt
 
 start: ## Start the local AI stack (Flask + nginx)
@@ -24,8 +24,19 @@ status: ## Show stack status
 test: ## Run unit tests
 	pytest
 
+cov: ## Run tests with coverage (fails under 50%)
+	pytest --cov=private_ai_gateway --cov-report=term-missing --cov-fail-under=50
+
 lint: ## Lint with ruff
 	ruff check src tests
 
 fmt: ## Auto-format with ruff
 	ruff format src tests
+
+sast: ## Static security analysis (bandit)
+	bandit -r src -q
+
+audit: ## Dependency vulnerability scan (pip-audit)
+	pip-audit -r requirements.txt
+
+check: lint sast audit cov ## Run all CI checks locally
