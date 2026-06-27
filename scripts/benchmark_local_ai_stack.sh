@@ -68,7 +68,7 @@ run_one() {
     -o "$tmp" \
     -w "%{http_code}" \
     http://127.0.0.1:8081/v1/chat/completions \
-    -H "Authorization: Bearer private-portfolio-token" \
+    -H "Authorization: Bearer ${PRIVATE_AI_AUTH_TOKEN:-private-portfolio-token}" \
     -H "Content-Type: application/json" \
     -d "{
       \"model\": \"$model\",

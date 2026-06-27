@@ -156,12 +156,16 @@ case "$subcommand" in
     done
     echo
     echo "Running JSON validation:"
-    if [ -f "$real_project_root/memory/PROJECT_STATE.json" ]; then
-      python3 -m json.tool "$real_project_root/memory/PROJECT_STATE.json" >/dev/null
-      echo "PROJECT_STATE.json valid"
-    else
-      echo "PROJECT_STATE.json missing"
-    fi
+    json_found=0
+    while IFS= read -r jf; do
+      json_found=1
+      if python3 -m json.tool "$jf" >/dev/null 2>&1; then
+        echo "valid: ${jf#"$real_project_root"/}"
+      else
+        echo "INVALID: ${jf#"$real_project_root"/}"
+      fi
+    done < <(find "$real_project_root" -maxdepth 2 -type f -name '*.json' -not -path '*/node_modules/*' 2>/dev/null)
+    [ "$json_found" -eq 0 ] && echo "no JSON files found"
     ;;
 
   suggest_patch)

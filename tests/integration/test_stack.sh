@@ -24,7 +24,7 @@ curl -sS http://127.0.0.1:8081/v1/chat/completions \
   }' | python3 -m json.tool
 
 echo
-echo "=== Test 4: Hermes Python OpenAI SDK, model=strategy ==="
+echo "=== Test 4: Python OpenAI SDK, model=strategy ==="
 "${PYTHON_BIN:-python3}" - <<'PY'
 from openai import OpenAI
 
@@ -44,7 +44,7 @@ print("TEXT:", r.choices[0].message.content)
 PY
 
 echo
-echo "=== Test 5: Hermes Python OpenAI SDK with tool-shaped request ==="
+echo "=== Test 5: Python OpenAI SDK with tool-shaped request ==="
 "${PYTHON_BIN:-python3}" - <<'PY'
 from openai import OpenAI
 

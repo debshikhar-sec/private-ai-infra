@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Local OpenAI-compatible MLX Gateway
-Hermes Agent -> Nginx -> Flask -> MLX
+Client -> Nginx -> Flask -> MLX
 """
 
 import gc
@@ -105,7 +105,7 @@ def normalize_content(content):
     OpenAI message content may be:
     - string
     - list of content parts
-    Hermes/tooling may send richer shapes.
+    Clients/tooling may send richer shapes.
     Convert to plain text for MLX chat templates.
     """
     if content is None:
@@ -201,7 +201,7 @@ def sanitize_model_output(text):
         flags=re.DOTALL | re.IGNORECASE,
     )
 
-    # Remove plain Hermes/Qwen-style fake tool-call lines/blocks.
+    # Remove plain Qwen-style fake tool-call lines/blocks.
     text = re.sub(
         r"<tool_call>.*?(?=\n|$)",
         "",
@@ -249,7 +249,7 @@ def sanitize_model_output(text):
 
     text = text.strip()
 
-    # If the model attempted a tool call, do not let Hermes interpret or display it.
+    # If the model attempted a tool call, do not let the client interpret or display it.
     # Return a safe text-only fallback instead of pretending the tool call happened.
     if tool_marker_seen:
         logger.warning(
@@ -273,7 +273,7 @@ def build_prompt(messages):
     clean_messages = normalize_messages(messages)
 
     # Qwen chat templates require system content to appear only at the beginning.
-    # Hermes/tool safety preambles can create multiple system messages.
+    # Tool-safety preambles can create multiple system messages.
     # Merge all system messages into one leading system message before rendering.
     current_model_name = str(CURRENT_MODEL_NAME or "").lower()
     if "qwen" in current_model_name:
@@ -456,7 +456,7 @@ def chat_completions():
         f"has_response_format={'response_format' in req_data}"
     )
 
-    # Accept but ignore unsupported OpenAI/Hermes extras for now.
+    # Accept but ignore unsupported OpenAI client extras for now.
     _ = req_data.get("tools")
     _ = req_data.get("tool_choice")
     _ = req_data.get("parallel_tool_calls")

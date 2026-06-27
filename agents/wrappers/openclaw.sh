@@ -65,7 +65,7 @@ case "$subcommand" in
     echo
     echo "Models:"
     curl -sS http://127.0.0.1:8081/v1/models \
-      -H "Authorization: Bearer private-portfolio-token" 2>/dev/null | python3 -m json.tool || true
+      -H "Authorization: Bearer ${PRIVATE_AI_AUTH_TOKEN:-private-portfolio-token}" 2>/dev/null | python3 -m json.tool || true
     echo
     echo "Recent audit log:"
     tail -n "$lines" "$audit_log" 2>/dev/null || true
