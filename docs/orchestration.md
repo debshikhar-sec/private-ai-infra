@@ -97,11 +97,17 @@ Honesty about the boundary is part of the design.
   target — then diffs before/after `sha256` manifests of the sandbox and `~/.config/opencode`
   to prove no out-of-sandbox writes (`ISOLATION_RESULT=PASS`). Its only model provider is the
   loopback gateway.
+- **Hermes runs as a stateful planner that delegates through the gateway.** The component at
+  [`agents/hermes/`](../agents/hermes) loads persistent memory (`PROJECT_STATE.json`,
+  `RUN_HISTORY.md`, `NEXT_ACTIONS.md`), composes a planning request from its contract + state,
+  delegates one cycle to the gateway **as the `hermes` principal capped at autonomy L1
+  (suggest)**, parses the structured plan, and records it back to memory (atomic writes +
+  pre-write backup). It plans; it does not execute. Asking to operate above L1 is denied by the
+  same autonomy gate (`403 autonomy_exceeded`) and audited — the planner holds no special
+  privilege.
 
 **Planned (Phase 2, behind the same boundary):**
 
-- **Hermes** as a running planner that emits the structured plan and issues delegations
-  through the gateway as distinct principals.
 - **OpenCode** OS-level hardening: additionally run the existing capability-denied harness
   under a kernel jail (seccomp/namespaces) and add an approval-gated apply path.
 - **OpenClaw** offensive-security / code-review / telemetry tasks feeding `/metrics`

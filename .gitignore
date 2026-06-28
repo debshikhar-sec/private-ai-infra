@@ -41,3 +41,4 @@ dist/
 *.egg-info/
 agents/opencode_runtime/
 agents/opencode_sandbox/runtime/
+agents/hermes/memory/

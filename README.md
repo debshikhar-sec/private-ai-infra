@@ -92,7 +92,7 @@ ceiling:
 
 | Component | Mandate |
 |---|---|
-| **Hermes** | Planning / orchestration — decompose an objective, route each sub-task. Plans; does not execute. |
+| **Hermes** | Planning / orchestration — runs as a **stateful planner** (`agents/hermes/`): loads persistent memory, delegates one planning cycle to the gateway as the `hermes` principal (autonomy **L1**), records the plan back to memory. Plans; does not execute. |
 | **OpenCode** | Code-review agent — runs **capability-denied and isolation-verified** (`agents/opencode_sandbox/`): edit/bash/network denied, isolated config, reviews a copy, writes proven to stay in-sandbox. |
 | **OpenClaw** | Security / observability — offsec checks, code review, telemetry feeding the audit + metrics. |
 
@@ -100,10 +100,11 @@ Delegated work is classified on an **autonomy ladder** (L0 observe → L1 sugges
 L3 owner-run → L4 monitored → L5 continuous → L6 unbounded). The gateway enforces each
 principal's ceiling on every request, so a component can't be handed work above its mandate even
 if the plan asks for it. Autonomy enforcement, identity/authorization, rate limiting, and
-egress guardrails are **live today**, and **OpenCode** already runs as a capability-denied,
-isolation-verified reviewer ([`agents/opencode_sandbox/`](agents/opencode_sandbox)); the running
-Hermes planner and OS-level jailing are the next phase. Full design and current-vs-planned
-status: **[docs/orchestration.md](docs/orchestration.md)**.
+egress guardrails are **live today**; **OpenCode** runs as a capability-denied,
+isolation-verified reviewer ([`agents/opencode_sandbox/`](agents/opencode_sandbox)) and
+**Hermes** runs as a stateful planner that delegates at L1
+([`agents/hermes/`](agents/hermes)). OpenClaw and OS-level jailing are the next phase. Full
+design and current-vs-planned status: **[docs/orchestration.md](docs/orchestration.md)**.
 
 ## Quickstart
 
@@ -127,7 +128,7 @@ src/private_ai_gateway/   # gateway (app.py) + governance (policy, ratelimit, gu
 config/                   # policy.example.toml — governance policy-as-code
 deploy/nginx/             # nginx loopback reverse-proxy config
 scripts/                  # operational entrypoints (start/stop/status/benchmark)
-agents/                   # owner-run operator wrappers (least-privilege, monitoring/inspection)
+agents/                   # orchestration components: hermes/ (stateful planner), opencode_sandbox/ (isolated reviewer), wrappers/ (owner-run, least-privilege)
 tests/                    # unit/ (pytest) + integration/ (stack smoke test)
 docs/                     # architecture, security model, orchestration, runbook, roadmap
 ```

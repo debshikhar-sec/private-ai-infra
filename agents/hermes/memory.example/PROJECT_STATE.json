@@ -1,0 +1,41 @@
+{
+  "project": "private-ai-infra",
+  "current_gate": "hermes_planner_bootstrap",
+  "components": {
+    "hermes": {
+      "role": "planner",
+      "executes": false,
+      "principal": "hermes",
+      "autonomy_ceiling": "L1",
+      "status": "implemented"
+    },
+    "opencode": {
+      "role": "sandboxed code reviewer",
+      "executes": "review-only, capability-denied",
+      "principal": "opencode",
+      "autonomy_ceiling": "L2",
+      "status": "implemented"
+    },
+    "openclaw": {
+      "role": "security / offsec / telemetry",
+      "executes": false,
+      "principal": "openclaw",
+      "autonomy_ceiling": "L0",
+      "status": "planned"
+    }
+  },
+  "phases": [
+    { "name": "governance_plane", "status": "PASS" },
+    { "name": "autonomy_ceiling_enforcement", "status": "PASS" },
+    { "name": "opencode_isolated_review_sandbox", "status": "PASS" },
+    { "name": "hermes_stateful_planner", "status": "IN_PROGRESS" },
+    { "name": "openclaw_security_telemetry", "status": "PLANNED" }
+  ],
+  "restrictions": [
+    "no git commit / push without approval",
+    "no gateway/runtime or server-config edits without approval",
+    "no network egress, tool execution, or MCP integration without approval",
+    "no action at autonomy L4 or above without approval"
+  ],
+  "updated_at": "1970-01-01T00:00:00Z"
+}
