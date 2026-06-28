@@ -22,7 +22,9 @@ client (OpenAI SDK / agent CLI)         Authorization: Bearer <api-key>
 nginx loopback proxy        127.0.0.1:8081   deploy/nginx/nginx.conf
   ▼
 Flask gateway + governance  127.0.0.1:8080   src/private_ai_gateway/
-  • identity + authorization (policy.py)   • decision audit (audit.py)
+  • identity + authorization (policy.py)   • rate limiting (ratelimit.py)
+  • output guardrails (guardrails.py)      • decision audit (audit.py)
+  • metrics + introspection (metrics.py)
   ▼
 MLX inference → local model  Apple Silicon   mlx-community/*
 ```
@@ -51,13 +53,27 @@ name = "analyst"
 key_sha256 = "…"          # printf '%s' 'the-key' | shasum -a 256
 allowed_models = ["strategy", "engineering"]
 max_output_tokens = 2048
+requests_per_minute = 30
+
+[ratelimit]
+default_requests_per_minute = 60
+
+[guardrails]
+action = "redact"          # off | redact | block
 ```
 
 - **Identity** — the bearer token is hashed and resolved to a principal.
 - **Authorization** — a model outside the principal's `allowed_models` returns `403`; the
   effective token cap is the tightest of request / per-model / per-principal.
-- **Decision audit** — every allow/deny is appended to `logs/decisions.jsonl` (request id,
-  principal, model, reason) for SIEM ingestion.
+- **Rate limiting** — a per-principal token bucket (`requests_per_minute`, with a policy-wide
+  default); over-limit requests get `429` + `Retry-After` before any model loads.
+- **Output guardrails** — responses are scanned for credential-shaped content (AWS keys,
+  private-key blocks, API tokens, JWTs) and `redact`ed or `block`ed by policy. Authority to
+  *invoke* a model is not authority to *exfiltrate* secrets.
+- **Decision audit** — every allow/deny/throttle/filter is appended to `logs/decisions.jsonl`
+  (request id, principal, model, reason) for SIEM ingestion.
+- **Observability** — `GET /metrics` (Prometheus text) exposes decision/denial/throttle/guardrail
+  counters; `GET /v1/whoami` returns the caller's effective permissions.
 
 With no policy file, the gateway runs single-principal using `PRIVATE_AI_AUTH_TOKEN` (an owner
 identity allowed every model), so local development stays zero-config.
@@ -80,7 +96,7 @@ make stop
 ## Project layout
 
 ```text
-src/private_ai_gateway/   # gateway (app.py) + governance (policy.py, audit.py)
+src/private_ai_gateway/   # gateway (app.py) + governance (policy, ratelimit, guardrails, metrics, audit)
 config/                   # policy.example.toml — governance policy-as-code
 deploy/nginx/             # nginx loopback reverse-proxy config
 scripts/                  # operational entrypoints (start/stop/status/benchmark)
@@ -91,9 +107,10 @@ docs/                     # architecture, security model, runbook, roadmap
 
 ## Security
 
-Fail-closed bearer auth (constant-time), policy-as-code identity & authorization, output
-sanitization, per-principal token caps, request-size limits, loopback-only binding, and a
-structured decision audit. Tool execution is intentionally **not** trusted. See
+Fail-closed bearer auth (constant-time), policy-as-code identity & authorization, per-principal
+rate limiting, secret-egress guardrails, output sanitization, per-principal token caps,
+request-size limits, loopback-only binding, and a structured decision audit. Tool execution is
+intentionally **not** trusted. See
 [SECURITY.md](SECURITY.md) and [docs/security-model.md](docs/security-model.md).
 
 ## Development

@@ -4,6 +4,29 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-27
+
+### Added
+- **Per-principal rate limiting.** Token-bucket limiter (`ratelimit.py`) keyed by
+  principal; a per-principal `requests_per_minute` overrides a policy-wide default
+  (`[ratelimit]`). Over-limit requests are rejected with `429` and a `Retry-After`
+  header before any model load — a runaway key is throttled cheaply.
+- **Output guardrails (secret-egress control).** `guardrails.py` scans every model
+  response for credential-shaped content (AWS keys, private-key blocks, OpenAI/Slack/
+  GitHub tokens, JWTs) and applies a policy action (`[guardrails] action` =
+  `off`/`redact`/`block`). Egress filtering applies regardless of how authorized the
+  caller is — authority to *invoke* a model is not authority to *exfiltrate* secrets.
+- **Observability.** Hand-rolled Prometheus counter registry (`metrics.py`, no new
+  dependency) exposed at `GET /metrics`: request decisions, authz denials, rate-limit
+  rejections, and guardrail events. `GET /v1/whoami` returns the caller's effective
+  permissions (principal, allowed models, token cap, rate limit).
+- Tests for rate limiting, guardrails, metrics, and the new endpoints (suite 22 → 42;
+  coverage 62% → 82%).
+
+### Changed
+- Guardrail and rate-limit activity is recorded to the structured decision audit
+  (`decisions.jsonl`) alongside authz decisions.
+
 ## [0.2.0] - 2026-06-27
 
 ### Added

@@ -15,9 +15,23 @@ name = "analyst"
 key_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 allowed_models = ["strategy", "engineering"]
 max_output_tokens = 2048
+requests_per_minute = 30
 
 [[principals]]
 name = "offsec-lead"
 key_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 allowed_models = ["strategy", "engineering", "offsec"]
 max_output_tokens = 4096
+requests_per_minute = 60
+
+# Rate limiting (token bucket, per principal). A principal's own
+# `requests_per_minute` overrides this default; 0 (or unset) means unlimited.
+[ratelimit]
+default_requests_per_minute = 60
+
+# Output guardrails: scan model responses for credential-shaped content before they
+# leave the gateway. action = "off" | "redact" | "block".
+#   redact -> replace each match with [REDACTED:<kind>]
+#   block  -> withhold the whole response and return a refusal
+[guardrails]
+action = "redact"

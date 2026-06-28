@@ -10,20 +10,25 @@ capability second.
   compares the bearer token in constant time, and no longer logs the `Authorization`
   header.
 - **Request-size limit** — `MAX_CONTENT_LENGTH` bounds the input side.
-- **Security-path tests** — auth pass/fail, empty-token-denies-all, and the size limit
-  are covered by `tests/unit/test_auth.py`.
+- **Policy-as-code identity & authorization** — principals from a TOML policy of API-key
+  hashes, per-principal model allowlists and token caps, structured decision audit.
+- **Per-principal rate limiting** — token-bucket limiter; over-limit → `429` + `Retry-After`.
+- **Secret-egress guardrails** — responses scanned for credential shapes and redacted/blocked
+  by policy.
+- **Observability** — Prometheus `/metrics` counters and `/v1/whoami` introspection.
+- **Security-path tests** — auth, policy, rate-limit, guardrail, and metrics paths covered
+  (42 tests, 82% coverage).
 
 ## Near-term — remaining hardening
 
-- **Rate limiting** — a per-client request-rate cap (only body size and output tokens
-  are bounded today).
 - **More security-path coverage** — alias routing and the tool-call-block fallback.
+- **Key lifecycle** — rotation/expiry for policy principals (keys are static today).
 
-## Medium-term — observability and packaging
+## Medium-term — packaging and streaming
 
-- Structured JSONL audit logs (machine-parseable, OpenTelemetry-style GenAI fields).
 - True token-by-token streaming (the current SSE path emits a single chunk).
 - Container packaging and a documented deploy path.
+- Grafana dashboard / alerting examples over the `/metrics` counters.
 
 ## Longer-term — capability, behind the same boundary
 

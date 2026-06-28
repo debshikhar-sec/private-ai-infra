@@ -18,7 +18,10 @@ from flask import Flask, Response, g, jsonify, request
 from mlx_lm import generate, load
 
 from private_ai_gateway.audit import DecisionLog
+from private_ai_gateway.guardrails import Guardrails
+from private_ai_gateway.metrics import Metrics
 from private_ai_gateway.policy import Policy, Principal
+from private_ai_gateway.ratelimit import RateLimiter
 
 app = Flask(__name__)
 
@@ -50,6 +53,19 @@ POLICY_PATH = os.environ.get(
 )
 POLICY = Policy.load(POLICY_PATH)
 DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"))
+
+# Cross-cutting controls, all driven by the same policy file:
+#   * RATE_LIMITER bounds request volume per principal (token bucket).
+#   * GUARDRAILS filters secret-like content out of model responses (egress).
+RATE_LIMITER = RateLimiter(POLICY.default_requests_per_minute)
+GUARDRAILS = Guardrails(POLICY.guardrail_action)
+
+# Observability: in-process Prometheus counters exposed at /metrics.
+METRICS = Metrics()
+METRICS.register("gateway_requests_total", "Terminal request decisions by principal.")
+METRICS.register("gateway_authz_denials_total", "Authorization denials by reason.")
+METRICS.register("gateway_rate_limited_total", "Requests rejected by the rate limiter.")
+METRICS.register("gateway_guardrail_events_total", "Responses that tripped an egress guardrail.")
 
 # The owner token (PRIVATE_AI_AUTH_TOKEN) maps to this break-glass admin identity,
 # permitted every model. Finer-grained restrictions come from POLICY principals.
@@ -388,6 +404,7 @@ def authenticate_request():
     # The Authorization header is never logged (it carries the bearer credential).
     if principal is None:
         logger.warning(f"AUTH_FAILURE | IP={request.remote_addr} | Path={request.path}")
+        METRICS.inc("gateway_requests_total", {"principal": "anonymous", "decision": "deny"})
         DECISION_LOG.record(
             request_id=g.request_id,
             principal=None,
@@ -409,6 +426,37 @@ def authenticate_request():
         ), 401
 
     g.principal = principal
+
+    # Rate limit per principal (token bucket). Applied before any work is done so a
+    # runaway key is rejected cheaply, ahead of model loading or inference.
+    allowed, retry_after = RATE_LIMITER.allow(principal.name, principal.requests_per_minute)
+    if not allowed:
+        logger.warning(f"RATE_LIMITED | principal={principal.name} | path={request.path}")
+        METRICS.inc("gateway_rate_limited_total", {"principal": principal.name})
+        METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "deny"})
+        DECISION_LOG.record(
+            request_id=g.request_id,
+            principal=principal.name,
+            method=request.method,
+            path=request.path,
+            model=None,
+            decision="deny",
+            reason="rate_limited",
+            status=429,
+        )
+        response = jsonify(
+            {
+                "error": {
+                    "message": "Rate limit exceeded",
+                    "type": "rate_limit_error",
+                    "code": "rate_limited",
+                }
+            }
+        )
+        response.status_code = 429
+        response.headers["Retry-After"] = str(int(retry_after) + 1)
+        return response
+
     logger.info(
         f"AUTH_SUCCESS | principal={principal.name} | "
         f"IP={request.remote_addr} | Path={request.path}"
@@ -439,6 +487,33 @@ def health():
             "models": list(ROUTE_MAP.keys()),
         }
     )
+
+
+@app.route("/v1/whoami", methods=["GET"])
+def whoami():
+    """Introspection: report the calling principal's effective permissions.
+
+    Useful for debugging policy and for a caller to confirm what it is authorized
+    to do without trial-and-error against /v1/chat/completions.
+    """
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    effective_rpm = principal.requests_per_minute
+    if effective_rpm is None:
+        effective_rpm = POLICY.default_requests_per_minute or None
+    return jsonify(
+        {
+            "principal": principal.name,
+            "allowed_models": sorted(principal.allowed_models),
+            "max_output_tokens": principal.max_output_tokens,
+            "requests_per_minute": effective_rpm,
+        }
+    )
+
+
+@app.route("/metrics", methods=["GET"])
+def metrics():
+    """Prometheus text-format metrics (requires auth; safe to scrape with a token)."""
+    return Response(METRICS.render(), mimetype="text/plain; version=0.0.4")
 
 
 @app.route("/models", methods=["GET"])
@@ -488,6 +563,8 @@ def chat_completions():
         logger.warning(
             f"AUTHZ_DENY | principal={principal.name} | model={requested_model}"
         )
+        METRICS.inc("gateway_authz_denials_total", {"reason": "model_not_allowed"})
+        METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "deny"})
         DECISION_LOG.record(
             request_id=getattr(g, "request_id", ""),
             principal=principal.name,
@@ -630,6 +707,27 @@ def chat_completions():
 
     logger.info("INFERENCE_COMPLETE | Payload generated")
 
+    # Egress guardrail: scan (and redact/block) secret-like content before the
+    # response leaves the gateway, regardless of how authorized the caller is.
+    guard = GUARDRAILS.scan(response_text)
+    if guard.fired:
+        logger.warning(
+            f"GUARDRAIL_FIRED | action={GUARDRAILS.action} | matched={','.join(guard.triggered)}"
+        )
+        METRICS.inc("gateway_guardrail_events_total", {"action": GUARDRAILS.action})
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""),
+            principal=principal.name,
+            method=request.method,
+            path=request.path,
+            model=requested_model,
+            decision="filter",
+            reason=f"egress_{GUARDRAILS.action}:{','.join(guard.triggered)}",
+            status=200,
+        )
+        response_text = guard.text
+
+    METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "allow"})
     DECISION_LOG.record(
         request_id=getattr(g, "request_id", ""),
         principal=principal.name,

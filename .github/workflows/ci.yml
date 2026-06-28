@@ -46,4 +46,4 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Tests with coverage
-        run: pytest --cov=private_ai_gateway --cov-report=term-missing --cov-fail-under=50
+        run: pytest --cov=private_ai_gateway --cov-report=term-missing --cov-fail-under=70

@@ -26,11 +26,13 @@ below.
 | Authentication | constant-time bearer check; fail-closed (won't start without a token) | active, see limits |
 | Identity | bearer token resolved to a principal via policy-as-code (API-key SHA-256 hashes) | active |
 | Authorization | per-principal model allowlist; unauthorized model → 403 | active |
+| Request rate | per-principal token-bucket limiter; over-limit → 429 + `Retry-After` | active |
+| Secret egress | response guardrails redact/block credential-shaped output | active (opt-in via policy) |
 | Model output | sanitizer strips thinking / tool / control markers | active (defense-in-depth) |
 | Tool execution | not performed by the gateway; tool-call output blocked + text fallback | active |
 | Input volume | request body capped via `MAX_CONTENT_LENGTH` (default 8 MiB) | active |
 | Output volume | tightest of request / per-model / per-principal token cap | active |
-| Observability | text audit log + structured decision audit (`decisions.jsonl`); Authorization header never logged | active |
+| Observability | text audit log + structured decision audit (`decisions.jsonl`) + Prometheus `/metrics`; Authorization header never logged | active |
 | Operator wrappers | project-root jail, read-only inspection, monitoring-only ops | active |
 
 ## Risks addressed (OWASP LLM / MITRE ATLAS framing)
@@ -46,8 +48,13 @@ This gateway targets a focused subset rather than claiming broad coverage:
   and every allow/deny decision is recorded for audit.
 - **LLM02 Insecure output handling** — model output is sanitized before it reaches the
   client (thinking wrappers, fake tool calls, stray control tokens removed).
-- **Model denial-of-service (output)** — per-model output-token caps bound runaway
-  generations.
+- **LLM02 Sensitive information disclosure (egress)** — output guardrails scan responses
+  for credential-shaped content (cloud keys, private-key blocks, API tokens, JWTs) and
+  redact or block them by policy, so an authorized caller cannot exfiltrate secrets the
+  model surfaced.
+- **Model denial-of-service (output / volume)** — per-model output-token caps bound runaway
+  generations, and a per-principal token-bucket rate limiter bounds request volume so one
+  key cannot saturate the single-process gateway.
 - **Unbounded autonomy** — there is no agent loop in the gateway; the operator runs
   deterministic commands.
 
@@ -62,11 +69,14 @@ Honesty about what is *not* yet hardened is part of the design:
   there is no automatic key rotation or expiry yet, and the owner (`PRIVATE_AI_AUTH_TOKEN`)
   token is an all-models break-glass identity. Treat this as a loopback governance gate,
   not a public IdP-backed auth system.
-- **The output sanitizer is a regex denylist.** It is defense-in-depth for *known*
-  marker shapes, not a guarantee against novel or obfuscated markers. Do not rely on it
-  as a sole control.
-- **No per-client rate limiting yet.** Request body size is bounded
-  (`MAX_CONTENT_LENGTH`) and output tokens are clamped, but there is no request-rate cap.
+- **The output sanitizer and egress guardrails are regex denylists.** They are
+  defense-in-depth for *known* marker and credential shapes, not a guarantee against novel
+  or obfuscated ones. The guardrail patterns are high-precision (tuned to avoid mangling
+  ordinary prose), which means they favor low false positives over exhaustive recall — do
+  not rely on either as a sole control.
+- **Rate limiting is in-process and per-node.** The token-bucket state lives in the single
+  gateway process, which is the correct scope for a loopback single-node service but is not
+  a distributed quota.
 - **No TLS.** The gateway is intended for loopback use only; do not expose it.
 - **Single-user by construction** (one global model reference, single-threaded) — this
   is not a multi-tenant service.

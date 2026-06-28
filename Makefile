@@ -25,7 +25,7 @@ test: ## Run unit tests
 	pytest
 
 cov: ## Run tests with coverage (fails under 50%)
-	pytest --cov=private_ai_gateway --cov-report=term-missing --cov-fail-under=50
+	pytest --cov=private_ai_gateway --cov-report=term-missing --cov-fail-under=70
 
 lint: ## Lint with ruff
 	ruff check src tests

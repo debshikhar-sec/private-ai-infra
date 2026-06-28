@@ -31,6 +31,7 @@ class Principal:
     name: str
     allowed_models: frozenset[str]
     max_output_tokens: int | None = None
+    requests_per_minute: int | None = None
 
     def may_use(self, alias: str) -> bool:
         """True if this principal may call the given model alias."""
@@ -45,8 +46,16 @@ def hash_token(token: str) -> str:
 class Policy:
     """A set of principals indexed by the SHA-256 hash of their API key."""
 
-    def __init__(self, principals_by_hash: dict[str, Principal]):
+    def __init__(
+        self,
+        principals_by_hash: dict[str, Principal],
+        *,
+        default_requests_per_minute: int = 0,
+        guardrail_action: str = "off",
+    ):
         self._by_hash = dict(principals_by_hash)
+        self.default_requests_per_minute = int(default_requests_per_minute)
+        self.guardrail_action = guardrail_action
 
     @property
     def principal_count(self) -> int:
@@ -54,10 +63,12 @@ class Policy:
 
     @classmethod
     def load(cls, path: str) -> "Policy":
-        """Load principals from a TOML file; return an empty policy if absent.
+        """Load policy from a TOML file; return an empty policy if absent.
 
-        Malformed entries are skipped rather than crashing the gateway — a single
-        bad policy line should not take the whole control plane down.
+        Malformed principal entries are skipped rather than crashing the gateway —
+        a single bad policy line should not take the whole control plane down. The
+        optional ``[ratelimit]`` and ``[guardrails]`` tables tune cross-cutting
+        controls.
         """
         try:
             with open(path, "rb") as fh:
@@ -72,14 +83,32 @@ class Policy:
                 if not key_hash:
                     continue
                 cap = entry.get("max_output_tokens")
+                rpm = entry.get("requests_per_minute")
                 principals[key_hash] = Principal(
                     name=str(entry.get("name", "unnamed")),
                     allowed_models=frozenset(entry.get("allowed_models", [])),
                     max_output_tokens=int(cap) if cap is not None else None,
+                    requests_per_minute=int(rpm) if rpm is not None else None,
                 )
             except (KeyError, TypeError, ValueError):
                 continue
-        return cls(principals)
+
+        ratelimit = raw.get("ratelimit", {}) or {}
+        try:
+            default_rpm = int(ratelimit.get("default_requests_per_minute", 0))
+        except (TypeError, ValueError):
+            default_rpm = 0
+
+        guardrails = raw.get("guardrails", {}) or {}
+        action = str(guardrails.get("action", "off")).strip().lower()
+        if action not in ("off", "redact", "block"):
+            action = "off"
+
+        return cls(
+            principals,
+            default_requests_per_minute=default_rpm,
+            guardrail_action=action,
+        )
 
     def identify(self, bearer_token: str) -> Principal | None:
         """Return the principal for a bearer token, or None if unknown."""

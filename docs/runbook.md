@@ -74,6 +74,29 @@ Expected:
 - offsec alias is listed
 - resolved model names are listed
 
+## Identity Introspection
+
+Run:
+
+curl -sS http://127.0.0.1:8081/v1/whoami -H "Authorization: Bearer YOUR_TOKEN" | python3 -m json.tool
+
+Expected:
+
+- principal name is reported
+- allowed_models, max_output_tokens, and requests_per_minute reflect the active policy
+
+## Metrics
+
+Run:
+
+curl -sS http://127.0.0.1:8081/metrics -H "Authorization: Bearer YOUR_TOKEN"
+
+Expected:
+
+- Prometheus text exposition (HELP/TYPE lines)
+- gateway_requests_total, gateway_authz_denials_total, gateway_rate_limited_total, and
+  gateway_guardrail_events_total counters are present
+
 ## Strategy Benchmark
 
 Run:

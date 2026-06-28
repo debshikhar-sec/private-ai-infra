@@ -28,10 +28,13 @@ Control plane
   - planning, review, drafting — text only
   - no trusted tool execution through the gateway
 
-Governance plane  (src/private_ai_gateway/policy.py + audit.py)
+Governance plane  (src/private_ai_gateway/{policy,ratelimit,guardrails,metrics,audit}.py)
   - policy-as-code: principals (API-key identities) from config/policy.toml
   - identity (token -> principal) and authorization (model allowlist, token caps)
+  - per-principal rate limiting (token bucket -> 429 + Retry-After)
+  - secret-egress guardrails (redact/block credential-shaped output)
   - structured decision audit (logs/decisions.jsonl)
+  - observability: Prometheus /metrics + /v1/whoami introspection
 
 Gateway layer  (src/private_ai_gateway/app.py + deploy/nginx)
   - nginx loopback boundary (127.0.0.1 only)
@@ -91,9 +94,18 @@ policy file (`config/policy.toml`, parsed with stdlib `tomllib`) defines princip
 - **Authorization** — each principal carries an `allowed_models` list and an optional
   `max_output_tokens` cap. A request for a model outside the allowlist returns `403`;
   governance can only *tighten* token caps, never loosen them.
-- **Decision audit** — every allow/deny is appended as one JSON line to
+- **Rate limiting** — a per-principal token bucket (`ratelimit.py`, `requests_per_minute`
+  with a policy-wide default) rejects over-limit requests with `429` + `Retry-After`,
+  before any model load — so throttling is cheap.
+- **Output guardrails** — before a response leaves the gateway, `guardrails.py` scans it
+  for credential-shaped content and `redact`s or `block`s it per the `[guardrails]` policy.
+  This is egress control: it constrains responses regardless of caller authority.
+- **Decision audit** — every allow/deny/throttle/filter is appended as one JSON line to
   `logs/decisions.jsonl` (`audit.py`) with a request id, principal, model, and reason —
   designed for SIEM ingestion.
+- **Observability** — `metrics.py` keeps in-process Prometheus counters (decisions,
+  denials, throttles, guardrail events) exposed at `GET /metrics`; `GET /v1/whoami` returns
+  the caller's effective permissions.
 
 If no policy file is present, the gateway runs single-principal using
 `PRIVATE_AI_AUTH_TOKEN` (an owner identity allowed every model), so local development is
