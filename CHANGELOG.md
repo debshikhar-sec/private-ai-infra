@@ -4,6 +4,29 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-28
+
+### Added
+- **OpenCode isolated review sandbox (`agents/opencode_sandbox/`).** Restores the
+  capability-denied, isolation-verified code-review agent into the public repo:
+  - `opencode.jsonc` runs OpenCode with `edit`/`bash`/`task`/`external_directory`/`webfetch`/
+    `websearch`/`lsp`/`skill`/`todowrite`/`doom_loop` **denied** — only `read`/`glob`/`grep`/
+    `list` allowed — pointed at the loopback gateway with an env-placeholder key.
+  - `run_review.sh` runs the agent under an **isolated XDG config/state** (never touches the
+    operator's real `~/.config/opencode`), against a **copy** of the target, gated by gateway
+    token validation, a config-safety check, a secret scan, and a process check — then diffs
+    before/after `sha256` manifests of the sandbox and `~/.config/opencode` to **prove no
+    out-of-sandbox writes** (`ISOLATION_RESULT=PASS`).
+  - Bundled example target + a sanitized example run report as evidence.
+- `docs/orchestration.md`, README, and roadmap updated: OpenCode moves from "planned" to
+  "implemented — capability-denied, isolation-verified"; OS-level (seccomp/namespaces) jailing
+  remains the next hardening step.
+
+### Note
+- This restores real work from the project's earlier sandbox harness, reconstructed clean of
+  local absolute paths and private learning material; live run output is gitignored
+  (`agents/opencode_sandbox/runtime/`).
+
 ## [0.4.0] - 2026-06-28
 
 ### Added

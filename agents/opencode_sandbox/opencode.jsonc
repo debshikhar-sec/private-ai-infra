@@ -1,0 +1,45 @@
+{
+  // Capability-denied OpenCode profile for the isolated review harness.
+  //
+  // OpenCode (https://opencode.ai) is pointed at the LOCAL gateway as its only model
+  // provider, and every action that could mutate state, execute code, or reach the
+  // network is DENIED. The agent can read, glob, grep, and list — i.e. it can review
+  // code — and nothing else. Authority is withheld at the agent layer; the gateway
+  // enforces auth and policy independently.
+  //
+  // The API key is an env placeholder (never a literal secret); the gateway validates
+  // the bearer token. run_review.sh copies this file into an isolated XDG config so the
+  // agent never reads your real ~/.config/opencode.
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "private-local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Private Local Gateway",
+      "options": {
+        "baseURL": "http://127.0.0.1:8081/v1",
+        "apiKey": "{env:PRIVATE_AI_AUTH_TOKEN}"
+      },
+      "models": {
+        "engineering": { "name": "Local Engineering Model" }
+      }
+    }
+  },
+  "model": "private-local/engineering",
+  "permission": {
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "deny",
+    "bash": "deny",
+    "task": "deny",
+    "external_directory": "deny",
+    "todowrite": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "lsp": "deny",
+    "skill": "deny",
+    "question": "deny",
+    "doom_loop": "deny"
+  }
+}

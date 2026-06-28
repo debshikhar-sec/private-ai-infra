@@ -1,0 +1,49 @@
+## Sanitized example run report.
+## Local absolute paths replaced with <PROJECT_ROOT> / <HOME>; the model's full review
+## body is trimmed. This is illustrative of a real run, not a verbatim machine log.
+
+RUN_ID=20260624_003714
+TARGET=agents/opencode_sandbox/examples/review_target
+RUN_DIR=agents/opencode_sandbox/runtime/run_20260624_003714
+
+===== PRECHECKS =====
+PASS: opencode binary found: /opt/homebrew/bin/opencode (1.17.9)
+PASS: token present (length 23)
+PASS: copied capability-deny config into isolated XDG config
+
+===== PROCESS CHECK (BEFORE) =====
+PASS: no pre-existing opencode process
+
+===== GATEWAY TOKEN VALIDATION =====
+MODELS_HTTP_CODE=200
+PASS: gateway token validates against /v1/models
+
+===== CONFIG SAFETY CHECK =====
+PASS: apiKey uses env placeholder
+PASS: local gateway baseURL present
+PASS: no literal bearer/user-path/cloud-token references
+
+===== SECRET SCAN (TARGET) =====
+FATAL_HIT_COUNT=0
+SECRET_SCAN_RESULT=PASS_NO_FATAL_HITS
+
+===== SNAPSHOT (BEFORE) =====
+sandbox files: 1
+global opencode-state files: 7
+
+===== RUN ISOLATED OPENCODE REVIEW =====
+OPENCODE_EXIT=0
+review output: agents/opencode_sandbox/runtime/run_20260624_003714/review.jsonl (12 lines)
+--- review summary (trimmed) ---
+- sample_handler.py:12  SQL injection: user_id interpolated into the query; use a
+  parameterized query (cur.execute("... WHERE id = ?", (user_id,))).
+- sample_handler.py:14  Resource leak: sqlite connection is never closed; use a
+  context manager or close() in a finally block.
+- sample_handler.py:19  Weak token construction: payload is trusted and unsigned; use
+  a real MAC/HMAC and validate inputs.
+
+===== ISOLATION VERDICT (AFTER) =====
+PASS: sandbox copy unmodified (read-only review)
+PASS: real ~/.config/opencode untouched — agent stayed in its isolated config
+
+ISOLATION_RESULT=PASS

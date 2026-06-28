@@ -18,6 +18,9 @@ capability second.
 - **Observability** — Prometheus `/metrics` counters and `/v1/whoami` introspection.
 - **Autonomy-ceiling enforcement** — per-principal L0–L6 ladder enforced on inference requests
   (`403 autonomy_exceeded`); the keystone of the orchestration control plane.
+- **OpenCode isolated review sandbox** — capability-denied (edit/bash/network off), isolated
+  XDG config, reviews a copy, before/after manifests prove no out-of-sandbox writes
+  (`agents/opencode_sandbox/`).
 - **Security-path tests** — auth, policy, rate-limit, guardrail, metrics, and autonomy paths
   covered (50 tests, 83% coverage).
 
@@ -28,8 +31,8 @@ substrate (above) is live, the running agents are next:
 
 - **Hermes** — a running planner that emits the structured plan and issues delegations through
   the gateway as distinct principals (one identity per component, no shared god token).
-- **OpenCode** — graduate the read-only operator wrapper into a real sandbox: network-isolated,
-  scoped filesystem, resource-limited, with an approval-gated apply path.
+- **OpenCode** — OS-level hardening: run the existing capability-denied review sandbox under a
+  kernel jail (seccomp/namespaces) and add an approval-gated apply path.
 - **OpenClaw** — offensive-security / code-review / telemetry tasks feeding `/metrics` and the
   decision audit.
 - **Approval gates** — `APPROVAL REQUIRED` for any L4+ action, surfaced to the owner.

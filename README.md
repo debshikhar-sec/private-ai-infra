@@ -93,15 +93,17 @@ ceiling:
 | Component | Mandate |
 |---|---|
 | **Hermes** | Planning / orchestration — decompose an objective, route each sub-task. Plans; does not execute. |
-| **OpenCode** | Code-execution agent — inspect/test/(approval-gated) modify code inside an isolated environment. |
+| **OpenCode** | Code-review agent — runs **capability-denied and isolation-verified** (`agents/opencode_sandbox/`): edit/bash/network denied, isolated config, reviews a copy, writes proven to stay in-sandbox. |
 | **OpenClaw** | Security / observability — offsec checks, code review, telemetry feeding the audit + metrics. |
 
 Delegated work is classified on an **autonomy ladder** (L0 observe → L1 suggest → L2 dry-run →
 L3 owner-run → L4 monitored → L5 continuous → L6 unbounded). The gateway enforces each
 principal's ceiling on every request, so a component can't be handed work above its mandate even
 if the plan asks for it. Autonomy enforcement, identity/authorization, rate limiting, and
-egress guardrails are **live today**; the running orchestrator and the sandboxed agents are the
-next phase. Full design and current-vs-planned status: **[docs/orchestration.md](docs/orchestration.md)**.
+egress guardrails are **live today**, and **OpenCode** already runs as a capability-denied,
+isolation-verified reviewer ([`agents/opencode_sandbox/`](agents/opencode_sandbox)); the running
+Hermes planner and OS-level jailing are the next phase. Full design and current-vs-planned
+status: **[docs/orchestration.md](docs/orchestration.md)**.
 
 ## Quickstart
 

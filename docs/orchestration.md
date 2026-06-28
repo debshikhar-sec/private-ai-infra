@@ -90,18 +90,24 @@ Honesty about the boundary is part of the design.
 - **Autonomy-ceiling enforcement** (L0–L6) on inference requests.
 - Secret-egress guardrails on responses.
 - Structured decision audit + Prometheus metrics for every decision.
+- **OpenCode runs as a capability-denied, isolation-verified reviewer.** The harness at
+  [`agents/opencode_sandbox/`](../agents/opencode_sandbox) runs OpenCode with `edit`/`bash`/
+  `task`/network/`lsp` denied (only `read`/`glob`/`grep`/`list` allowed), under an isolated
+  XDG config so it never touches the operator's real OpenCode config, against a *copy* of the
+  target — then diffs before/after `sha256` manifests of the sandbox and `~/.config/opencode`
+  to prove no out-of-sandbox writes (`ISOLATION_RESULT=PASS`). Its only model provider is the
+  loopback gateway.
 
 **Planned (Phase 2, behind the same boundary):**
 
 - **Hermes** as a running planner that emits the structured plan and issues delegations
   through the gateway as distinct principals.
-- **OpenCode** graduated from the current read-only, project-root-jailed wrapper
-  (`agents/wrappers/opencode.sh`) into a real sandbox: no network, scoped filesystem,
-  resource limits, and an approval-gated apply path.
+- **OpenCode** OS-level hardening: additionally run the existing capability-denied harness
+  under a kernel jail (seccomp/namespaces) and add an approval-gated apply path.
 - **OpenClaw** offensive-security / code-review / telemetry tasks feeding `/metrics`
   and the decision audit.
 - Approval gates (`APPROVAL REQUIRED`) for any L4+ action, surfaced to the owner.
 
-See [roadmap.md](roadmap.md) for sequencing. The operator wrappers in
-[`agents/`](../agents) are the present-day, deliberately-minimal stand-ins for the
-OpenCode and OpenClaw surfaces.
+See [roadmap.md](roadmap.md) for sequencing. The OpenCode review sandbox is implemented in
+[`agents/opencode_sandbox/`](../agents/opencode_sandbox); the read-only operator wrappers in
+[`agents/wrappers/`](../agents/wrappers) are the present-day stand-ins for the OpenClaw surface.

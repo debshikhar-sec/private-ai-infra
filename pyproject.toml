@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "private-ai-gateway"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local-first AI governance plane: an OpenAI-compatible MLX gateway with policy-as-code identity, authorization, output guardrails, and decision audit."
 readme = "README.md"
 requires-python = ">=3.11"
