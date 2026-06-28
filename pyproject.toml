@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "private-ai-gateway"
-version = "0.5.0"
+version = "0.6.0"
 description = "Local-first AI governance plane: an OpenAI-compatible MLX gateway with policy-as-code identity, authorization, output guardrails, and decision audit."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,10 +34,10 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 addopts = "-q --import-mode=importlib"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "agents"]
 
 [tool.coverage.run]
-source = ["private_ai_gateway"]
+source = ["private_ai_gateway", "hermes"]
 omit = ["tests/*"]
 
 [tool.coverage.report]

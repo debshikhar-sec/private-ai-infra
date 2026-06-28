@@ -24,17 +24,17 @@ status: ## Show stack status
 test: ## Run unit tests
 	pytest
 
-cov: ## Run tests with coverage (fails under 50%)
-	pytest --cov=private_ai_gateway --cov-report=term-missing --cov-fail-under=70
+cov: ## Run tests with coverage (fails under 70%)
+	pytest --cov=private_ai_gateway --cov=hermes --cov-report=term-missing --cov-fail-under=70
 
 lint: ## Lint with ruff
-	ruff check src tests
+	ruff check src tests agents/hermes
 
 fmt: ## Auto-format with ruff
-	ruff format src tests
+	ruff format src tests agents/hermes
 
 sast: ## Static security analysis (bandit)
-	bandit -r src -q
+	bandit -r src agents/hermes -q
 
 audit: ## Dependency vulnerability scan (pip-audit)
 	pip-audit -r requirements.txt

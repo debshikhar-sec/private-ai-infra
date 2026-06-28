@@ -4,6 +4,35 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-28
+
+### Added
+- **Hermes stateful planner (`agents/hermes/`).** Restores the planning component as a
+  running, *stateful* agent — the memory/state capture that the earlier de-LARP flattened:
+  - **Persistent memory** (`store.py`): `PROJECT_STATE.json` (canonical machine state),
+    `RUN_HISTORY.md` (append-only cycle log), and `NEXT_ACTIONS.md` (current gate). Writes are
+    **atomic** (temp file + `os.replace`) and every overwrite is preceded by a **pre-write
+    backup** under `backups/<timestamp>/`. Live memory (`memory/`) is gitignored; a tracked
+    `memory.example/` seeds it.
+  - **Planner contract + parser** (`HERMES_PLANNER_CONTRACT.md`, `planner.py`): plan one phase
+    at a time, declare an autonomy level, never claim un-evidenced file actions, and emit an
+    `APPROVAL REQUIRED` block before any L4+/runtime/config/git/network action. The structured
+    reply is parsed back into a `Plan` and the discipline is unit-tested.
+  - **Gateway delegation** (`client.py`, `run.py`): one planning cycle is delegated to the
+    gateway **as the `hermes` principal, capped at autonomy L1 (suggest)** — the planner plans,
+    it does not execute, and it holds no special privilege. `--show-prompt` runs the cycle
+    offline for review.
+- `hermes`, `opencode`, and `openclaw` principals added to `config/policy.example.toml`, each
+  with its own key and autonomy ceiling (L1 / L2 / L0) — one identity per component, no shared
+  admin token.
+- Tests for the memory engine, plan parsing, the gateway client, and the runner (suite 50 → 80;
+  coverage 83% → 88%). Hermes is covered by `make cov` and linted/scanned by `make check`.
+
+### Changed
+- `docs/orchestration.md` and `docs/roadmap.md`: Hermes moves from "planned" to
+  "implemented — stateful planner, delegates at L1". README reframed around all three
+  components now having running implementations.
+
 ## [0.5.0] - 2026-06-28
 
 ### Added
