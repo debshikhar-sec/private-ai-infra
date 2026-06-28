@@ -17,6 +17,7 @@ import mlx.core as mx
 from flask import Flask, Response, g, jsonify, request
 from mlx_lm import generate, load
 
+from private_ai_gateway import autonomy
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.metrics import Metrics
@@ -67,9 +68,16 @@ METRICS.register("gateway_authz_denials_total", "Authorization denials by reason
 METRICS.register("gateway_rate_limited_total", "Requests rejected by the rate limiter.")
 METRICS.register("gateway_guardrail_events_total", "Responses that tripped an egress guardrail.")
 
-# The owner token (PRIVATE_AI_AUTH_TOKEN) maps to this break-glass admin identity,
-# permitted every model. Finer-grained restrictions come from POLICY principals.
-OWNER_PRINCIPAL = Principal("owner", frozenset({"*"}), None)
+# The owner token (PRIVATE_AI_AUTH_TOKEN) maps to this break-glass admin identity:
+# every model, no token/rate cap, and the top of the autonomy ladder (L6). Finer-grained
+# restrictions come from POLICY principals.
+OWNER_PRINCIPAL = Principal(
+    "owner",
+    frozenset({"*"}),
+    max_output_tokens=None,
+    requests_per_minute=None,
+    max_autonomy_level=autonomy.MAX_LEVEL,
+)
 
 ROUTE_MAP = {
     "strategy": "mlx-community/Qwen3.6-27B-OptiQ-4bit",
@@ -500,12 +508,17 @@ def whoami():
     effective_rpm = principal.requests_per_minute
     if effective_rpm is None:
         effective_rpm = POLICY.default_requests_per_minute or None
+    max_autonomy = principal.max_autonomy_level
+    if max_autonomy is None:
+        max_autonomy = POLICY.default_max_autonomy_level
     return jsonify(
         {
             "principal": principal.name,
             "allowed_models": sorted(principal.allowed_models),
             "max_output_tokens": principal.max_output_tokens,
             "requests_per_minute": effective_rpm,
+            "max_autonomy_level": max_autonomy,
+            "max_autonomy_name": autonomy.level_name(max_autonomy),
         }
     )
 
@@ -584,6 +597,56 @@ def chat_completions():
                     ),
                     "type": "permission_error",
                     "code": "model_not_allowed",
+                }
+            }
+        ), 403
+
+    # --- AUTONOMY: does this request exceed the principal's autonomy ceiling? ---
+    # The request declares an intended level (header or body); the principal carries a
+    # ceiling (its own, else the policy default). When no ceiling is configured anywhere,
+    # gating is off. This turns the L0-L6 ladder from a prompt rule into an enforced one.
+    declared_level = autonomy.parse_level(
+        request.headers.get("X-Autonomy-Level"),
+        autonomy.parse_level(req_data.get("autonomy_level"), autonomy.DEFAULT_REQUEST_LEVEL),
+    )
+    autonomy_ceiling = principal.max_autonomy_level
+    if autonomy_ceiling is None:
+        autonomy_ceiling = POLICY.default_max_autonomy_level
+    if (
+        autonomy_ceiling is not None
+        and declared_level is not None
+        and declared_level > autonomy_ceiling
+    ):
+        logger.warning(
+            f"AUTONOMY_DENY | principal={principal.name} | "
+            f"requested=L{declared_level} | ceiling=L{autonomy_ceiling}"
+        )
+        METRICS.inc("gateway_authz_denials_total", {"reason": "autonomy_exceeded"})
+        METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "deny"})
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""),
+            principal=principal.name,
+            method=request.method,
+            path=request.path,
+            model=requested_model,
+            decision="deny",
+            reason=(
+                f"autonomy_exceeded:requested=L{declared_level}"
+                f"({autonomy.level_name(declared_level)}),ceiling=L{autonomy_ceiling}"
+            ),
+            status=403,
+        )
+        return jsonify(
+            {
+                "error": {
+                    "message": (
+                        f"Principal '{principal.name}' is capped at autonomy "
+                        f"L{autonomy_ceiling} ({autonomy.level_name(autonomy_ceiling)}); "
+                        f"request declared L{declared_level} "
+                        f"({autonomy.level_name(declared_level)})"
+                    ),
+                    "type": "permission_error",
+                    "code": "autonomy_exceeded",
                 }
             }
         ), 403

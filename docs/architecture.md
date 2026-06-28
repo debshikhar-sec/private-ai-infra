@@ -31,6 +31,7 @@ Control plane
 Governance plane  (src/private_ai_gateway/{policy,ratelimit,guardrails,metrics,audit}.py)
   - policy-as-code: principals (API-key identities) from config/policy.toml
   - identity (token -> principal) and authorization (model allowlist, token caps)
+  - autonomy ceiling enforcement (L0-L6 ladder -> 403 autonomy_exceeded)
   - per-principal rate limiting (token bucket -> 429 + Retry-After)
   - secret-egress guardrails (redact/block credential-shaped output)
   - structured decision audit (logs/decisions.jsonl)
@@ -94,6 +95,11 @@ policy file (`config/policy.toml`, parsed with stdlib `tomllib`) defines princip
 - **Authorization** — each principal carries an `allowed_models` list and an optional
   `max_output_tokens` cap. A request for a model outside the allowlist returns `403`;
   governance can only *tighten* token caps, never loosen them.
+- **Autonomy ceiling** — each principal carries a `max_autonomy_level` on the L0–L6 ladder
+  (`autonomy.py`). A request declaring a higher level (via `X-Autonomy-Level` header or
+  `autonomy_level` body field) is denied `403 autonomy_exceeded` before any model load.
+  This is the enforcement substrate for the orchestration control plane — see
+  [orchestration.md](orchestration.md).
 - **Rate limiting** — a per-principal token bucket (`ratelimit.py`, `requests_per_minute`
   with a policy-wide default) rejects over-limit requests with `429` + `Retry-After`,
   before any model load — so throttling is cheap.

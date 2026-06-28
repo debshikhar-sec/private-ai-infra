@@ -4,6 +4,30 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-28
+
+### Added
+- **Autonomy-ceiling enforcement (orchestration keystone).** New `autonomy.py` defines the
+  L0–L6 autonomy ladder (observe → suggest → dry-run → owner-run → monitored → continuous →
+  unbounded). Each principal carries a `max_autonomy_level` (with an `[autonomy]`
+  `default_max_level` fallback); a request declaring a higher level via the
+  `X-Autonomy-Level` header or `autonomy_level` body field is denied `403 autonomy_exceeded`
+  **before any model loads**, and the denial is audited. Gating is opt-in (off when no ceiling
+  is configured). This converts the project's original prompt-level autonomy governance into
+  an enforced control.
+- **Orchestration control plane, documented.** `docs/orchestration.md` defines the
+  multi-agent control plane — **Hermes** (planning/orchestration), **OpenCode** (sandboxed
+  code execution), **OpenClaw** (security/observability) — as components governed by the
+  enforced governance plane, with an explicit current-vs-planned status. `/v1/whoami` now
+  reports the caller's `max_autonomy_level`.
+- Tests for the ladder, policy loading, and endpoint enforcement (suite 42 → 50; coverage
+  82% → 83%).
+
+### Changed
+- The owner break-glass identity sits at the top of the ladder (L6).
+- README, architecture, and security model reframed around the orchestration control plane
+  (capability is not authority — now enforced, not requested).
+
 ## [0.3.0] - 2026-06-27
 
 ### Added

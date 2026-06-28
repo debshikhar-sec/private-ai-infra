@@ -16,8 +16,23 @@ capability second.
 - **Secret-egress guardrails** — responses scanned for credential shapes and redacted/blocked
   by policy.
 - **Observability** — Prometheus `/metrics` counters and `/v1/whoami` introspection.
-- **Security-path tests** — auth, policy, rate-limit, guardrail, and metrics paths covered
-  (42 tests, 82% coverage).
+- **Autonomy-ceiling enforcement** — per-principal L0–L6 ladder enforced on inference requests
+  (`403 autonomy_exceeded`); the keystone of the orchestration control plane.
+- **Security-path tests** — auth, policy, rate-limit, guardrail, metrics, and autonomy paths
+  covered (50 tests, 83% coverage).
+
+## Next major scope — orchestration control plane (Phase 2)
+
+The control plane is designed in [orchestration.md](orchestration.md); the enforcement
+substrate (above) is live, the running agents are next:
+
+- **Hermes** — a running planner that emits the structured plan and issues delegations through
+  the gateway as distinct principals (one identity per component, no shared god token).
+- **OpenCode** — graduate the read-only operator wrapper into a real sandbox: network-isolated,
+  scoped filesystem, resource-limited, with an approval-gated apply path.
+- **OpenClaw** — offensive-security / code-review / telemetry tasks feeding `/metrics` and the
+  decision audit.
+- **Approval gates** — `APPROVAL REQUIRED` for any L4+ action, surfaced to the owner.
 
 ## Near-term — remaining hardening
 

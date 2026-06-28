@@ -4,6 +4,12 @@ Owner-run helper scripts that demonstrate a least-privilege boundary around loca
 operations. They are **not** wired into the gateway as autonomous tools — the operator
 runs them deliberately.
 
+These are the present-day, deliberately-minimal stand-ins for the **OpenCode** (code) and
+**OpenClaw** (security/observability) surfaces of the orchestration control plane. The full
+design — components, the L0–L6 autonomy ladder, and current-vs-planned status — is in
+[docs/orchestration.md](../docs/orchestration.md). Phase 2 graduates `opencode.sh` into a real
+sandbox and adds the Hermes planner; until then these wrappers stay read-only by design.
+
 ## Wrappers
 
 - **`wrappers/opencode.sh`** — read-only engineering inspection and safe syntax tests.

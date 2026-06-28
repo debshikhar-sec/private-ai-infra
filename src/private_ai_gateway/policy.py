@@ -23,6 +23,8 @@ import hashlib
 import tomllib
 from dataclasses import dataclass
 
+from private_ai_gateway import autonomy as autonomy_mod
+
 
 @dataclass(frozen=True)
 class Principal:
@@ -32,6 +34,7 @@ class Principal:
     allowed_models: frozenset[str]
     max_output_tokens: int | None = None
     requests_per_minute: int | None = None
+    max_autonomy_level: int | None = None
 
     def may_use(self, alias: str) -> bool:
         """True if this principal may call the given model alias."""
@@ -52,10 +55,12 @@ class Policy:
         *,
         default_requests_per_minute: int = 0,
         guardrail_action: str = "off",
+        default_max_autonomy_level: int | None = None,
     ):
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
         self.guardrail_action = guardrail_action
+        self.default_max_autonomy_level = default_max_autonomy_level
 
     @property
     def principal_count(self) -> int:
@@ -84,11 +89,13 @@ class Policy:
                     continue
                 cap = entry.get("max_output_tokens")
                 rpm = entry.get("requests_per_minute")
+                autonomy = entry.get("max_autonomy_level")
                 principals[key_hash] = Principal(
                     name=str(entry.get("name", "unnamed")),
                     allowed_models=frozenset(entry.get("allowed_models", [])),
                     max_output_tokens=int(cap) if cap is not None else None,
                     requests_per_minute=int(rpm) if rpm is not None else None,
+                    max_autonomy_level=autonomy_mod.parse_level(autonomy),
                 )
             except (KeyError, TypeError, ValueError):
                 continue
@@ -104,10 +111,14 @@ class Policy:
         if action not in ("off", "redact", "block"):
             action = "off"
 
+        autonomy_tbl = raw.get("autonomy", {}) or {}
+        default_autonomy = autonomy_mod.parse_level(autonomy_tbl.get("default_max_level"))
+
         return cls(
             principals,
             default_requests_per_minute=default_rpm,
             guardrail_action=action,
+            default_max_autonomy_level=default_autonomy,
         )
 
     def identify(self, bearer_token: str) -> Principal | None:

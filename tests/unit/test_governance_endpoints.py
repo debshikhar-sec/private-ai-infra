@@ -29,6 +29,9 @@ def test_whoami_reports_owner(owner_client):
     body = r.get_json()
     assert body["principal"] == "owner"
     assert body["allowed_models"] == ["*"]
+    # Owner sits at the top of the autonomy ladder (L6, break-glass).
+    assert body["max_autonomy_level"] == 6
+    assert body["max_autonomy_name"] == "unbounded"
 
 
 def test_metrics_requires_auth(owner_client):
@@ -55,6 +58,58 @@ def test_rate_limit_returns_429(monkeypatch):
     r = client.get("/v1/models", headers=hdr)
     assert r.status_code == 429
     assert int(r.headers["Retry-After"]) >= 1
+
+
+def _autonomy_client(monkeypatch, ceiling):
+    """A client whose only principal is capped at the given autonomy level."""
+    key = "agent-key"
+    pol = Policy(
+        {hash_token(key): Principal("agent", frozenset({"strategy"}), None, None, ceiling)}
+    )
+    monkeypatch.setattr(gw, "POLICY", pol)
+    monkeypatch.setattr(gw, "AUTH_TOKEN", "")  # no owner break-glass fallback
+    monkeypatch.setattr(gw, "RATE_LIMITER", RateLimiter(0))
+    return gw.app.test_client(), key
+
+
+def test_autonomy_over_ceiling_denied(monkeypatch):
+    client, key = _autonomy_client(monkeypatch, ceiling=1)  # suggest only
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "strategy", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": f"Bearer {key}", "X-Autonomy-Level": "L3"},
+    )
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "autonomy_exceeded"
+
+
+def test_autonomy_at_or_below_ceiling_allowed(monkeypatch):
+    # At/below the ceiling, the request passes the gate and proceeds to inference,
+    # which we stub out so no model loads.
+    monkeypatch.setattr(gw, "swap_model_if_needed", lambda *a, **k: True)
+    monkeypatch.setattr(gw, "generate", lambda *a, **k: "ok")
+    client, key = _autonomy_client(monkeypatch, ceiling=3)
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "strategy", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": f"Bearer {key}", "X-Autonomy-Level": "L2"},
+    )
+    assert r.status_code == 200
+
+
+def test_autonomy_level_via_body_field(monkeypatch):
+    client, key = _autonomy_client(monkeypatch, ceiling=0)  # observe only
+    r = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "strategy",
+            "messages": [{"role": "user", "content": "hi"}],
+            "autonomy_level": "L2",
+        },
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "autonomy_exceeded"
 
 
 def test_guardrail_redacts_secret_in_chat(monkeypatch):

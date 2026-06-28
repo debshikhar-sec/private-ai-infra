@@ -26,6 +26,7 @@ below.
 | Authentication | constant-time bearer check; fail-closed (won't start without a token) | active, see limits |
 | Identity | bearer token resolved to a principal via policy-as-code (API-key SHA-256 hashes) | active |
 | Authorization | per-principal model allowlist; unauthorized model → 403 | active |
+| Autonomy | per-principal L0–L6 ceiling; request above ceiling → 403 `autonomy_exceeded` | active (opt-in via policy) |
 | Request rate | per-principal token-bucket limiter; over-limit → 429 + `Retry-After` | active |
 | Secret egress | response guardrails redact/block credential-shaped output | active (opt-in via policy) |
 | Model output | sanitizer strips thinking / tool / control markers | active (defense-in-depth) |
@@ -41,7 +42,9 @@ This gateway targets a focused subset rather than claiming broad coverage:
 
 - **LLM01 Prompt injection / LLM06 Excessive agency** — the gateway never grants the
   model execution authority; tool-call output is blocked, not forwarded. A compromised
-  prompt cannot turn into an action through this path.
+  prompt cannot turn into an action through this path. Beyond that, the **autonomy ceiling**
+  caps each principal on an L0–L6 ladder, so even an authorized agent cannot be delegated
+  work above its mandate — capability is bounded by enforced authority, not by prompt text.
 - **Broken access control / least privilege** — identity and authorization are
   policy-as-code: each API key maps to a principal constrained to specific model aliases
   and token caps. A leaked low-privilege key cannot reach a model it was never granted,

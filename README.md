@@ -65,6 +65,10 @@ action = "redact"          # off | redact | block
 - **Identity** — the bearer token is hashed and resolved to a principal.
 - **Authorization** — a model outside the principal's `allowed_models` returns `403`; the
   effective token cap is the tightest of request / per-model / per-principal.
+- **Autonomy ceiling** — each principal is capped on the L0–L6 autonomy ladder
+  (`max_autonomy_level`); a request declaring a higher level (via `X-Autonomy-Level`) is
+  denied `403 autonomy_exceeded` before any model loads. See
+  [Orchestration](#orchestration-control-plane).
 - **Rate limiting** — a per-principal token bucket (`requests_per_minute`, with a policy-wide
   default); over-limit requests get `429` + `Retry-After` before any model loads.
 - **Output guardrails** — responses are scanned for credential-shaped content (AWS keys,
@@ -77,6 +81,27 @@ action = "redact"          # off | redact | block
 
 With no policy file, the gateway runs single-principal using `PRIVATE_AI_AUTH_TOKEN` (an owner
 identity allowed every model), so local development stays zero-config.
+
+## Orchestration control plane
+
+The gateway is the enforcement layer for a multi-agent control plane whose guiding rule is
+that **AI capability is not AI authority** — a planner may reason about anything, but what
+*executes* is decided and recorded by the governance plane. Three components, each
+authenticating as its **own principal** with its own model allowlist, caps, and autonomy
+ceiling:
+
+| Component | Mandate |
+|---|---|
+| **Hermes** | Planning / orchestration — decompose an objective, route each sub-task. Plans; does not execute. |
+| **OpenCode** | Code-execution agent — inspect/test/(approval-gated) modify code inside an isolated environment. |
+| **OpenClaw** | Security / observability — offsec checks, code review, telemetry feeding the audit + metrics. |
+
+Delegated work is classified on an **autonomy ladder** (L0 observe → L1 suggest → L2 dry-run →
+L3 owner-run → L4 monitored → L5 continuous → L6 unbounded). The gateway enforces each
+principal's ceiling on every request, so a component can't be handed work above its mandate even
+if the plan asks for it. Autonomy enforcement, identity/authorization, rate limiting, and
+egress guardrails are **live today**; the running orchestrator and the sandboxed agents are the
+next phase. Full design and current-vs-planned status: **[docs/orchestration.md](docs/orchestration.md)**.
 
 ## Quickstart
 
@@ -102,7 +127,7 @@ deploy/nginx/             # nginx loopback reverse-proxy config
 scripts/                  # operational entrypoints (start/stop/status/benchmark)
 agents/                   # owner-run operator wrappers (least-privilege, monitoring/inspection)
 tests/                    # unit/ (pytest) + integration/ (stack smoke test)
-docs/                     # architecture, security model, runbook, roadmap
+docs/                     # architecture, security model, orchestration, runbook, roadmap
 ```
 
 ## Security

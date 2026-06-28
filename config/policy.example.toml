@@ -10,12 +10,17 @@
 # .env.example. When a policy file IS present, the owner token still works as a
 # break-glass admin identity, alongside the principals defined below.
 
+# max_autonomy_level caps the autonomy ladder (L0 observe .. L6 unbounded) a principal
+# may operate at. A request declares its level via the X-Autonomy-Level header or an
+# autonomy_level body field; anything above the ceiling is denied (403 autonomy_exceeded).
+
 [[principals]]
 name = "analyst"
 key_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 allowed_models = ["strategy", "engineering"]
 max_output_tokens = 2048
 requests_per_minute = 30
+max_autonomy_level = "L1"   # suggest only — may propose, may not drive execution
 
 [[principals]]
 name = "offsec-lead"
@@ -23,11 +28,17 @@ key_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
 allowed_models = ["strategy", "engineering", "offsec"]
 max_output_tokens = 4096
 requests_per_minute = 60
+max_autonomy_level = "L3"   # owner-run local execution
 
 # Rate limiting (token bucket, per principal). A principal's own
 # `requests_per_minute` overrides this default; 0 (or unset) means unlimited.
 [ratelimit]
 default_requests_per_minute = 60
+
+# Autonomy ceiling applied to principals that don't set their own `max_autonomy_level`.
+# Unset here (and per-principal) means autonomy gating is off.
+[autonomy]
+default_max_level = "L2"
 
 # Output guardrails: scan model responses for credential-shaped content before they
 # leave the gateway. action = "off" | "redact" | "block".
