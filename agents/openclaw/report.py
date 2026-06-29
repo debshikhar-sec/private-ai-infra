@@ -64,6 +64,34 @@ class AssuranceReport:
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2) + "\n"
 
+    def to_memory_record(self) -> dict:
+        """A compact, serializable summary for another component to persist.
+
+        This is OpenClaw's hand-off contract: it carries the verdict, the counts, and
+        the *failing* controls (with enough detail to act on) without exposing OpenClaw's
+        internal types. Hermes folds this into its memory so the next planning cycle
+        plans from verified state. Kept deliberately small and JSON-only.
+        """
+        return {
+            "verdict": self.verdict,
+            "generated_at": self.generated_at,
+            "counts": self.counts(),
+            "passed_controls": [f.control_id for f in self.findings if f.status == PASS],
+            "inconclusive_controls": [
+                f.control_id for f in self.findings if f.status == INCONCLUSIVE
+            ],
+            "failed_controls": [
+                {
+                    "control_id": f.control_id,
+                    "title": f.title,
+                    "severity": f.severity,
+                    "detail": f.detail,
+                }
+                for f in self.findings
+                if f.status == FAIL
+            ],
+        }
+
     def to_markdown(self) -> str:
         c = self.counts()
         lines = [

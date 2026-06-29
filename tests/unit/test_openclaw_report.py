@@ -53,3 +53,27 @@ def test_to_text_includes_evidence():
     text = build_report([f]).to_text()
     assert "evidence: audit.jsonl" in text
     assert "AC-X" in text
+
+
+def test_to_memory_record_partitions_controls_by_status():
+    report = build_report(
+        [
+            Finding("AC-PASS", "ok", PASS, "info", "fine"),
+            Finding("AC-FAIL", "bad", FAIL, "high", "broke"),
+            Finding("AC-INC", "unknown", INCONCLUSIVE, "info", "no evidence"),
+        ]
+    )
+    rec = report.to_memory_record()
+    assert rec["verdict"] == VERDICT_FAIL
+    assert rec["passed_controls"] == ["AC-PASS"]
+    assert rec["inconclusive_controls"] == ["AC-INC"]
+    assert [c["control_id"] for c in rec["failed_controls"]] == ["AC-FAIL"]
+    # failed controls carry enough detail for the consumer to act on
+    assert rec["failed_controls"][0]["title"] == "bad"
+    assert rec["failed_controls"][0]["severity"] == "high"
+    assert rec["counts"] == {PASS: 1, FAIL: 1, INCONCLUSIVE: 1}
+
+
+def test_to_memory_record_is_json_serializable():
+    rec = build_report([_f(PASS)]).to_memory_record()
+    assert json.loads(json.dumps(rec))["verdict"] == VERDICT_PASS

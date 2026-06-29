@@ -87,3 +87,72 @@ def test_atomic_write_leaves_no_tmp_file(tmp_path):
     store = MemoryStore(tmp_path)
     store.save_state({"a": 1})
     assert not list(tmp_path.glob("*.tmp"))
+
+
+# -- assurance feedback (closed loop) -----------------------------------------
+PASS_RECORD = {
+    "verdict": "PASS",
+    "generated_at": "2026-06-29T00:00:00Z",
+    "counts": {"pass": 7, "fail": 0, "inconclusive": 0},
+    "failed_controls": [],
+}
+FAIL_RECORD = {
+    "verdict": "FAIL",
+    "generated_at": "2026-06-29T00:00:00Z",
+    "counts": {"pass": 5, "fail": 1, "inconclusive": 1},
+    "failed_controls": [
+        {
+            "control_id": "AC-AUTONOMY-CEILING",
+            "title": "Autonomy ceiling was never exceeded",
+            "severity": "high",
+            "detail": "an over-ceiling request was allowed",
+        }
+    ],
+}
+
+
+def test_record_assurance_pass_attaches_block_and_proceed_gate(tmp_path):
+    store = MemoryStore(tmp_path)
+    store.record_assurance(PASS_RECORD)
+    state = store.load_state()
+    assert state["assurance"]["verdict"] == "PASS"
+    assert state["current_gate"] == "assurance PASS"
+    gate_text = store.next_actions_path.read_text()
+    assert "proceed to the next planned increment" in gate_text
+
+
+def test_record_assurance_fail_gates_on_first_failing_control(tmp_path):
+    store = MemoryStore(tmp_path)
+    store.record_assurance(FAIL_RECORD)
+    state = store.load_state()
+    assert state["current_gate"] == "assurance FAIL — remediation required"
+    gate_text = store.next_actions_path.read_text()
+    assert "remediate AC-AUTONOMY-CEILING" in gate_text
+    assert "proposing new feature work" in gate_text
+
+
+def test_record_assurance_appends_run_history(tmp_path):
+    store = MemoryStore(tmp_path)
+    store.record_assurance(FAIL_RECORD)
+    hist = store.history_path.read_text()
+    assert "assurance verification (OpenClaw)" in hist
+    assert "assurance verdict: FAIL" in hist
+    assert "FAILED AC-AUTONOMY-CEILING" in hist
+
+
+def test_record_assurance_backs_up_prior_state(tmp_path):
+    store = MemoryStore(tmp_path)
+    store.save_state({"current_gate": "before"})
+    store.record_assurance(PASS_RECORD)
+    backups = list((tmp_path / "backups").glob("*/PROJECT_STATE.json"))
+    assert backups, "prior state should be backed up before assurance overwrite"
+
+
+def test_record_assurance_preserves_existing_state_keys(tmp_path):
+    store = MemoryStore(tmp_path)
+    store.save_state({"project": "private-ai-infra", "components": {"hermes": {}}})
+    store.record_assurance(PASS_RECORD)
+    state = store.load_state()
+    assert state["project"] == "private-ai-infra"
+    assert "hermes" in state["components"]
+    assert "assurance" in state

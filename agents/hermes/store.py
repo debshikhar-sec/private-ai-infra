@@ -170,3 +170,67 @@ class MemoryStore:
     def set_next_gate(self, gate: NextGate) -> None:
         """Replace NEXT_ACTIONS.md with the current gate."""
         _atomic_write(self.next_actions_path, gate.to_markdown())
+
+    # -- assurance feedback --------------------------------------------------
+    def record_assurance(self, record: dict, *, backup: bool = True) -> None:
+        """Fold an OpenClaw assurance record into memory, closing the control loop.
+
+        After a plan is acted on, OpenClaw verifies the evidence and produces a record
+        (verdict + failing controls). Persisting it here means the *next* planning cycle
+        resumes from **verified** state, and a failing control becomes the gate:
+
+          - canonical state gains an ``assurance`` block (so the planner can read it),
+          - the run history gets one entry noting the verification,
+          - the next gate is set to *remediate the first failing control* on FAIL, or to
+            *proceed to the next planned increment* on PASS.
+
+        The record is a plain JSON-able dict — this keeps Hermes decoupled from OpenClaw's
+        internal types; the two components meet only at this data shape.
+        """
+        verdict = str(record.get("verdict", "UNKNOWN"))
+        failed = record.get("failed_controls") or []
+        counts = record.get("counts") or {}
+
+        if verdict == "FAIL" and failed:
+            first = failed[0]
+            cid = first.get("control_id", "a control")
+            title = first.get("title", "")
+            next_action = f"remediate {cid} ({title}) before proposing new work"
+            gate = NextGate(
+                current_gate="assurance FAIL — remediation required",
+                allowed_next_action=next_action,
+                not_allowed=["proposing new feature work while a control is failing"],
+            )
+        else:
+            next_action = "proceed to the next planned increment"
+            gate = NextGate(
+                current_gate=f"assurance {verdict}",
+                allowed_next_action=next_action,
+            )
+
+        # 1) canonical state: attach the assurance block and reflect the gate.
+        state = self.load_state()
+        state["assurance"] = record
+        state["current_gate"] = gate.current_gate
+        self.save_state(state, backup=backup)
+
+        # 2) run history: one entry recording the verification.
+        results = [f"assurance verdict: {verdict}"]
+        if counts:
+            results.append(
+                f"controls: {counts.get('pass', 0)} pass / {counts.get('fail', 0)} fail "
+                f"/ {counts.get('inconclusive', 0)} inconclusive"
+            )
+        results.extend(f"FAILED {fc.get('control_id')}: {fc.get('title')}" for fc in failed)
+        self.append_run(
+            RunEntry(
+                goal="assurance verification (OpenClaw)",
+                autonomy_level="L0",
+                results=results,
+                next_action=next_action,
+                approval_required="none",
+            )
+        )
+
+        # 3) the gate the next planning cycle must respect.
+        self.set_next_gate(gate)

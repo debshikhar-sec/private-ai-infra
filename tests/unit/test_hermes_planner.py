@@ -36,6 +36,30 @@ def test_summarize_state_renders_components_and_phases():
     assert "no git push" in out
 
 
+def test_summarize_state_surfaces_assurance_verdict_and_failing_controls():
+    state = {
+        "assurance": {
+            "verdict": "FAIL",
+            "generated_at": "2026-06-29T00:00:00Z",
+            "counts": {"pass": 5, "fail": 1, "inconclusive": 1},
+            "failed_controls": [
+                {"control_id": "AC-AUTONOMY-CEILING", "title": "Autonomy ceiling was never exceeded"}
+            ],
+        }
+    }
+    out = planner.summarize_state(state)
+    assert "Last assurance verification (OpenClaw): FAIL" in out
+    assert "remediate before any new work" in out
+    assert "AC-AUTONOMY-CEILING" in out
+
+
+def test_summarize_state_pass_assurance_lists_no_failing_controls():
+    state = {"assurance": {"verdict": "PASS", "counts": {"pass": 7, "fail": 0, "inconclusive": 0}}}
+    out = planner.summarize_state(state)
+    assert "PASS" in out
+    assert "Failing controls" not in out
+
+
 def test_build_messages_structure():
     msgs = planner.build_messages("CONTRACT", {"current_gate": "g"}, "  do the thing  ")
     assert msgs[0]["role"] == "system" and "CONTRACT" in msgs[0]["content"]

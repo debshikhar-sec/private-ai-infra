@@ -17,19 +17,20 @@
       "status": "implemented"
     },
     "openclaw": {
-      "role": "security / offsec / telemetry",
+      "role": "assurance verifier (read-only)",
       "executes": false,
       "principal": "openclaw",
       "autonomy_ceiling": "L0",
-      "status": "planned"
+      "status": "implemented"
     }
   },
   "phases": [
     { "name": "governance_plane", "status": "PASS" },
     { "name": "autonomy_ceiling_enforcement", "status": "PASS" },
     { "name": "opencode_isolated_review_sandbox", "status": "PASS" },
-    { "name": "hermes_stateful_planner", "status": "IN_PROGRESS" },
-    { "name": "openclaw_security_telemetry", "status": "PLANNED" }
+    { "name": "hermes_stateful_planner", "status": "PASS" },
+    { "name": "openclaw_assurance_plane", "status": "PASS" },
+    { "name": "closed_assurance_loop", "status": "IN_PROGRESS" }
   ],
   "restrictions": [
     "no git commit / push without approval",

@@ -28,22 +28,24 @@ capability second.
   decision audit, `/metrics` counters, OpenCode isolation manifests, and policy, runs seven
   controls over them, and emits a PASS/FAIL/INCONCLUSIVE assurance report; exits non-zero only
   on FAIL so it can gate CI (`agents/openclaw/`).
+- **Closed assurance → planning loop** — `hermes.verify` runs OpenClaw and folds the verdict
+  back into Hermes' memory (an `assurance` block + run-history entry + a remediation gate on
+  FAIL), so the next planning cycle plans from *verified* state and a failing control gates new
+  work (`agents/hermes/verify.py`).
 - **Security-path tests** — auth, policy, rate-limit, guardrail, metrics, autonomy, the Hermes
-  memory/plan paths, and the OpenClaw evidence/controls/report/runner paths covered.
+  memory/plan/verify paths, and the OpenClaw evidence/controls/report/runner paths covered.
 
 ## Next major scope — orchestration control plane (Phase 2)
 
 The control plane is designed in [orchestration.md](orchestration.md); the enforcement
 substrate (above) is live, the running agents are next:
 
-- **OpenClaw → Hermes feedback** — *next:* feed live OpenClaw assurance findings (and OpenCode
-  review outcomes) back into Hermes' memory so consecutive cycles plan from *verified* results,
-  not just declared state. This closes the plan → act → verify → record loop.
-- **OpenClaw probes** — add model-driven offensive-security / code-review checks for the
+- **OpenClaw probes** — *next:* add model-driven offensive-security / code-review checks for the
   `openclaw` principal (its `allowed_models` and L0 ceiling already exist in policy), on top of
   today's evidence-verification controls.
 - **OpenCode** — OS-level hardening: run the existing capability-denied review sandbox under a
-  kernel jail (seccomp/namespaces) and add an approval-gated apply path.
+  kernel jail (seccomp/namespaces) and add an approval-gated apply path — the **act** step of
+  the now-closed plan → act → verify → record loop.
 - **Approval gates** — `APPROVAL REQUIRED` for any L4+ action, surfaced to the owner.
 
 ## Near-term — remaining hardening

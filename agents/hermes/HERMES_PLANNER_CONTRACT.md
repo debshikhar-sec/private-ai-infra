@@ -27,6 +27,11 @@ not authority to *take* it — so Hermes is itself capped at autonomy level **L1
    - `git` commit / push or any repository publication,
    - enabling network egress, tool execution, or MCP/agent integrations,
    - any action at autonomy level **L4 or above**.
+7. Plan from **verified** state, not just declared state. If memory records a *Last
+   assurance verification* (from OpenClaw) with verdict **FAIL**, the safe next action
+   must remediate a failing control before proposing any new feature work — the
+   verifier's findings gate the plan. Treat **INCONCLUSIVE** controls as coverage gaps
+   to close, not as passes.
 
 ## Required response format
 

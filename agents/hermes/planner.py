@@ -59,6 +59,22 @@ def summarize_state(state: dict) -> str:
             ph = ph if isinstance(ph, dict) else {}
             lines.append(f"  - {ph.get('name', '?')}: {ph.get('status', '?')}")
 
+    assurance = state.get("assurance")
+    if isinstance(assurance, dict) and assurance:
+        counts = assurance.get("counts") or {}
+        lines.append(
+            f"Last assurance verification (OpenClaw): {assurance.get('verdict', '?')} "
+            f"({counts.get('pass', 0)} pass / {counts.get('fail', 0)} fail / "
+            f"{counts.get('inconclusive', 0)} inconclusive) at "
+            f"{assurance.get('generated_at', '?')}"
+        )
+        failed = assurance.get("failed_controls") or []
+        if failed:
+            lines.append("  Failing controls — remediate before any new work:")
+            lines.extend(
+                f"    - {fc.get('control_id')}: {fc.get('title')}" for fc in failed
+            )
+
     restrictions = state.get("restrictions", [])
     if isinstance(restrictions, list) and restrictions:
         lines.append("Standing restrictions (need approval to cross):")

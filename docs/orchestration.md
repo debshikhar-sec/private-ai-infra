@@ -115,17 +115,31 @@ Honesty about the boundary is part of the design.
   evidence streams and surfaces gaps, but it changes nothing and has no authority to clear its
   own findings. This is the assurance step the roadmap puts *before* widening any implementer's
   authority — the verifier is defined first.
+- **The assurance → planning loop is closed.** `hermes.verify` (the composition root at
+  [`agents/hermes/verify.py`](../agents/hermes/verify.py)) runs OpenClaw over the evidence and
+  folds the verdict back into Hermes' memory: the canonical state gains an `assurance` block, the
+  run history records the verification, and the next gate becomes *remediate the first failing
+  control* on FAIL. The next planning cycle therefore reads the verified result — a failing
+  control appears in Hermes' planning prompt and, by contract, gates new work until it is fixed.
+  The two leaf packages stay decoupled: they meet only at a small JSON assurance record, not at
+  each other's types.
+
+```text
+Hermes plan ──▶ (owner / OpenCode act) ──▶ OpenClaw verify ──▶ record to Hermes memory ──▶ re-plan
+        └──────────────────────── plan from verified state ───────────────────────────────┘
+```
 
 **Planned (next, behind the same boundary):**
 
-- **OpenClaw → Hermes feedback:** feed live assurance findings back into Hermes' memory so
-  consecutive plans build on *verified* state, and add model-driven offensive-security probes
-  for the `openclaw` principal (its `allowed_models` / L0 ceiling already exist in policy).
+- **OpenClaw probes:** add model-driven offensive-security / code-review checks for the
+  `openclaw` principal (its `allowed_models` / L0 ceiling already exist in policy), on top of
+  today's evidence-verification controls.
 - **OpenCode** OS-level hardening: additionally run the existing capability-denied harness
-  under a kernel jail (seccomp/namespaces) and add an approval-gated apply path.
+  under a kernel jail (seccomp/namespaces) and add an approval-gated apply path — the **act**
+  step of the loop above.
 - Approval gates (`APPROVAL REQUIRED`) for any L4+ action, surfaced to the owner.
 
 See [roadmap.md](roadmap.md) for sequencing. All three components now have running
-implementations: [`agents/hermes/`](../agents/hermes) (planner),
+implementations: [`agents/hermes/`](../agents/hermes) (planner + verification loop),
 [`agents/opencode_sandbox/`](../agents/opencode_sandbox) (isolated reviewer), and
 [`agents/openclaw/`](../agents/openclaw) (assurance verifier).

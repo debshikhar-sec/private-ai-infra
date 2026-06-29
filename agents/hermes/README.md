@@ -60,6 +60,29 @@ principal to
 `config/policy.toml` (see `config/policy.example.toml`) so the gateway recognises the
 token and applies the L1 ceiling.
 
+## Closing the loop: verify before re-planning
+
+Planning from *declared* state is not enough — Hermes should plan from **verified** state.
+`hermes.verify` runs [OpenClaw](../openclaw) over the evidence the gateway emits and folds
+the verdict back into memory (`MemoryStore.record_assurance`): `PROJECT_STATE.json` gains an
+`assurance` block, `RUN_HISTORY.md` records the verification, and `NEXT_ACTIONS.md` becomes
+*remediate the first failing control* on FAIL. The next cycle's planning prompt then shows the
+last verdict and any failing controls — and by contract (rule 7) a FAIL gates new work until
+it is fixed.
+
+```bash
+# Run assurance and record the verdict into Hermes memory (offline, no gateway needed):
+PYTHONPATH=agents python -m hermes.verify \
+  --memory-dir agents/hermes/memory \
+  --audit logs/decisions.jsonl \
+  --policy config/policy.toml \
+  --opencode-report agents/opencode_sandbox/examples/isolated_review.report.txt
+# exits non-zero on FAIL, so it can gate CI
+```
+
+This is the composition root where the orchestrator invokes the verifier; the two packages
+stay decoupled, meeting only at a small JSON assurance record.
+
 ## The planner contract
 
 [`HERMES_PLANNER_CONTRACT.md`](HERMES_PLANNER_CONTRACT.md) is the system prompt: plan

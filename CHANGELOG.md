@@ -4,6 +4,32 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-29
+
+### Added
+- **Closed assurance → planning loop (`agents/hermes/verify.py`).** Connects the verifier
+  (OpenClaw) back to the planner (Hermes), so consecutive cycles plan from *verified* state
+  rather than declared state — completing `plan → act → verify → record → re-plan`.
+  - `hermes.verify` runs OpenClaw over the evidence (audit, metrics, OpenCode isolation report,
+    policy) and folds the result into Hermes' memory via `MemoryStore.record_assurance()`: the
+    canonical `PROJECT_STATE.json` gains an `assurance` block, `RUN_HISTORY.md` records the
+    verification, and `NEXT_ACTIONS.md` becomes *remediate the first failing control* on FAIL (or
+    *proceed to the next planned increment* on PASS). It exits non-zero on FAIL.
+  - `planner.summarize_state` now surfaces the last assurance verdict and any failing controls in
+    Hermes' planning prompt, and the planner contract gains a rule (#7): on a FAIL verdict the
+    safe next action must remediate a failing control before proposing new work; INCONCLUSIVE
+    controls are coverage gaps to close, not passes.
+  - `AssuranceReport.to_memory_record()` is OpenClaw's compact, JSON-only hand-off — the two leaf
+    packages stay decoupled and meet only at this data shape.
+- Tests for `record_assurance` (PASS/FAIL gates, history, state-key preservation, backup),
+  `to_memory_record`, the planner assurance digest, and the `hermes.verify` runner end-to-end
+  (suite 134 → 148; coverage ~91%). All pure-stdlib, so they run on CI.
+
+### Changed
+- `docs/orchestration.md`, `docs/roadmap.md`, and the example `PROJECT_STATE.json`: OpenClaw is
+  now `implemented`, and the assurance → planning loop is documented as closed; the next steps
+  are model-driven OpenClaw probes and the OpenCode *act* step (kernel-jailed apply path).
+
 ## [0.7.0] - 2026-06-28
 
 ### Added
