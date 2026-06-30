@@ -25,16 +25,16 @@ test: ## Run unit tests
 	pytest
 
 cov: ## Run tests with coverage (fails under 70%)
-	pytest --cov=private_ai_gateway --cov=hermes --cov=openclaw --cov=evals --cov-report=term-missing --cov-fail-under=70
+	pytest --cov=private_ai_gateway --cov=hermes --cov=openclaw --cov=opencode_sandbox --cov=evals --cov-report=term-missing --cov-fail-under=70
 
 lint: ## Lint with ruff
-	ruff check src tests agents/hermes agents/openclaw evals
+	ruff check src tests agents/hermes agents/openclaw agents/opencode_sandbox evals
 
 fmt: ## Auto-format with ruff
-	ruff format src tests agents/hermes agents/openclaw evals
+	ruff format src tests agents/hermes agents/openclaw agents/opencode_sandbox evals
 
 sast: ## Static security analysis (bandit)
-	bandit -r src agents/hermes agents/openclaw evals -q
+	bandit -c pyproject.toml -r src agents/hermes agents/openclaw agents/opencode_sandbox evals -q
 
 evals: ## Run the adversarial security eval suite
 	PYTHONPATH=src python -m evals.run

@@ -40,9 +40,15 @@ capability second.
   reads the eval report as evidence, so a failing probe becomes a failing assurance control that
   Hermes folds into memory and treats as a remediation gate on the next planning cycle. The
   third thread (`evals → OpenClaw → Hermes`) of the plan → act → verify → record loop is closed.
+- **OpenCode act step** — an approval-gated, confined, verified apply path
+  (`agents/opencode_sandbox/apply.py`, CLI `opencode_sandbox.act`): a proposed change carries no
+  approval, is refused without an explicit owner approval (fail closed, ≥ L3, no under-declaring),
+  is applied only into a sandbox copy, and is verified by sha256 manifests to change exactly the
+  files it declared — the **act** step of the plan → act → verify → record loop. Pure-stdlib and
+  unit-tested.
 - **Security-path tests** — auth, policy, rate-limit, guardrail, metrics, autonomy, the Hermes
-  memory/plan/verify paths, the OpenClaw evidence/controls/report/runner paths, and the eval
-  harness covered.
+  memory/plan/verify paths, the OpenClaw evidence/controls/report/runner paths, the eval
+  harness, and the OpenCode act-step (gate/confinement/verify/CLI) covered.
 
 ## Next major scope — orchestration control plane (Phase 2)
 
@@ -52,10 +58,11 @@ substrate (above) is live, the running agents are next:
 - **OpenClaw probes** — *next:* add model-driven offensive-security / code-review checks for the
   `openclaw` principal (its `allowed_models` and L0 ceiling already exist in policy), on top of
   today's evidence-verification controls.
-- **OpenCode** — OS-level hardening: run the existing capability-denied review sandbox under a
-  kernel jail (seccomp/namespaces) and add an approval-gated apply path — the **act** step of
-  the now-closed plan → act → verify → record loop.
-- **Approval gates** — `APPROVAL REQUIRED` for any L4+ action, surfaced to the owner.
+- **OpenCode OS-level jail** — run both the review sandbox and the act-step apply under a kernel
+  jail (seccomp/namespaces / `sandbox-exec`). The protocol-level gate and filesystem verification
+  are done; the remaining hardening is the OS boundary.
+- **Approval gates** — surface `APPROVAL REQUIRED` to the owner for L4+ gateway actions, reusing
+  the act step's approval model.
 
 ## Near-term — remaining hardening
 

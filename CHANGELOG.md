@@ -4,6 +4,40 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-06-29
+
+### Added
+- **OpenCode act step — an approval-gated, confined, verified apply path
+  (`agents/opencode_sandbox/apply.py`, CLI `opencode_sandbox.act`).** The *write* boundary of
+  the control plane, where "AI capability is not AI authority" becomes mechanical. The review
+  harness already proved OpenCode can look without touching; the act step proves a *proposed*
+  change cannot be applied without authority, cannot escape the target, and cannot change
+  anything it did not declare. Four enforced steps:
+  - **Capability ≠ authority.** A `ChangeProposal` (declared edits + rationale) carries no
+    approval; an `Approval` (owner + reason) is a *separately-sourced* input — the proposer
+    cannot approve itself.
+  - **Fail closed.** Any write is at least `owner_run` (L3); without a granted approval the
+    apply is **REFUSED**, exactly as the gateway refuses an unauthenticated request. A proposal
+    that carries edits is treated as ≥ L3 even if it declares lower, so it cannot label itself
+    `dry_run` to dodge the gate (most-privileged-wins, mirroring `autonomy.declared_level`).
+  - **Confinement.** Paths that escape the target root (`..`, absolute, symlink) are **REJECTED**
+    before any byte is written.
+  - **Verified.** The change is applied into a sandbox copy; before/after sha256 manifests prove
+    **exactly the declared files changed**. An undeclared write is **FAILED**, never a silent
+    success. `--commit` promotes the verified change onto the real target, re-verified and still
+    approval-gated.
+  - Emits a structured `ApplyReport` (status / effective level / approver / declared-vs-changed
+    files / violations) — the same evidence doctrine as the review manifests, ready to fold into
+    Hermes' memory or check with OpenClaw. Pure-stdlib and offline (no `opencode` binary, no
+    gateway), so unlike the review harness it is fully unit-tested. Bundled
+    `examples/fix_sqli.proposal.json` proposes the fix for the review target's SQL-injection bug.
+  - Contract: `agents/opencode_sandbox/OPENCODE_ACT_CONTRACT.md`. Suite 178 → 198.
+
+### Changed
+- `opencode_sandbox` joins lint/SAST/coverage (`make check`); bandit excludes the deliberately
+  vulnerable `examples/review_target` fixture (it exists to *be* found flawed). README, roadmap,
+  and the orchestration narrative reflect OpenCode now reviewing **and** acting.
+
 ## [0.10.0] - 2026-06-29
 
 ### Added

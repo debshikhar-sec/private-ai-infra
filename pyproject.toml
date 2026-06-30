@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "private-ai-gateway"
-version = "0.10.0"
+version = "0.11.0"
 description = "Local-first AI governance plane: an OpenAI-compatible MLX gateway with policy-as-code identity, authorization, output guardrails, and decision audit."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,11 +37,13 @@ testpaths = ["tests"]
 pythonpath = ["src", "agents", "."]
 
 [tool.coverage.run]
-source = ["private_ai_gateway", "hermes", "openclaw", "evals"]
+source = ["private_ai_gateway", "hermes", "openclaw", "opencode_sandbox", "evals"]
 omit = ["tests/*"]
 
 [tool.coverage.report]
 show_missing = true
 
 [tool.bandit]
-exclude_dirs = ["tests"]
+# "review_target" holds deliberately-vulnerable fixture code — it exists so the OpenCode
+# reviewer/act-step has real bugs to find; it is not product code, so it is not scanned.
+exclude_dirs = ["tests", "agents/opencode_sandbox/examples/review_target"]
