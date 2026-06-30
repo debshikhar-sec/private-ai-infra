@@ -14,6 +14,9 @@ All notable changes to this project are documented here. Format based on
   example evasion don't apply to a pre-trained, loopback, text-only authority plane).
 - **Profile photo support** on the author page — the avatar shows a photo
   (`site/assets/profile.jpg`) when present and falls back to the gradient monogram otherwise.
+- **Downloadable résumé** on the author page — `site/assets/Debshikhar_Das_resume.pdf`
+  (realigned to the current AI-security context, including the `private-ai-infra` project),
+  surfaced via a contact chip and a "Download résumé" button, plus a phone contact chip.
 - **Repository security hardening** — `main` protected by a ruleset (no deletion, no
   force-push, PR-required, `lint-and-scan`+`test` must pass); Dependabot alerts + security
   updates enabled; `SECURITY.md` documents the posture. (Secret scanning, push protection,
