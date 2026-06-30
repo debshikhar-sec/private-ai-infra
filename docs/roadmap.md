@@ -26,7 +26,8 @@ capability second.
   `NEXT_ACTIONS.md` with atomic writes and pre-write backups (`agents/hermes/`).
 - **OpenClaw assurance verifier** — read-only (autonomy **L0**) verifier that reads the
   decision audit, `/metrics` counters, OpenCode isolation manifests, policy, and the adversarial
-  eval report, runs eight controls over them, and emits a PASS/FAIL/INCONCLUSIVE assurance
+  eval report, and the act-step apply report, runs nine controls over them, and emits a
+  PASS/FAIL/INCONCLUSIVE assurance
   report; exits non-zero only on FAIL so it can gate CI (`agents/openclaw/`).
 - **Closed assurance → planning loop** — `hermes.verify` runs OpenClaw and folds the verdict
   back into Hermes' memory (an `assurance` block + run-history entry + a remediation gate on
@@ -46,6 +47,11 @@ capability second.
   is applied only into a sandbox copy, and is verified by sha256 manifests to change exactly the
   files it declared — the **act** step of the plan → act → verify → record loop. Pure-stdlib and
   unit-tested.
+- **Act → verify → record closed** — OpenClaw's `AC-APPLY-INTEGRITY` control reads the act-step
+  apply report as evidence (an ungated apply, an undeclared write, or a FAILED apply is a failing
+  control; a REFUSED/REJECTED apply is the gate holding), so the apply verdict flows through the
+  existing `hermes.verify` machinery into memory and gates the next plan — the fourth thread of
+  the loop, reusing the eval-gating path.
 - **Security-path tests** — auth, policy, rate-limit, guardrail, metrics, autonomy, the Hermes
   memory/plan/verify paths, the OpenClaw evidence/controls/report/runner paths, the eval
   harness, and the OpenCode act-step (gate/confinement/verify/CLI) covered.

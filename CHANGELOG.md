@@ -4,6 +4,33 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-06-29
+
+### Added
+- **The act step now feeds assurance — an ungated or unconfined apply gates the planning
+  loop.** OpenClaw gained a ninth control, `AC-APPLY-INTEGRITY`, that reads the OpenCode
+  act-step's apply report as one more evidence artifact (it does *not* import
+  `opencode_sandbox` — same doctrine as the audit, eval, and isolation reports) and asks an
+  independent question: did the approval gate and change-confinement actually hold?
+  - an APPLIED change with **no recorded approver** is a **FAIL** (a tree-mutating action with
+    no authorizing approval is an authority bypass);
+  - an APPLIED report whose changed files are **not a subset of its declared files** is a
+    **FAIL** (independent cross-check against a tampered/inconsistent record);
+  - a **FAILED** apply (the act step's own verification caught an undeclared write) is a **FAIL**;
+  - a **REFUSED**/**REJECTED** apply is a **PASS** — positive evidence the gate correctly blocked
+    an unapproved or invalid change;
+  - an unreadable/status-less report is a **FAIL** (integrity gap, fail closed); no report is
+    **INCONCLUSIVE**.
+- **Closes `act → verify → record` through the existing loop.** `python -m openclaw.run
+  --apply-report …` and `python -m hermes.verify --apply-report …` thread the apply verdict
+  through assurance into Hermes' memory, so an authority/confinement breach in the act step
+  becomes a failing assurance control that gates the next plan — reusing the same machinery as
+  the eval-gating path, no new plumbing. New `agents/openclaw/examples/apply.report.json`.
+
+### Changed
+- OpenClaw assurance contract and README list the new control (nine total); suite grows with
+  evidence/control/runner/closed-loop tests for the apply-gating path.
+
 ## [0.11.0] - 2026-06-29
 
 ### Added

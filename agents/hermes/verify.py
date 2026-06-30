@@ -12,9 +12,10 @@ Hermes plans; OpenClaw verifies; the memory is the only thing they share. This m
 is the composition root where the orchestrator (Hermes) invokes the verifier — the two
 leaf packages stay decoupled, meeting only at the JSON assurance record.
 
-The same verdict also absorbs the **adversarial security evals**: pass the eval
-harness's JSON report and a failing probe (a control that let an attack through) becomes
-a failing assurance control, which gates the next planning cycle just like any other.
+The same verdict also absorbs the **adversarial security evals** and the **OpenCode
+act-step apply report**: a failing eval probe (a control that let an attack through) or an
+ungated/undeclared apply (an authority/confinement breach) becomes a failing assurance
+control, which gates the next planning cycle just like any other.
 
 Usage:
     PYTHONPATH=agents python -m hermes.verify \
@@ -50,6 +51,7 @@ def gather_and_record(
     metrics_file: str | Path | None = None,
     opencode_report: str | Path | None = None,
     eval_report: str | Path | None = None,
+    apply_report: str | Path | None = None,
     backup: bool = True,
 ) -> dict:
     """Run OpenClaw over the evidence and persist the verdict into Hermes memory.
@@ -62,6 +64,7 @@ def gather_and_record(
     pol = evidence.load_policy(policy) if policy else None
     iso = evidence.load_isolation_report(opencode_report) if opencode_report else None
     evals = evidence.load_eval_report(eval_report) if eval_report else None
+    applied = evidence.load_apply_report(apply_report) if apply_report else None
     metrics = (
         evidence.parse_metrics(Path(metrics_file).read_text(encoding="utf-8"))
         if metrics_file
@@ -69,7 +72,12 @@ def gather_and_record(
     )
 
     ev = Evidence(
-        audit=audit_log, metrics=metrics, policy=pol, isolation=iso, eval_report=evals
+        audit=audit_log,
+        metrics=metrics,
+        policy=pol,
+        isolation=iso,
+        eval_report=evals,
+        apply_report=applied,
     )
     report = build_report(checks.run_all(ev))
     record = report.to_memory_record()
@@ -92,6 +100,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval-report",
         help="Path to a security-eval report JSON (a failing eval gates the planning loop)",
     )
+    p.add_argument(
+        "--apply-report",
+        help="Path to an act-step apply report JSON (an ungated/failed apply gates the loop)",
+    )
     return p
 
 
@@ -105,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         metrics_file=args.metrics_file,
         opencode_report=args.opencode_report,
         eval_report=args.eval_report,
+        apply_report=args.apply_report,
     )
 
     verdict = record["verdict"]

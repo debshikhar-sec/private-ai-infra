@@ -8,6 +8,7 @@ already emits and parses each into a typed view the controls can reason over:
   - ``IsolationReport``— OpenCode's sandbox run report (``ISOLATION_RESULT=PASS`` etc.).
   - ``PolicyView``     — principals and their allowlists/ceilings from ``policy.toml``.
   - ``EvalReportView`` — the adversarial security-eval report (``evals.run --format json``).
+  - ``ApplyReportView``— the OpenCode act-step apply report (``opencode_sandbox.act``).
 
 Every loader is tolerant of *absence* (a missing optional source yields ``None`` so the
 dependent control reports INCONCLUSIVE) but strict about *malformation* (a corrupt audit
@@ -342,3 +343,59 @@ def load_eval_report(path: str | Path) -> EvalReportView | None:
     except FileNotFoundError:
         return None
     return parse_eval_report(text, source=str(p))
+
+
+# ------------------------------------------------------------------------ apply report
+@dataclass
+class ApplyReportView:
+    """The OpenCode act-step apply report, reduced to what assurance needs.
+
+    The act step gates a code change behind an explicit approval, applies it confined,
+    and verifies it. OpenClaw treats its JSON record as one more evidence artifact (it
+    does not import ``opencode_sandbox``) and asks an independent question: did the
+    approval gate and the change-confinement actually hold? A report that does not parse,
+    or is missing its ``status``, is ``malformed``.
+    """
+
+    status: str | None = None
+    approver: str | None = None
+    committed: bool = False
+    declared_files: list[str] = field(default_factory=list)
+    changed_files: list[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
+    malformed: bool = False
+    source: str = ""
+
+
+def parse_apply_report(text: str, *, source: str = "") -> ApplyReportView:
+    """Parse the JSON from ``opencode_sandbox.act`` (``to_dict``/``to_record`` shape)."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return ApplyReportView(malformed=True, source=source)
+    if not isinstance(data, dict) or "status" not in data:
+        return ApplyReportView(malformed=True, source=source)
+
+    def _strlist(value) -> list[str]:
+        return [str(x) for x in value] if isinstance(value, list) else []
+
+    approver = data.get("approver")
+    return ApplyReportView(
+        status=str(data.get("status")),
+        approver=str(approver) if approver else None,
+        committed=bool(data.get("committed", False)),
+        declared_files=_strlist(data.get("declared_files")),
+        changed_files=_strlist(data.get("changed_files")),
+        violations=_strlist(data.get("violations")),
+        source=source,
+    )
+
+
+def load_apply_report(path: str | Path) -> ApplyReportView | None:
+    """Load an act-step apply report, or ``None`` if the file is absent."""
+    p = Path(path)
+    try:
+        text = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    return parse_apply_report(text, source=str(p))

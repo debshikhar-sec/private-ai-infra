@@ -10,4 +10,4 @@ The design principle (from the project's own roadmap) is that the *verifier shou
 defined before the implementer's authority is widened* — assurance before execution.
 """
 
-__version__ = "0.10.0"
+__version__ = "0.12.0"

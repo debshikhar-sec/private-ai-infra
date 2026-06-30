@@ -35,6 +35,7 @@ those controls already emit. It is a verifier, not an actor.
 | `AC-GUARDRAIL-EGRESS` | Egress-guardrail (`filter`) decisions are well-formed and counted. | decision audit |
 | `AC-METRICS-RECONCILE` | Audit deny/throttle/filter counts reconcile with the metrics counters. | decision audit + metrics |
 | `AC-OPENCODE-ISOLATION` | OpenCode's last run reported `ISOLATION_RESULT=PASS` with a clean secret scan and exit 0. | isolation report |
+| `AC-APPLY-INTEGRITY` | Every OpenCode act-step apply was gated and confined: an APPLIED change carries the approver that authorized it and changed only its declared files; a FAILED apply (undeclared write) fails the control; a REFUSED/REJECTED apply is the gate correctly holding. | apply report |
 | `AC-SECURITY-EVALS` | The adversarial eval suite repelled every probe — no governance control let an attack through. A failing probe (or an unreadable report) fails the control. | security-eval report |
 
 ## Verdict

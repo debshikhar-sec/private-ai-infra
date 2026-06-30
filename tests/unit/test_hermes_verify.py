@@ -133,3 +133,42 @@ def test_failing_eval_report_gates_next_plan(tmp_path):
     assert any(c["control_id"] == "AC-SECURITY-EVALS" for c in record["failed_controls"])
     digest = planner.summarize_state(MemoryStore(mem).load_state())
     assert "AC-SECURITY-EVALS" in digest
+
+
+def _apply_report(tmp_path, payload):
+    p = tmp_path / "apply.json"
+    p.write_text(json.dumps(payload), encoding="utf-8")
+    return str(p)
+
+
+def test_passing_apply_report_records_as_passed_control(tmp_path):
+    record = verify.gather_and_record(
+        memory_dir=tmp_path / "mem",
+        audit=_audit(tmp_path, _CLEAN_AUDIT),
+        apply_report=_apply_report(
+            tmp_path,
+            {"status": "applied", "approver": "alice", "committed": True,
+             "declared_files": ["a.py"], "changed_files": ["a.py"]},
+        ),
+    )
+    assert record["verdict"] == "PASS"
+    assert "AC-APPLY-INTEGRITY" in record["passed_controls"]
+
+
+def test_ungated_apply_report_gates_next_plan(tmp_path):
+    # An apply that mutated the tree with no recorded approver is an authority bypass:
+    # it must become a failing assurance control and gate Hermes' next plan.
+    mem = tmp_path / "mem"
+    record = verify.gather_and_record(
+        memory_dir=mem,
+        audit=_audit(tmp_path, _CLEAN_AUDIT),
+        apply_report=_apply_report(
+            tmp_path,
+            {"status": "applied", "approver": None, "committed": True,
+             "declared_files": ["a.py"], "changed_files": ["a.py"]},
+        ),
+    )
+    assert record["verdict"] == "FAIL"
+    assert any(c["control_id"] == "AC-APPLY-INTEGRITY" for c in record["failed_controls"])
+    digest = planner.summarize_state(MemoryStore(mem).load_state())
+    assert "AC-APPLY-INTEGRITY" in digest

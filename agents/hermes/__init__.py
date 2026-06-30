@@ -7,4 +7,4 @@ records the resulting plan back to memory. It also runs the verification step
 next planning cycle plans from verified state.
 """
 
-__version__ = "0.10.0"
+__version__ = "0.12.0"

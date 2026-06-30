@@ -1,0 +1,17 @@
+{
+  "component": "opencode-act",
+  "status": "applied",
+  "autonomy_level": 3,
+  "autonomy_name": "owner_run",
+  "approver": "alice",
+  "committed": true,
+  "declared_files": [
+    "sample_handler.py"
+  ],
+  "changed_files": [
+    "sample_handler.py"
+  ],
+  "violations": [],
+  "generated_at": "2026-06-30T00:40:25Z",
+  "detail": "applied and verified in sandbox: exactly the 1 declared file(s) changed; committed to /var/folders/p7/cw4s0qgs12z1287m62j87qsr0000gn/T/tmpxyrh421p/t."
+}
