@@ -62,6 +62,8 @@ def build_gateway_transport():
             None,
             idt.requests_per_minute,
             idt.max_autonomy_level,
+            allowed_skills=frozenset(idt.allowed_skills),
+            allowed_tools=frozenset(idt.allowed_tools),
         )
         for idt in IDENTITIES
     }

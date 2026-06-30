@@ -21,6 +21,9 @@ allowed_models = ["strategy", "engineering"]
 max_output_tokens = 2048
 requests_per_minute = 30
 max_autonomy_level = "L1"   # suggest only — may propose, may not drive execution
+# A2A skills this principal may be delegated; MCP tools it may call.
+allowed_skills = ["plan.summarize"]
+allowed_tools = ["clock.now", "text.wordcount"]   # read-only (L0) tools only
 
 [[principals]]
 name = "offsec-lead"
@@ -49,6 +52,8 @@ allowed_models = ["engineering"]
 max_output_tokens = 4096
 requests_per_minute = 30
 max_autonomy_level = "L2"   # sandboxed reviewer: dry-run / no-op only
+allowed_skills = ["review.code"]
+allowed_tools = ["clock.now", "text.wordcount", "echo", "hash.sha256"]
 
 [[principals]]
 name = "openclaw"

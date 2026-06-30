@@ -35,10 +35,23 @@ class Principal:
     max_output_tokens: int | None = None
     requests_per_minute: int | None = None
     max_autonomy_level: int | None = None
+    # Capability grants for the agentic surfaces. A2A delegation is scoped to
+    # ``allowed_skills`` and MCP tool calls to ``allowed_tools`` — the same
+    # allowlist-with-wildcard model as ``allowed_models``. Empty means "none granted".
+    allowed_skills: frozenset[str] = frozenset()
+    allowed_tools: frozenset[str] = frozenset()
 
     def may_use(self, alias: str) -> bool:
         """True if this principal may call the given model alias."""
         return "*" in self.allowed_models or alias in self.allowed_models
+
+    def may_use_skill(self, skill: str) -> bool:
+        """True if this principal may be delegated the given A2A skill."""
+        return "*" in self.allowed_skills or skill in self.allowed_skills
+
+    def may_use_tool(self, tool: str) -> bool:
+        """True if this principal may invoke the given MCP tool."""
+        return "*" in self.allowed_tools or tool in self.allowed_tools
 
 
 def hash_token(token: str) -> str:
@@ -96,6 +109,8 @@ class Policy:
                     max_output_tokens=int(cap) if cap is not None else None,
                     requests_per_minute=int(rpm) if rpm is not None else None,
                     max_autonomy_level=autonomy_mod.parse_level(autonomy),
+                    allowed_skills=frozenset(entry.get("allowed_skills", [])),
+                    allowed_tools=frozenset(entry.get("allowed_tools", [])),
                 )
             except (KeyError, TypeError, ValueError):
                 continue

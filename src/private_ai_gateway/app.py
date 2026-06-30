@@ -17,7 +17,7 @@ import mlx.core as mx
 from flask import Flask, Response, g, jsonify, request
 from mlx_lm import generate, load
 
-from private_ai_gateway import autonomy
+from private_ai_gateway import a2a, autonomy, tools
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.metrics import Metrics
@@ -67,6 +67,8 @@ METRICS.register("gateway_requests_total", "Terminal request decisions by princi
 METRICS.register("gateway_authz_denials_total", "Authorization denials by reason.")
 METRICS.register("gateway_rate_limited_total", "Requests rejected by the rate limiter.")
 METRICS.register("gateway_guardrail_events_total", "Responses that tripped an egress guardrail.")
+METRICS.register("gateway_a2a_tasks_total", "A2A delegation decisions by decision.")
+METRICS.register("gateway_tool_calls_total", "MCP tool-call decisions by decision.")
 
 # The owner token (PRIVATE_AI_AUTH_TOKEN) maps to this break-glass admin identity:
 # every model, no token/rate cap, and the top of the autonomy ladder (L6). Finer-grained
@@ -77,7 +79,15 @@ OWNER_PRINCIPAL = Principal(
     max_output_tokens=None,
     requests_per_minute=None,
     max_autonomy_level=autonomy.MAX_LEVEL,
+    allowed_skills=frozenset({"*"}),
+    allowed_tools=frozenset({"*"}),
 )
+
+
+def autonomy_ceiling_for(principal: Principal) -> int | None:
+    """The principal's effective autonomy ceiling: its own, else the policy default."""
+    ceiling = principal.max_autonomy_level
+    return POLICY.default_max_autonomy_level if ceiling is None else ceiling
 
 ROUTE_MAP = {
     "strategy": "mlx-community/Qwen3.6-27B-OptiQ-4bit",
@@ -547,6 +557,176 @@ def whoami():
 def metrics():
     """Prometheus text-format metrics (requires auth; safe to scrape with a token)."""
     return Response(METRICS.render(), mimetype="text/plain; version=0.0.4")
+
+
+# -----------------------------
+# A2A (Agent2Agent) — agent card discovery + governed delegation
+# -----------------------------
+@app.route("/.well-known/agent-card.json", methods=["GET"])
+def agent_card():
+    """Serve the calling principal's A2A Agent Card, scoped to its granted skills.
+
+    Unlike a self-asserted card, this is rendered from policy: it advertises only the
+    skills the principal is actually granted and surfaces its enforced autonomy ceiling,
+    so a peer's delegation decision is made against authority, not a claim.
+    """
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    base_url = request.host_url.rstrip("/")
+    return jsonify(a2a.agent_card(principal, base_url=base_url, ceiling=autonomy_ceiling_for(principal)))
+
+
+@app.route("/a2a/tasks", methods=["POST"])
+def a2a_tasks():
+    """Governed A2A delegation: accept a task only if the principal is authorized for it.
+
+    A delegation names a ``skill`` and (optionally) the autonomy level it intends to
+    operate at. The gateway enforces the same plane as inference — the skill must be in
+    the principal's ``allowed_skills`` and the declared level must not exceed its ceiling —
+    before the task is accepted. Accepted tasks are recorded; nothing executes on the
+    strength of the request alone.
+    """
+    req_data = request.get_json(force=True, silent=True) or {}
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    skill = str(req_data.get("skill", "")).strip()
+
+    if not skill:
+        return jsonify(
+            {"error": {"message": "Missing 'skill'", "type": "invalid_request_error",
+                       "code": "invalid_request"}}
+        ), 400
+
+    # --- AUTHORIZATION: is this principal granted the delegated skill? ---
+    if not principal.may_use_skill(skill):
+        METRICS.inc("gateway_a2a_tasks_total", {"decision": "deny"})
+        METRICS.inc("gateway_authz_denials_total", {"reason": "skill_not_allowed"})
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny", reason=f"skill_not_allowed:{skill}", status=403,
+        )
+        return jsonify(
+            {"error": {"message": f"Principal '{principal.name}' is not granted skill '{skill}'",
+                       "type": "permission_error", "code": "skill_not_allowed"}}
+        ), 403
+
+    # --- AUTONOMY: does the delegation exceed the principal's ceiling? ---
+    declared = autonomy.declared_level(
+        request.headers.get("X-Autonomy-Level"), req_data.get("autonomy_level")
+    )
+    ceiling = autonomy_ceiling_for(principal)
+    if ceiling is not None and declared is not None and declared > ceiling:
+        METRICS.inc("gateway_a2a_tasks_total", {"decision": "deny"})
+        METRICS.inc("gateway_authz_denials_total", {"reason": "autonomy_exceeded"})
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny",
+            reason=f"autonomy_exceeded:requested=L{declared},ceiling=L{ceiling}", status=403,
+        )
+        return jsonify(
+            {"error": {"message": (
+                f"Principal '{principal.name}' is capped at autonomy L{ceiling} "
+                f"({autonomy.level_name(ceiling)}); delegation declared L{declared}"),
+                "type": "permission_error", "code": "autonomy_exceeded"}}
+        ), 403
+
+    METRICS.inc("gateway_a2a_tasks_total", {"decision": "allow"})
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"a2a_task:{skill}", status=202,
+    )
+    return jsonify(
+        {
+            "id": f"task-{getattr(g, 'request_id', '')[:12]}",
+            "status": "submitted",
+            "skill": skill,
+            "principal": principal.name,
+            "accepted_autonomy_level": declared,
+            "accepted_autonomy_name": autonomy.level_name(declared),
+        }
+    ), 202
+
+
+# -----------------------------
+# MCP — governed tool access
+# -----------------------------
+@app.route("/mcp/tools", methods=["GET"])
+def mcp_tools():
+    """List the governed tools this principal is permitted to call."""
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    allowed = [t for t in tools.list_tools() if principal.may_use_tool(t["name"])]
+    return jsonify({"tools": allowed})
+
+
+@app.route("/mcp/call", methods=["POST"])
+def mcp_call():
+    """Governed MCP tool invocation: a tool call is not authority unless granted.
+
+    Enforcement runs before the tool handler: the tool must exist, be in the principal's
+    ``allowed_tools``, and sit at or below the principal's autonomy ceiling (each tool
+    declares the autonomy level it requires). Only then does the (pure, side-effect-free)
+    handler run, and the outcome is recorded.
+    """
+    req_data = request.get_json(force=True, silent=True) or {}
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    name = str(req_data.get("tool", "")).strip()
+    tool = tools.get_tool(name)
+
+    if tool is None:
+        return jsonify(
+            {"error": {"message": f"Unknown tool '{name}'", "type": "invalid_request_error",
+                       "code": "tool_not_found"}}
+        ), 404
+
+    if not principal.may_use_tool(name):
+        METRICS.inc("gateway_tool_calls_total", {"decision": "deny"})
+        METRICS.inc("gateway_authz_denials_total", {"reason": "tool_not_allowed"})
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny", reason=f"tool_not_allowed:{name}", status=403,
+        )
+        return jsonify(
+            {"error": {"message": f"Principal '{principal.name}' is not granted tool '{name}'",
+                       "type": "permission_error", "code": "tool_not_allowed"}}
+        ), 403
+
+    ceiling = autonomy_ceiling_for(principal)
+    if ceiling is not None and tool.min_level > ceiling:
+        METRICS.inc("gateway_tool_calls_total", {"decision": "deny"})
+        METRICS.inc("gateway_authz_denials_total", {"reason": "autonomy_exceeded"})
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny",
+            reason=f"autonomy_exceeded:tool={name},needs=L{tool.min_level},ceiling=L{ceiling}",
+            status=403,
+        )
+        return jsonify(
+            {"error": {"message": (
+                f"Tool '{name}' requires autonomy L{tool.min_level} "
+                f"({autonomy.level_name(tool.min_level)}); principal '{principal.name}' is "
+                f"capped at L{ceiling}"),
+                "type": "permission_error", "code": "autonomy_exceeded"}}
+        ), 403
+
+    try:
+        result = tool.handler(dict(req_data.get("arguments", {}) or {}))
+    except Exception as exc:  # a tool that errors is a failed call, never a silent pass
+        logger.exception(f"TOOL_FAILED | tool={name} | {exc}")
+        return jsonify(
+            {"error": {"message": "Tool execution failed", "type": "server_error",
+                       "code": "tool_failed"}}
+        ), 500
+
+    METRICS.inc("gateway_tool_calls_total", {"decision": "allow"})
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"tool_call:{name}", status=200,
+    )
+    return jsonify({"tool": name, "autonomy_level": tool.min_level, "result": result})
 
 
 @app.route("/models", methods=["GET"])

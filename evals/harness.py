@@ -143,3 +143,5 @@ class Identity:
     max_autonomy_level: int | None = None
     requests_per_minute: int | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
+    allowed_skills: tuple[str, ...] = field(default_factory=tuple)
+    allowed_tools: tuple[str, ...] = field(default_factory=tuple)

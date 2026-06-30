@@ -123,6 +123,94 @@ def test_autonomy_level_via_body_field(monkeypatch):
     assert r.get_json()["error"]["code"] == "autonomy_exceeded"
 
 
+def _agent_client(monkeypatch, *, ceiling, skills=(), tools_=()):
+    """A client whose only principal has the given autonomy ceiling, skills, and tools."""
+    key = "agent-key"
+    pol = Policy(
+        {
+            hash_token(key): Principal(
+                "agent",
+                frozenset({"strategy"}),
+                None,
+                None,
+                ceiling,
+                allowed_skills=frozenset(skills),
+                allowed_tools=frozenset(tools_),
+            )
+        }
+    )
+    monkeypatch.setattr(gw, "POLICY", pol)
+    monkeypatch.setattr(gw, "AUTH_TOKEN", "")
+    monkeypatch.setattr(gw, "RATE_LIMITER", RateLimiter(0))
+    return gw.app.test_client(), {"Authorization": f"Bearer {key}"}
+
+
+# --------------------------------------------------------------- A2A agent card + delegation
+def test_agent_card_reflects_grants_and_ceiling(monkeypatch):
+    client, hdr = _agent_client(monkeypatch, ceiling=1, skills=("plan.summarize",))
+    r = client.get("/.well-known/agent-card.json", headers=hdr)
+    assert r.status_code == 200
+    card = r.get_json()
+    assert card["name"] == "agent"
+    assert {s["id"] for s in card["skills"]} == {"plan.summarize"}
+    assert card["x-governance"]["autonomy_ceiling"] == 1
+
+
+def test_a2a_delegation_denies_ungranted_skill(monkeypatch):
+    client, hdr = _agent_client(monkeypatch, ceiling=1, skills=("plan.summarize",))
+    r = client.post("/a2a/tasks", json={"skill": "deploy.prod"}, headers=hdr)
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "skill_not_allowed"
+
+
+def test_a2a_delegation_denies_autonomy_over_ceiling(monkeypatch):
+    client, hdr = _agent_client(monkeypatch, ceiling=1, skills=("plan.summarize",))
+    r = client.post(
+        "/a2a/tasks", json={"skill": "plan.summarize", "autonomy_level": "L6"}, headers=hdr
+    )
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "autonomy_exceeded"
+
+
+def test_a2a_delegation_accepts_granted_skill(monkeypatch):
+    client, hdr = _agent_client(monkeypatch, ceiling=1, skills=("plan.summarize",))
+    r = client.post("/a2a/tasks", json={"skill": "plan.summarize"}, headers=hdr)
+    assert r.status_code == 202
+    body = r.get_json()
+    assert body["status"] == "submitted" and body["skill"] == "plan.summarize"
+
+
+# --------------------------------------------------------------- MCP tool access
+def test_mcp_denies_ungranted_tool(monkeypatch):
+    client, hdr = _agent_client(monkeypatch, ceiling=3, tools_=("clock.now",))
+    r = client.post("/mcp/call", json={"tool": "echo", "arguments": {"text": "x"}}, headers=hdr)
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "tool_not_allowed"
+
+
+def test_mcp_denies_tool_above_autonomy_ceiling(monkeypatch):
+    # echo requires L1; an L0-capped principal that *is* granted it is still refused.
+    client, hdr = _agent_client(monkeypatch, ceiling=0, tools_=("echo",))
+    r = client.post("/mcp/call", json={"tool": "echo", "arguments": {"text": "x"}}, headers=hdr)
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "autonomy_exceeded"
+
+
+def test_mcp_unknown_tool_404(monkeypatch):
+    client, hdr = _agent_client(monkeypatch, ceiling=3, tools_=("*",))
+    r = client.post("/mcp/call", json={"tool": "no.such.tool"}, headers=hdr)
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "tool_not_found"
+
+
+def test_mcp_executes_granted_tool_in_budget(monkeypatch):
+    client, hdr = _agent_client(monkeypatch, ceiling=1, tools_=("clock.now",))
+    r = client.post("/mcp/call", json={"tool": "clock.now"}, headers=hdr)
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["tool"] == "clock.now" and "utc" in body["result"]
+
+
 def test_guardrail_redacts_secret_in_chat(monkeypatch):
     monkeypatch.setattr(gw, "AUTH_TOKEN", "test-token")
     monkeypatch.setattr(gw, "GUARDRAILS", Guardrails("redact"))
