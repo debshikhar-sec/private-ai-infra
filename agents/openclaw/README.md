@@ -27,6 +27,7 @@ artifacts-that-exist into artifacts-that-are-checked.
 | `AC-GUARDRAIL-EGRESS` | egress-guardrail (`filter`) decisions are well-formed | audit |
 | `AC-METRICS-RECONCILE` | the metrics counters are consistent with the audit (metric ≥ audit count) | audit + metrics |
 | `AC-OPENCODE-ISOLATION` | OpenCode's last run reported `ISOLATION_RESULT=PASS`, clean secret scan, exit 0 | isolation report |
+| `AC-APPLY-INTEGRITY` | every act-step apply was approved and confined (APPLIED carries an approver and changed only declared files; FAILED = undeclared write; REFUSED/REJECTED = gate held) | apply report |
 | `AC-SECURITY-EVALS` | the adversarial eval suite repelled every probe — no control let an attack through | security-eval report |
 
 A control with no evidence to judge it is reported **INCONCLUSIVE** — never silently
@@ -49,6 +50,7 @@ PYTHONPATH=agents python -m openclaw.run \
   --metrics-file agents/openclaw/examples/metrics.sample.prom \
   --opencode-report agents/opencode_sandbox/examples/isolated_review.report.txt \
   --eval-report evals/examples/security-eval.report.json \
+  --apply-report agents/openclaw/examples/apply.report.json \
   --format markdown
 ```
 

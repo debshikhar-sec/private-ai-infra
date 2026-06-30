@@ -5,6 +5,7 @@ from __future__ import annotations
 from openclaw import checks
 from openclaw.checks import FAIL, INCONCLUSIVE, PASS, Evidence
 from openclaw.evidence import (
+    ApplyReportView,
     AuditEvent,
     AuditLog,
     EvalReportView,
@@ -207,6 +208,67 @@ def test_isolation_inconclusive_when_absent():
     assert f.status == INCONCLUSIVE
 
 
+# --------------------------------------------------------------- AC-APPLY-INTEGRITY
+def _apply(**kw) -> ApplyReportView:
+    base = dict(status="applied", approver="alice", committed=True,
+                declared_files=["a.py"], changed_files=["a.py"], source="apply.json")
+    base.update(kw)
+    return ApplyReportView(**base)
+
+
+def test_apply_integrity_pass_when_approved_and_confined():
+    f = checks.check_apply_integrity(Evidence(audit=_log([]), apply_report=_apply()))
+    assert f.status == PASS and "alice" in f.detail
+
+
+def test_apply_integrity_fails_when_applied_without_approver():
+    f = checks.check_apply_integrity(
+        Evidence(audit=_log([]), apply_report=_apply(approver=None))
+    )
+    assert f.status == FAIL and f.severity == "high"
+
+
+def test_apply_integrity_fails_on_undeclared_change():
+    f = checks.check_apply_integrity(
+        Evidence(audit=_log([]), apply_report=_apply(changed_files=["a.py", "b.py"]))
+    )
+    assert f.status == FAIL and "never declared" in f.detail
+
+
+def test_apply_integrity_fails_on_failed_status():
+    f = checks.check_apply_integrity(
+        Evidence(audit=_log([]), apply_report=_apply(status="failed"))
+    )
+    assert f.status == FAIL and f.severity == "high"
+
+
+def test_apply_integrity_pass_when_gate_blocked_change():
+    for status in ("refused", "rejected"):
+        f = checks.check_apply_integrity(
+            Evidence(audit=_log([]), apply_report=_apply(status=status, approver=None))
+        )
+        assert f.status == PASS, status
+
+
+def test_apply_integrity_fails_on_malformed():
+    f = checks.check_apply_integrity(
+        Evidence(audit=_log([]), apply_report=ApplyReportView(malformed=True, source="a"))
+    )
+    assert f.status == FAIL
+
+
+def test_apply_integrity_inconclusive_when_absent():
+    f = checks.check_apply_integrity(Evidence(audit=_log([])))
+    assert f.status == INCONCLUSIVE
+
+
+def test_apply_integrity_inconclusive_on_unknown_status():
+    f = checks.check_apply_integrity(
+        Evidence(audit=_log([]), apply_report=_apply(status="weird"))
+    )
+    assert f.status == INCONCLUSIVE
+
+
 # --------------------------------------------------------------- AC-SECURITY-EVALS
 def test_security_evals_pass_when_all_repelled():
     rep = EvalReportView(verdict="PASS", passed=12, failed=0, skipped=0, source="e.json")
@@ -272,5 +334,6 @@ def test_run_all_returns_one_finding_per_control():
         "AC-GUARDRAIL-EGRESS",
         "AC-METRICS-RECONCILE",
         "AC-OPENCODE-ISOLATION",
+        "AC-APPLY-INTEGRITY",
         "AC-SECURITY-EVALS",
     }

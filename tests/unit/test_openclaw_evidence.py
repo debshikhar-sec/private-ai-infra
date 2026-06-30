@@ -173,3 +173,46 @@ def test_load_eval_report_roundtrips_from_harness(tmp_path):
 
 def test_load_eval_report_missing_is_none(tmp_path):
     assert evidence.load_eval_report(tmp_path / "nope.json") is None
+
+
+# ------------------------------------------------------------------- apply report
+def test_parse_apply_report_reads_status_and_files():
+    rep = evidence.parse_apply_report(
+        '{"status":"applied","approver":"alice","committed":true,'
+        '"declared_files":["a.py"],"changed_files":["a.py"],"violations":[]}',
+        source="apply.json",
+    )
+    assert rep.status == "applied"
+    assert rep.approver == "alice" and rep.committed is True
+    assert rep.declared_files == ["a.py"] and rep.changed_files == ["a.py"]
+    assert not rep.malformed
+
+
+def test_parse_apply_report_blank_approver_is_none():
+    rep = evidence.parse_apply_report('{"status":"refused","approver":null}', source="a")
+    assert rep.approver is None
+
+
+def test_parse_apply_report_malformed_on_bad_json():
+    rep = evidence.parse_apply_report("{nope", source="a")
+    assert rep.malformed and rep.status is None
+
+
+def test_parse_apply_report_malformed_when_status_missing():
+    rep = evidence.parse_apply_report('{"approver":"x"}', source="a")
+    assert rep.malformed
+
+
+def test_load_apply_report_roundtrips(tmp_path):
+    p = _write(
+        tmp_path,
+        "apply.json",
+        '{"component":"opencode-act","status":"applied","approver":"al","committed":false,'
+        '"declared_files":["x"],"changed_files":["x"],"violations":[]}',
+    )
+    rep = evidence.load_apply_report(p)
+    assert rep.status == "applied" and rep.source == str(p)
+
+
+def test_load_apply_report_missing_is_none(tmp_path):
+    assert evidence.load_apply_report(tmp_path / "nope.json") is None

@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from openclaw.evidence import (
+    ApplyReportView,
     AuditLog,
     EvalReportView,
     IsolationReport,
@@ -51,6 +52,7 @@ class Evidence:
     policy: PolicyView | None = None
     isolation: IsolationReport | None = None
     eval_report: EvalReportView | None = None
+    apply_report: ApplyReportView | None = None
 
 
 # --------------------------------------------------------------------- AC-AUDIT-INTEGRITY
@@ -305,6 +307,73 @@ def check_opencode_isolation(ev: Evidence) -> Finding:
     )
 
 
+# ---------------------------------------------------------------- AC-APPLY-INTEGRITY
+def check_apply_integrity(ev: Evidence) -> Finding:
+    cid, title = "AC-APPLY-INTEGRITY", "OpenCode applies were gated and confined"
+    rep = ev.apply_report
+    if rep is None:
+        return Finding(
+            cid, title, INCONCLUSIVE, "info",
+            "No act-step apply report supplied — the OpenCode write path was not exercised "
+            "or recorded in this window, so there is no evidence its approval gate held.",
+        )
+    if rep.malformed:
+        return Finding(
+            cid, title, FAIL, "high",
+            "the act-step apply report could not be parsed or was missing its status. "
+            "An unreadable record of a write action is an integrity gap — fail closed.",
+            evidence=[rep.source],
+        )
+    status = (rep.status or "").lower()
+    if status == "failed":
+        return Finding(
+            cid, title, FAIL, "high",
+            "an OpenCode apply was recorded as FAILED — its own verification found a change "
+            "outside the declared files (a confinement breach). Investigate before any apply.",
+            evidence=[rep.source],
+        )
+    if status == "applied":
+        # An applied (let alone committed) write must carry the approver that authorized it:
+        # capability to apply is only ever granted by an explicit approval.
+        if not rep.approver:
+            return Finding(
+                cid, title, FAIL, "high",
+                "an OpenCode apply reached APPLIED with no approver recorded — a tree-mutating "
+                "action with no authorizing approval is an authority bypass.",
+                evidence=[rep.source],
+            )
+        # Independent cross-check: the report's own changed set must stay within what it
+        # declared (defence in depth against a tampered or inconsistent record).
+        undeclared = sorted(set(rep.changed_files) - set(rep.declared_files))
+        if undeclared:
+            return Finding(
+                cid, title, FAIL, "high",
+                f"an APPLIED report lists changed file(s) it never declared: {undeclared}. "
+                "Declared and changed sets must match — the record is inconsistent.",
+                evidence=[rep.source],
+            )
+        scope = "committed to the target" if rep.committed else "verified in sandbox"
+        return Finding(
+            cid, title, PASS, "info",
+            f"the OpenCode apply was approved (by {rep.approver}), {scope}, and changed only "
+            f"its {len(rep.declared_files)} declared file(s).",
+            evidence=[rep.source],
+        )
+    if status in ("refused", "rejected"):
+        why = "no granted approval (gate held)" if status == "refused" else "a confinement/consistency violation"
+        return Finding(
+            cid, title, PASS, "info",
+            f"the act step correctly blocked a change ({status}: {why}) — the approval/confinement "
+            "gate worked and nothing was written.",
+            evidence=[rep.source],
+        )
+    return Finding(
+        cid, title, INCONCLUSIVE, "info",
+        f"apply report has an unrecognized status {rep.status!r} — cannot judge it.",
+        evidence=[rep.source],
+    )
+
+
 # ---------------------------------------------------------------- AC-SECURITY-EVALS
 def check_security_evals(ev: Evidence) -> Finding:
     cid, title = "AC-SECURITY-EVALS", "Adversarial security evals held"
@@ -353,6 +422,7 @@ ALL_CHECKS = [
     check_guardrail_egress,
     check_metrics_reconcile,
     check_opencode_isolation,
+    check_apply_integrity,
     check_security_evals,
 ]
 

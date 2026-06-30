@@ -47,6 +47,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval-report",
         help="Path to a security-eval report JSON (python -m evals.run --format json)",
     )
+    p.add_argument(
+        "--apply-report",
+        help="Path to an act-step apply report JSON (opencode_sandbox.act --format json)",
+    )
     src = p.add_mutually_exclusive_group()
     src.add_argument("--metrics-file", help="Read Prometheus metrics from a file")
     src.add_argument("--metrics-url", help="Scrape GET /metrics from this gateway base URL")
@@ -89,6 +93,9 @@ def main(argv: list[str] | None = None, *, metrics_client_factory=MetricsClient)
     eval_report = (
         evidence.load_eval_report(args.eval_report) if args.eval_report else None
     )
+    apply_report = (
+        evidence.load_apply_report(args.apply_report) if args.apply_report else None
+    )
     try:
         metrics = _gather_metrics(args, metrics_client_factory=metrics_client_factory)
     except (MetricsError, OSError) as exc:
@@ -101,6 +108,7 @@ def main(argv: list[str] | None = None, *, metrics_client_factory=MetricsClient)
         policy=policy,
         isolation=isolation,
         eval_report=eval_report,
+        apply_report=apply_report,
     )
     report = build_report(checks.run_all(ev))
 
