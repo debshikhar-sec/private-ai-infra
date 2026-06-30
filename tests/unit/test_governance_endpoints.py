@@ -34,6 +34,17 @@ def test_whoami_reports_owner(owner_client):
     assert body["max_autonomy_name"] == "unbounded"
 
 
+def test_response_carries_request_id_and_security_headers(owner_client):
+    r = owner_client.get("/v1/whoami", headers={"Authorization": "Bearer test-token"})
+    assert r.status_code == 200
+    # the per-request audit id is surfaced so a client can tie its response to the audit line
+    assert r.headers.get("X-Request-Id")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"
+    assert r.headers["Referrer-Policy"] == "no-referrer"
+    assert r.headers["Cache-Control"] == "no-store"
+
+
 def test_metrics_requires_auth(owner_client):
     assert owner_client.get("/metrics").status_code == 401
 
