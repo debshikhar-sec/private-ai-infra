@@ -103,6 +103,7 @@ Each row is a control, the attack against it, and where that attack is proven to
 | Autonomy **under-declare** | low level in header, high in body | `declared_level` (most-privileged-wins) | `evals` **AUTONOMY-004** — the real bug it caught |
 | Rate limiting | one key saturates the gateway | `ratelimit.py` → `429` | `evals` RATELIMIT-001 · `test_ratelimit` |
 | Secret egress | model surfaces an AWS key / JWT / PEM | `guardrails.py` redact/block | `evals` EGRESS-001…004 · `test_guardrails` |
+| **Captured-model bound** | injection / context-poisoning hijacks the model itself | authority decided **off the prompt path** | `evals` **AGENTIC-001/002/003** — OWASP Agentic ASI01/03/06 |
 | Apply integrity | an apply runs ungated or escapes its sandbox | `opencode_sandbox/apply.py` | OpenClaw `AC-APPLY-INTEGRITY` · `test_opencode_act` |
 
 → Run the attacks yourself: `make evals` · Re-verify the controls: `make` + see [docs/threat-model.md](docs/threat-model.md).
@@ -194,6 +195,7 @@ zero-config. Drop in `config/policy.toml` to enable the per-principal ceilings s
 | [**Threat model**](docs/threat-model.md) | STRIDE per trust boundary → control → the eval that proves it |
 | [Orchestration](docs/orchestration.md) | the control plane, autonomy ladder, closed loop |
 | [Runbook](docs/runbook.md) | operating the stack + the live enforcement demo |
+| [**Product evolution**](docs/product-evolution.md) | OWASP Agentic Top-10 coverage map + threat-led roadmap vs. the AI-gateway field |
 | [Roadmap](docs/roadmap.md) | what's hardened, what's next |
 
 ## Project layout

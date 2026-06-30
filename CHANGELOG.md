@@ -7,6 +7,22 @@ All notable changes to this project are documented here. Format based on
 ## [Unreleased]
 
 ### Added
+- **Agentic threat-model evals** (`AGENTIC-001/002/003`) — a black-box-attacker group that
+  assumes the model is already captured by prompt-injection / context-poisoning and proves the
+  authority boundary still holds: a hijacked model cannot reach an ungranted model (ASI01),
+  exceed its autonomy ceiling (ASI03), or exfiltrate a secret (ASI06). Mapped onto the **OWASP
+  Top 10 for Agentic Applications (2026)**. The suite is now **15** cases (was 12).
+- **`docs/product-evolution.md`** — the product narrative: an ASI01–ASI10 coverage map (with
+  honest enforced/partial/roadmap status), positioning against the AI-gateway field
+  (LiteLLM/Portkey/Cloudflare/Kong), and a threat-led evolution roadmap (short-lived agent
+  identity via SPIFFE/OAuth scoped delegation, tamper-evident memory, OTel GenAI semconv,
+  supply-chain signing). Linked from the README and roadmap.
+- **Author / portfolio page** (`site/author.html` + `site/author.css`) — a recruiter-facing
+  profile (identity hero, impact metrics, experience timeline, skill clusters, featured project,
+  education) reusing the site design system; linked from the project page nav and footer.
+- **Response hardening** — every gateway response now carries an `X-Request-Id` correlation
+  header (tied to the decision audit) plus strict security headers (`X-Content-Type-Options`,
+  `X-Frame-Options`, `Referrer-Policy`, `Cache-Control: no-store`).
 - **Showcase website** (`site/`) deployed to **GitHub Pages** via the official Actions
   pipeline (`.github/workflows/pages.yml`; no `gh-pages` branch, no build step). Hand-authored,
   zero-build, responsive dark UI using modern CSS (scroll-driven reveals, `:has()`,
