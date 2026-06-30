@@ -4,6 +4,11 @@ The value of this project is not that a model can run locally — it is the cont
 boundary around it. The roadmap reflects that: harden the boundary first, broaden
 capability second.
 
+> For the **product narrative** — how these controls map onto the OWASP Top 10 for
+> Agentic Applications (2026), where the project sits against the AI-gateway field, and the
+> threat-led evolution by horizon — see **[product-evolution.md](product-evolution.md)**.
+> This file is the engineering checklist; that one is the strategy.
+
 ## Done — boundary hardening
 
 - **Fail-closed auth** — the gateway refuses to start without `PRIVATE_AI_AUTH_TOKEN`,
@@ -83,9 +88,14 @@ substrate (above) is live, the running agents are next:
 
 ## Next — extend the eval harness
 
-- Add **prompt-injection / tool-misuse** probes once an explicitly-gated tool path exists.
-  (Feeding the eval verdict into OpenClaw's assurance so a failed eval gates the planning loop
-  is now **done** — see boundary hardening above.)
+- **Agentic threat-model probes** *(started)* — the `AGENTIC-*` group takes the black-box
+  attacker's stance (assume the model is already captured by injection) and proves the
+  authority boundary still holds: ASI01 (goal hijack → ungranted model), ASI03 (privilege
+  abuse → autonomy ceiling), ASI06 (memory/context poisoning → secret egress). Maps onto the
+  OWASP Top 10 for Agentic Applications (2026); grow toward the full ASI catalogue.
+- Extend toward **tool-result poisoning, memory replay, and exfil-via-markdown** once an
+  explicitly-gated tool path exists. (Feeding the eval verdict into OpenClaw's assurance so a
+  failed eval gates the planning loop is already **done** — see boundary hardening above.)
 
 ## Longer-term — capability, behind the same boundary
 

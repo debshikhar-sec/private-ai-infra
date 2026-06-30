@@ -472,6 +472,26 @@ def authenticate_request():
     return None
 
 
+@app.after_request
+def apply_response_hardening(response):
+    """Attach a correlation id and conservative security headers to every response.
+
+    The gateway already mints a per-request id in ``before_request`` and threads it
+    through the decision audit; surfacing it as ``X-Request-Id`` lets an operator tie a
+    client-visible response back to the exact audit line. The headers are deliberately
+    strict for an API that only ever returns JSON / Prometheus text to a loopback caller:
+    no sniffing, no framing, no referrer leakage, and never cache a governed response.
+    """
+    request_id = getattr(g, "request_id", "")
+    if request_id:
+        response.headers["X-Request-Id"] = request_id
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
 @app.errorhandler(413)
 def request_entity_too_large(_e):
     return jsonify(

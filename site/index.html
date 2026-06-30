@@ -24,6 +24,7 @@
         <a href="#enforce">Enforcement</a>
         <a href="#proof">Proof</a>
         <a href="#plane">Control plane</a>
+        <a href="author.html">Author</a>
         <a class="nav-cta" href="https://github.com/debsqui88/private-ai-infra">GitHub ↗</a>
       </nav>
     </div>
@@ -61,8 +62,8 @@
     <section class="wrap" aria-label="Project metrics" style="padding-top:1rem">
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="9">0</div><div class="lbl">enforced controls</div></div>
-        <div class="stat"><div class="num g" data-count="12">0</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="215">0</div><div class="lbl">tests passing</div></div>
+        <div class="stat"><div class="num g" data-count="15">0</div><div class="lbl">adversarial evals</div></div>
+        <div class="stat"><div class="num g" data-count="217">0</div><div class="lbl">tests passing</div></div>
         <div class="stat"><div class="num g" data-count="93" data-suffix="%">0</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl">known CVEs</div></div>
       </div>
@@ -124,6 +125,7 @@
         <div class="proof-row" role="row"><span class="ctrl" role="cell">Autonomy under-declare</span><span class="atk deny" role="cell">low level in header, high in body</span><span class="proven" role="cell">AUTONOMY-004</span></div>
         <div class="proof-row" role="row"><span class="ctrl" role="cell">Rate limiting</span><span class="atk deny" role="cell">one key saturates the gateway</span><span class="proven" role="cell">RATELIMIT-001</span></div>
         <div class="proof-row" role="row"><span class="ctrl" role="cell">Secret egress</span><span class="atk deny" role="cell">model surfaces an AWS key / JWT / PEM</span><span class="proven" role="cell">EGRESS-001…004</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Captured-model bound</span><span class="atk deny" role="cell">injection / context-poisoning hijacks the model itself</span><span class="proven" role="cell">AGENTIC-001…003 · ASI01/03/06</span></div>
         <div class="proof-row" role="row"><span class="ctrl" role="cell">Apply integrity</span><span class="atk deny" role="cell">an apply runs ungated or escapes its sandbox</span><span class="proven" role="cell">AC-APPLY-INTEGRITY</span></div>
       </div>
     </section>
@@ -182,6 +184,7 @@
         verified by an adversarial eval suite. Diagrams are Mermaid; this page is hand-authored, zero-build.
       </div>
       <nav aria-label="Footer">
+        <a href="author.html">About the author</a> ·
         <a href="https://github.com/debsqui88/private-ai-infra">GitHub</a> ·
         <a href="https://github.com/debsqui88/private-ai-infra/blob/main/docs/security-model.md">Security model</a> ·
         <a href="https://github.com/debsqui88/private-ai-infra/blob/main/docs/architecture.md">Architecture</a> ·

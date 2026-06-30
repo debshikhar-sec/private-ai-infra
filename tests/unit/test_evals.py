@@ -11,7 +11,7 @@ import json
 
 import pytest
 from evals import run as evalrun
-from evals.cases import ALL_CASES, EGRESS_CASES
+from evals.cases import AGENTIC_CASES, ALL_CASES, EGRESS_CASES
 from evals.harness import (
     FAIL,
     PASS,
@@ -79,6 +79,23 @@ def test_egress_probes_pass_against_real_guardrails():
     results = run_suite(EGRESS_CASES, ctx)
     assert results, "expected egress cases"
     assert all(r.status == PASS for r in results), [
+        (r.case.id, r.observation.note) for r in results if r.status != PASS
+    ]
+
+
+# --------------------------------------------------------------- agentic (OWASP ASI)
+def test_agentic_cases_wired_and_memory_poisoning_probe_holds():
+    from private_ai_gateway.guardrails import Guardrails
+
+    # the agentic threat-model group is part of the full attack catalogue
+    ids = {c.id for c in ALL_CASES}
+    assert {"AGENTIC-001", "AGENTIC-002", "AGENTIC-003"} <= ids
+
+    # the memory/context-poisoning exfil probe is egress-only, so it runs everywhere
+    # (incl. Linux CI): a captured model still cannot push a secret past the guardrail.
+    egress_agentic = [c for c in AGENTIC_CASES if not c.needs_gateway]
+    results = run_suite(egress_agentic, Context(guardrails=Guardrails("redact")))
+    assert results and all(r.status == PASS for r in results), [
         (r.case.id, r.observation.note) for r in results if r.status != PASS
     ]
 
