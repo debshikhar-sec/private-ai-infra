@@ -7,10 +7,12 @@ All notable changes to this project are documented here. Format based on
 ## [0.13.0] - 2026-06-30
 
 ### Changed
-- **Showcase site restructured** — the GitHub Pages root now serves the **author/profile**
-  page (`site/index.html`); the `private-ai-infra` project page moved to `project.html`.
-  All GitHub handles migrated `debsqui88` → `debshikhar-sec` (repo, Pages, badges, links,
-  résumé) after the account rename.
+- **This repo's Pages serves the project** at `debshikhar-sec.github.io/private-ai-infra/`
+  (`site/index.html` = the `private-ai-infra` showcase). The **author/profile is now a
+  standalone personal website** in the dedicated user-site repo
+  `debshikhar-sec.github.io` (served at the domain root); the project page's "Author" link
+  points out to it. All GitHub handles migrated `debsqui88` → `debshikhar-sec` (repo, Pages,
+  badges, links, résumé) after the account rename.
 
 ### Added
 - **Installable as a package** — `pip install .` registers a `private-ai-gateway` console
