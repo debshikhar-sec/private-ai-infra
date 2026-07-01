@@ -3,29 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Debshikhar Das — Security Engineer · DevSecOps & AI Security</title>
-  <meta name="description" content="Debshikhar Das — Security Engineer specializing in DevSecOps automation, AI/agentic security, AppSec, and threat modeling. MS Cybersecurity (Stevens). Currently securing AI-driven vulnerability workflows at BNP Paribas CIB." />
+  <title>private-ai-infra — AI capability is not AI authority</title>
+  <meta name="description" content="A local-first AI governance plane for Apple Silicon (MLX). Policy-as-code identity, an enforced autonomy ceiling, egress guardrails, and a structured decision audit — enforced in code and proven by adversarial evals." />
   <meta name="theme-color" content="#08090d" />
-  <meta property="og:title" content="Debshikhar Das — Security Engineer · DevSecOps & AI Security" />
-  <meta property="og:description" content="DevSecOps & AI-security engineer: policy-as-code enforcement, agentic-AI threat modeling, AppSec, and cloud security. Author of private-ai-infra." />
-  <meta property="og:type" content="profile" />
+  <meta property="og:title" content="private-ai-infra — AI capability is not AI authority" />
+  <meta property="og:description" content="A local-first AI governance plane: every model call mediated by policy-as-code, an enforced L0–L6 autonomy ceiling, and an independently re-verified audit." />
+  <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='.55' stop-color='%233b82f6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%230d0f14'/%3E%3Ccircle cx='16' cy='16' r='7' fill='url(%23g)'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="author.css" />
 </head>
 <body>
   <a class="sr-only" href="#main">Skip to content</a>
 
   <header class="nav">
     <div class="wrap">
-      <a class="brand" href="#top"><span class="dot" aria-hidden="true"></span> Debshikhar Das</a>
+      <a class="brand" href="#top"><span class="dot" aria-hidden="true"></span> private-ai-infra</a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#experience">Experience</a>
-        <a href="#skills">Skills</a>
-        <a href="#project">Project</a>
-        <a href="#education">Education</a>
-        <a class="nav-cta" href="project.html">The project ↗</a>
+        <a href="#demo">Demo</a>
+        <a href="#enforce">Enforcement</a>
+        <a href="#proof">Proof</a>
+        <a href="#plane">Control plane</a>
+        <a href="https://debshikhar-sec.github.io/profile.html">Author</a>
+        <a class="nav-cta" href="https://github.com/debshikhar-sec/private-ai-infra">GitHub ↗</a>
       </nav>
     </div>
   </header>
@@ -33,241 +33,145 @@
   <main id="main">
     <span id="top"></span>
 
-    <!-- ===================== IDENTITY HERO ===================== -->
-    <section class="wrap profile" aria-labelledby="who">
-      <div class="avatar">
-        <img class="avatar-photo" src="assets/profile.jpeg" alt="Debshikhar Das"
-             onerror="this.style.display='none'" />
-        <span class="monogram" aria-hidden="true">DD</span>
+    <!-- ===================== HERO ===================== -->
+    <section class="hero wrap" aria-labelledby="hero-h">
+      <span class="pill"><span class="live" aria-hidden="true"></span> local-first · Apple Silicon (MLX) · loopback-only</span>
+      <h1 id="hero-h">AI <span class="gradient-text">capability</span> is not AI <span class="nope">authority</span>.</h1>
+      <p class="lead">
+        A local-first AI governance plane. Every call to a local model is mediated by
+        <strong>policy-as-code identity</strong>, an enforced <strong>L0–L6 autonomy ceiling</strong>,
+        egress guardrails, and a structured decision audit — <em>enforced in code, before any model
+        loads</em>, not asserted in a README.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/debshikhar-sec/private-ai-infra">View on GitHub</a>
+        <a class="btn btn-ghost" href="#demo">▶ See it enforce</a>
       </div>
-      <div>
-        <h1 id="who">Debshikhar Das</h1>
-        <div class="role">Security Engineer<span class="sep">·</span>DevSecOps &amp; AI Security<span class="sep">·</span>AppSec</div>
-        <p class="tagline">
-          I build the <strong>enforcement layer</strong> around AI and software: policy-as-code that
-          decides what an identity is allowed to do, threat models that cite their own proof, and
-          DevSecOps pipelines that turn security telemetry into action. Three years scaling
-          enterprise vulnerability and AppSec programs — now focused on <strong>agentic-AI
-          security</strong>, where capability has badly outrun authority.
-        </p>
-        <div class="id-meta">
-          <span class="chip status"><span class="ic" aria-hidden="true"></span> Jersey City, NJ · open to senior AI-security roles</span>
-          <a class="chip" href="https://www.linkedin.com/in/debshikhar"><span class="ic" aria-hidden="true">in</span> LinkedIn</a>
-          <a class="chip" href="https://github.com/debshikhar-sec"><span class="ic" aria-hidden="true">⌥</span> GitHub</a>
-          <a class="chip" href="mailto:debshikhar.das@outlook.com"><span class="ic" aria-hidden="true">✉</span> debshikhar.das@outlook.com</a>
-          <a class="chip" href="tel:+19173616286"><span class="ic" aria-hidden="true">☎</span> 917.361.6286</a>
-          <a class="chip" href="assets/Debshikhar_Das_resume.pdf" download><span class="ic" aria-hidden="true">⤓</span> Résumé (PDF)</a>
-        </div>
+
+      <div class="term" role="img" aria-label="Terminal: a principal capped at L1 is denied HTTP 403 when it declares L6 autonomy.">
+        <div class="term-bar"><i></i><i></i><i></i><span>hermes — capped at autonomy L1 (suggest)</span></div>
+<pre><span class="c-cmt"># declares L6 (unbounded) — more autonomy than its mandate</span>
+<span class="c-prompt">❯</span> curl :8081/v1/chat/completions -H <span class="c-key">"$HERMES"</span> -H <span class="c-key">'X-Autonomy-Level: 6'</span> -d '{"model":"strategy"…}'
+{"error":{"code":<span class="c-deny">"autonomy_exceeded"</span>,"message":"Principal 'hermes' is capped
+ at autonomy L1 (suggest); request declared L6 (unbounded)"}}
+<span class="c-deny">→ HTTP 403</span>   <span class="c-cmt"># refused before the model ever loads · audited · re-verified</span></pre>
       </div>
     </section>
 
-    <!-- ===================== IMPACT METRICS ===================== -->
-    <section class="wrap" aria-label="Impact" style="padding-top:1rem">
-      <div class="stats metrics reveal">
-        <div class="stat metric"><div class="num g" data-count="60" data-suffix="%">0</div><div class="lbl">faster vuln remediation<br>(AI RAG agent, BNP Paribas)</div></div>
-        <div class="stat metric"><div class="num g" data-count="95" data-suffix="%">0</div><div class="lbl">SLA compliance on<br>critical vulnerabilities</div></div>
-        <div class="stat metric"><div class="num g" data-count="50" data-suffix="%">0</div><div class="lbl">less manual control<br>validation (DevSecOps, EY)</div></div>
-        <div class="stat metric"><div class="num g" data-count="3" data-suffix="+">0</div><div class="lbl">years in security<br>engineering &amp; consulting</div></div>
+    <!-- ===================== STATS ===================== -->
+    <section class="wrap" aria-label="Project metrics" style="padding-top:1rem">
+      <div class="stats reveal">
+        <div class="stat"><div class="num g" data-count="9">0</div><div class="lbl">enforced controls</div></div>
+        <div class="stat"><div class="num g" data-count="18">0</div><div class="lbl">adversarial evals</div></div>
+        <div class="stat"><div class="num g" data-count="232">0</div><div class="lbl">tests passing</div></div>
+        <div class="stat"><div class="num g" data-count="93" data-suffix="%">0</div><div class="lbl">coverage</div></div>
+        <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl">known CVEs</div></div>
       </div>
     </section>
 
-    <!-- ===================== EXPERIENCE ===================== -->
-    <section id="experience" class="wrap" aria-labelledby="exp-h">
+    <!-- ===================== LIVE DEMO ===================== -->
+    <section id="demo" class="wrap" aria-labelledby="demo-h">
       <div class="reveal">
-        <span class="eyebrow">Experience</span>
-        <h2 class="section-title" id="exp-h">Where I've shipped security</h2>
-        <p class="section-sub">From enterprise vulnerability management and AI remediation agents at a global
-          investment bank to threat modeling and CI/CD security at a Big Four consultancy.</p>
+        <span class="eyebrow">Live</span>
+        <h2 class="section-title" id="demo-h">Watch the boundary hold</h2>
+        <p class="section-sub">A principal capped at <strong>L1</strong> with models <code>["strategy"]</code> is
+          refused the instant it asks for more — autonomy it lacks, or a model it was never granted. Then OpenClaw,
+          an independent read-only verifier, re-derives that the controls held.</p>
       </div>
-
-      <div class="timeline reveal" style="margin-top:1.8rem">
-        <div class="tl-item current">
-          <div class="tl-card">
-            <div class="tl-head">
-              <span class="org">BNP Paribas CIB</span>
-              <span class="pos">DevSecOps Engineer · contract via Quanteam</span>
-              <span class="tl-when">Jul 2024 — Present</span>
-            </div>
-            <div class="tl-loc">Jersey City, NJ</div>
-            <ul>
-              <li>Designed and deployed an <b>AI-powered RAG agent</b> that vectorizes vulnerability data
-                (Nexpose, Tanium, and more) and lets remediation teams query insights in natural language —
-                dynamically pulling from APIs or generating SQL — improving response time and decision
-                accuracy by <b>~60%</b>.</li>
-              <li>Engineered automated pipelines integrating patch and vulnerability intelligence into the
-                bank's vulnerability, obsolescence &amp; patch-management platform, cutting manual triage by
-                <b>~30%</b>; built an <b>AI-driven remediation advisory engine</b> on top of it.</li>
-              <li>Integrated enriched Red Hat CVE intelligence (CVSS scoring, exploit indicators) for
-                risk-prioritized remediation, reaching <b>~95% SLA compliance</b> on critical vulnerabilities.</li>
-              <li>Stood up a real-time obsolescence tracker into OpenSearch for predictive end-of-life
-                detection, and laid the foundation for <b>agentic-AI adoption</b> in vulnerability workflows.</li>
-            </ul>
-            <div class="tl-tags">
-              <span class="tag">RAG / LangChain</span><span class="tag">Vector DBs</span><span class="tag">Agentic AI</span>
-              <span class="tag">Vulnerability Mgmt</span><span class="tag">OpenSearch</span><span class="tag">CVE / CVSS</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="tl-item">
-          <div class="tl-card">
-            <div class="tl-head">
-              <span class="org">Ernst &amp; Young</span>
-              <span class="pos">Cybersecurity Consultant — Staff 2</span>
-              <span class="tl-when">Oct 2022 — Jan 2024</span>
-            </div>
-            <div class="tl-loc">New York, NY</div>
-            <ul>
-              <li>Built CI/CD security infrastructure — tuned Jenkins pipelines with custom rulesets for
-                <b>SAST &amp; SCA</b> (SonarQube, Snyk), <b>DAST</b> (Checkmarx), container scans (Aqua), and
-                fuzzing (Burp Suite) across the SDLC.</li>
-              <li>Spearheaded a scalable <b>threat-modeling</b> process (STRIDE) that cut intake assessment
-                time by <b>25%</b>, and an automated toolchain that reduced manual control validation by
-                <b>50%</b>.</li>
-              <li>Containerized security testing (Docker → Kubernetes via YAML, provisioned with Terraform);
-                authored <b>SBoMs</b> and SOPs and hardened cloud security documentation.</li>
-              <li>Strengthened network segmentation (Guardicore), DMZ architecture, and AWS WAF / CloudFront /
-                Route 53 mitigations — measurably reducing security incidents.</li>
-            </ul>
-            <div class="tl-tags">
-              <span class="tag">Threat Modeling</span><span class="tag">SAST/DAST/SCA</span><span class="tag">CI/CD</span>
-              <span class="tag">Kubernetes</span><span class="tag">Terraform</span><span class="tag">AWS Security</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="tl-item">
-          <div class="tl-card">
-            <div class="tl-head">
-              <span class="org">SM Advisors</span>
-              <span class="pos">Cybersecurity Intern</span>
-              <span class="tl-when">Feb 2022 — May 2022</span>
-            </div>
-            <div class="tl-loc">West Hollywood, CA</div>
-            <ul>
-              <li>Cut anomaly detection time ~20% by analyzing how deployed updates impacted live operations;
-                helped deploy IDS/IPS, firewall rules, and log-analysis tooling to reduce intrusions.</li>
-            </ul>
-            <div class="tl-tags"><span class="tag">IDS/IPS</span><span class="tag">Cloud Security</span><span class="tag">Log Analysis</span></div>
-          </div>
-        </div>
-
-        <div class="tl-item">
-          <div class="tl-card">
-            <div class="tl-head">
-              <span class="org">Cisco Systems</span>
-              <span class="pos">Summer Research Intern</span>
-              <span class="tl-when">2018</span>
-            </div>
-            <div class="tl-loc">India</div>
-            <ul>
-              <li>Researched IoT / connected-vehicle threat vectors and prototyped a <b>zero-trust</b>
-                architecture to mitigate remote and MITM attack paths.</li>
-            </ul>
-            <div class="tl-tags"><span class="tag">Zero Trust</span><span class="tag">IoT Security</span><span class="tag">Threat Research</span></div>
-          </div>
-        </div>
+      <div class="demo-frame reveal" style="margin-top:1.5rem">
+        <img src="assets/enforce.gif" width="1320" height="820"
+             alt="Terminal recording: three curl requests as the hermes principal each return HTTP 403 (autonomy_exceeded, model_not_allowed, and an under-declared header/body), then OpenClaw reports verdict PASS for the autonomy-ceiling and model-authorization controls." loading="lazy" />
       </div>
     </section>
 
-    <!-- ===================== SKILLS ===================== -->
-    <section id="skills" class="wrap" aria-labelledby="sk-h">
+    <!-- ===================== ENFORCEMENT ===================== -->
+    <section id="enforce" class="wrap" aria-labelledby="enf-h">
       <div class="reveal">
-        <span class="eyebrow">Capabilities</span>
-        <h2 class="section-title" id="sk-h">What I work in</h2>
-        <p class="section-sub">Depth in DevSecOps and AppSec, sharpening toward AI/agentic security and the
-          identity-and-authority problems that come with it.</p>
+        <span class="eyebrow">Architecture</span>
+        <h2 class="section-title" id="enf-h">How it enforces</h2>
+        <p class="section-sub">Every request crosses a loopback boundary and runs a fixed gauntlet. Each gate fails
+          <strong>closed</strong> with a specific status — and authz, autonomy, and rate denials all happen
+          <em>before</em> the model loads, so an unauthorized request never pays for inference.</p>
       </div>
-      <div class="skill-grid reveal">
-        <div class="skill-cluster card">
-          <h3><span class="k">01</span> AI &amp; Agentic Security</h3>
-          <div class="pills"><span>OWASP LLM / Agentic Top 10</span><span>Prompt-injection defense</span><span>RAG security</span><span>LangChain / LangGraph</span><span>Vector DBs (Qdrant, Chroma)</span><span>Policy-as-code enforcement</span><span>Autonomy / authority gating</span></div>
+      <div class="diagram reveal" style="margin-top:1.5rem">
+        <div class="gauntlet" role="list" aria-label="Request enforcement pipeline">
+          <div class="gate boundary" role="listitem"><div class="gname">Loopback</div><div class="gsub">nginx :8081 · 127.0.0.1</div><span class="verdict ok">proxied</span></div>
+          <div class="gate" role="listitem"><div class="gname">Auth</div><div class="gsub">constant-time bearer</div><span class="verdict deny">401</span></div>
+          <div class="gate" role="listitem"><div class="gname">Identity</div><div class="gsub">token → principal</div><span class="verdict ok">resolved</span></div>
+          <div class="gate" role="listitem"><div class="gname">Model authz</div><div class="gsub">allowlist</div><span class="verdict deny">403</span></div>
+          <div class="gate" role="listitem"><div class="gname">Autonomy</div><div class="gsub">L0–L6 ceiling</div><span class="verdict deny">403</span></div>
+          <div class="gate" role="listitem"><div class="gname">Rate limit</div><div class="gsub">token bucket</div><span class="verdict deny">429</span></div>
+          <div class="gate" role="listitem"><div class="gname">Inference</div><div class="gsub">MLX · lazy load</div><span class="verdict ok">run</span></div>
+          <div class="gate" role="listitem"><div class="gname">Egress guard</div><div class="gsub">secret scan</div><span class="verdict deny">redact</span></div>
+          <div class="gate store" role="listitem"><div class="gname">Response</div><div class="gsub">sanitized</div><span class="verdict ok">200</span></div>
         </div>
-        <div class="skill-cluster card">
-          <h3><span class="k">02</span> DevSecOps &amp; CI/CD</h3>
-          <div class="pills"><span>Jenkins</span><span>GitHub Actions</span><span>SAST · SonarQube</span><span>SCA · Snyk</span><span>DAST · Checkmarx</span><span>Aqua</span><span>JFrog / Nexus</span><span>SBOM</span></div>
-        </div>
-        <div class="skill-cluster card">
-          <h3><span class="k">03</span> AppSec &amp; Threat Modeling</h3>
-          <div class="pills"><span>STRIDE</span><span>OWASP Top 10</span><span>IriusRisk</span><span>ThreatModeler</span><span>OWASP ZAP</span><span>Burp Suite</span><span>Secure SDLC</span></div>
-        </div>
-        <div class="skill-cluster card">
-          <h3><span class="k">04</span> Cloud &amp; Infrastructure</h3>
-          <div class="pills"><span>AWS (IAM, VPC, WAF, CloudTrail)</span><span>Docker</span><span>Kubernetes</span><span>Terraform</span><span>Ansible</span><span>OpenSearch</span><span>Zero Trust</span></div>
-        </div>
-        <div class="skill-cluster card">
-          <h3><span class="k">05</span> Languages &amp; Frameworks</h3>
-          <div class="pills"><span>Python</span><span>Java</span><span>Shell</span><span>FastAPI</span><span>Flask</span><span>NIST CSF / 800-53</span><span>SQL (PostgreSQL, Oracle)</span></div>
-        </div>
-        <div class="skill-cluster card">
-          <h3><span class="k">06</span> Vulnerability Management</h3>
-          <div class="pills"><span>Nexpose</span><span>Tanium</span><span>CVE / CVSS</span><span>Exploit intelligence</span><span>SLA-driven remediation</span><span>Obsolescence / EOL tracking</span></div>
-        </div>
+        <div class="audit-bar">↳ every allow / deny → <b>logs/decisions.jsonl</b> + Prometheus <b>/metrics</b> — authz, autonomy &amp; rate denials happen <b>before</b> the model loads</div>
       </div>
     </section>
 
-    <!-- ===================== FEATURED PROJECT ===================== -->
-    <section id="project" class="wrap" aria-labelledby="pr-h">
+    <!-- ===================== PROVEN ===================== -->
+    <section id="proof" class="wrap" aria-labelledby="proof-h">
       <div class="reveal">
-        <span class="eyebrow">Featured work</span>
-        <h2 class="section-title" id="pr-h"><span class="gradient-text">private-ai-infra</span> — an AI authority plane</h2>
-        <p class="section-sub">A local-first AI governance plane that enforces the thesis my day job keeps running
-          into: <em>AI capability is not AI authority.</em> Built end to end — gateway, policy engine, agent
-          control plane, adversarial evals, and CI.</p>
+        <span class="eyebrow">Proven, not asserted</span>
+        <h2 class="section-title" id="proof-h">Every control is <span class="gradient-text">attacked</span></h2>
+        <p class="section-sub">An adversarial eval suite (OWASP-LLM tagged) re-attacks each control and fails CI on
+          regression; an independent verifier re-derives that they held. Controls aren't claimed — they're proven.</p>
       </div>
-      <div class="feature reveal">
-        <div>
-          <h3>Enforced in code, proven by attack</h3>
-          <p>An OpenAI-compatible gateway mediates every call to a local model: policy-as-code identity,
-            per-principal model allowlists, an enforced <strong>L0–L6 autonomy ceiling</strong>, egress
-            guardrails, and a decision audit independently re-verified by a read-only assurance agent. A
-            15-case adversarial suite — including agentic probes mapped to the <strong>OWASP Top 10 for
-            Agentic Applications</strong> — re-attacks every control and fails CI on regression.</p>
-          <div class="cta-row" style="margin-top:1.4rem">
-            <a class="btn btn-primary" href="project.html">Explore the project</a>
-            <a class="btn btn-ghost" href="https://github.com/debshikhar-sec/private-ai-infra">Source on GitHub</a>
-          </div>
-        </div>
-        <div class="mini-term" role="img" aria-label="A principal capped at autonomy L1 is denied HTTP 403 when injected content tries to switch it to an ungranted model.">
-<pre><span class="c-cmt"># a captured model is told to switch to an ungranted model</span>
-<span class="c-prompt">❯</span> curl :8081/v1/chat/completions -d '{"model":"offsec"…}'
-{"error":{"code":<span class="c-deny">"model_not_allowed"</span>}}
-<span class="c-deny">→ HTTP 403</span>  <span class="c-cmt"># authority is decided off the prompt path</span></pre>
-        </div>
+      <div class="proof reveal" style="margin-top:1.5rem" role="table" aria-label="Controls, the attack each repels, and the eval or test that proves it">
+        <div class="proof-head" role="row"><span role="columnheader">Control</span><span role="columnheader">Attack it repels</span><span role="columnheader">Proven by</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Fail-closed auth</span><span class="atk deny" role="cell">unauthenticated / wrong token</span><span class="proven" role="cell">AUTHN-001/002</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Model authorization</span><span class="atk deny" role="cell">low-priv key reaches an ungranted model</span><span class="proven" role="cell">AUTHZ-001</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Autonomy ceiling</span><span class="atk deny" role="cell">agent declares more autonomy than its mandate</span><span class="proven" role="cell">AUTONOMY-001/002</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Autonomy under-declare</span><span class="atk deny" role="cell">low level in header, high in body</span><span class="proven" role="cell">AUTONOMY-004</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Rate limiting</span><span class="atk deny" role="cell">one key saturates the gateway</span><span class="proven" role="cell">RATELIMIT-001</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Secret egress</span><span class="atk deny" role="cell">model surfaces an AWS key / JWT / PEM</span><span class="proven" role="cell">EGRESS-001…004</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Captured-model bound</span><span class="atk deny" role="cell">injection / context-poisoning hijacks the model itself</span><span class="proven" role="cell">AGENTIC-001…003 · ASI01/03/06</span></div>
+        <div class="proof-row" role="row"><span class="ctrl" role="cell">Apply integrity</span><span class="atk deny" role="cell">an apply runs ungated or escapes its sandbox</span><span class="proven" role="cell">AC-APPLY-INTEGRITY</span></div>
       </div>
     </section>
 
-    <!-- ===================== EDUCATION ===================== -->
-    <section id="education" class="wrap" aria-labelledby="ed-h">
+    <!-- ===================== CONTROL PLANE ===================== -->
+    <section id="plane" class="wrap" aria-labelledby="plane-h">
       <div class="reveal">
-        <span class="eyebrow">Education</span>
-        <h2 class="section-title" id="ed-h">Foundations</h2>
+        <span class="eyebrow">Orchestration</span>
+        <h2 class="section-title" id="plane-h">Three agents, one closed loop</h2>
+        <p class="section-sub">Each component authenticates as its own principal with its own autonomy ceiling —
+          no shared "god" identity. A model may <em>reason</em> about anything; what <em>executes</em> is decided
+          and recorded by the governance plane.</p>
       </div>
-      <div class="edu reveal">
-        <div class="card">
-          <div class="deg">M.S. in Cybersecurity</div>
-          <div class="school">Stevens Institute of Technology — Hoboken, NJ</div>
-          <div class="yr">Jan 2021 — Aug 2022</div>
-        </div>
-        <div class="card">
-          <div class="deg">B.S. in Computer Science &amp; Engineering</div>
-          <div class="school">Amity University — Kolkata, India</div>
-          <div class="yr">Aug 2015 — Jun 2019</div>
-        </div>
+
+      <div class="diagram reveal" style="margin-top:1.5rem">
+        <img src="assets/diagram-plane.svg" alt="Control-plane loop: Hermes plans (L1) and delegates to OpenCode's gated apply; OpenCode's apply report and the adversarial eval report feed OpenClaw (L0 verify), whose PASS/FAIL verdict is recorded to Hermes memory, where a failing control gates the next plan." style="width:100%;height:auto" loading="lazy" />
+        <p class="caption">plan → act → verify → record → re-plan</p>
+      </div>
+
+      <div class="grid cols-3 reveal" style="margin-top:1.5rem">
+        <article class="card">
+          <h3>🧭 Hermes <span class="badge l1">L1 · suggest</span></h3>
+          <p>A stateful planner. Delegates one planning cycle to the gateway, records the plan to memory — and is denied <code>403</code> if it asks to operate above L1. Plans; never executes.</p>
+        </article>
+        <article class="card">
+          <h3>🛠️ OpenCode <span class="badge l3">L2 / L3</span></h3>
+          <p>Capability-denied reviewer (edit/bash/network off, isolation-verified) and an approval-gated apply path: refused without owner approval, confined to a copy, sha256-verified to touch only declared files.</p>
+        </article>
+        <article class="card">
+          <h3>🔍 OpenClaw <span class="badge l0">L0 · observe</span></h3>
+          <p>Read-only assurance. Reconciles the audit, metrics, isolation manifests, and policy across nine controls and emits a PASS/FAIL verdict — changing nothing, clearing nothing.</p>
+        </article>
       </div>
     </section>
 
-    <!-- ===================== CONTACT CTA ===================== -->
-    <section class="wrap" aria-labelledby="ct-h">
+    <!-- ===================== THREAT MODEL / CTA ===================== -->
+    <section class="wrap" aria-labelledby="tm-h">
       <div class="card reveal" style="text-align:center;padding:clamp(2rem,5vw,3.2rem)">
-        <span class="eyebrow" style="justify-content:center">Let's talk</span>
-        <h2 class="section-title" id="ct-h" style="margin-top:.6rem">Building secure AI systems — or breaking them first</h2>
-        <p class="section-sub" style="margin-inline:auto">Open to senior roles in AI / agentic security, DevSecOps, AppSec,
-          and security engineering. The fastest way to see how I think is the project above.</p>
+        <span class="eyebrow" style="justify-content:center">Defense in depth</span>
+        <h2 class="section-title" id="tm-h" style="margin-top:.6rem">A STRIDE threat model that can't drift</h2>
+        <p class="section-sub" style="margin-inline:auto">Every mitigation cites the executable proof — an eval ID or unit
+          test that runs in CI — so the threat model stays in lockstep with the code. Loopback → auth → authorization →
+          egress: an attacker must cross every ring, each failing closed and each logged.</p>
         <div class="cta-row" style="justify-content:center;margin-top:1.8rem">
-          <a class="btn btn-primary" href="mailto:debshikhar.das@outlook.com">Email me</a>
-          <a class="btn btn-ghost" href="assets/Debshikhar_Das_resume.pdf" download>Download résumé (PDF)</a>
-          <a class="btn btn-ghost" href="https://www.linkedin.com/in/debshikhar">Connect on LinkedIn</a>
+          <a class="btn btn-primary" href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/threat-model.md">Read the threat model</a>
+          <a class="btn btn-ghost" href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/orchestration.md">Orchestration design</a>
         </div>
       </div>
     </section>
@@ -276,14 +180,15 @@
   <footer class="footer">
     <div class="wrap">
       <div class="built">
-        Debshikhar Das — Security Engineer · DevSecOps &amp; AI Security. This page is hand-authored,
-        zero-build, and lives alongside the project it showcases.
+        Built as a local-first DevSecOps lab — Flask + nginx + MLX, governed by policy-as-code,
+        verified by an adversarial eval suite. Diagrams are Mermaid; this page is hand-authored, zero-build.
       </div>
       <nav aria-label="Footer">
-        <a href="project.html">The project</a> ·
-        <a href="https://github.com/debshikhar-sec">GitHub</a> ·
-        <a href="https://www.linkedin.com/in/debshikhar">LinkedIn</a> ·
-        <a href="mailto:debshikhar.das@outlook.com">Email</a>
+        <a href="https://debshikhar-sec.github.io/profile.html">About the author</a> ·
+        <a href="https://github.com/debshikhar-sec/private-ai-infra">GitHub</a> ·
+        <a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/security-model.md">Security model</a> ·
+        <a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/architecture.md">Architecture</a> ·
+        <a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/LICENSE">MIT © <span id="year">2026</span></a>
       </nav>
     </div>
   </footer>

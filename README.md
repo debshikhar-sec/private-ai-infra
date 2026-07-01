@@ -1,7 +1,7 @@
 # Private AI Gateway
 
 <!-- If the GitHub slug differs from debshikhar-sec/private-ai-infra, update it in the badge URLs below. -->
-[![Live demo](https://img.shields.io/website?url=https%3A%2F%2Fdebshikhar-sec.github.io%2Fprivate-ai-infra%2F&up_message=online&up_color=8b5cf6&down_message=offline&label=live%20demo)](https://debshikhar-sec.github.io/private-ai-infra/project.html)
+[![Live demo](https://img.shields.io/website?url=https%3A%2F%2Fdebshikhar-sec.github.io%2Fprivate-ai-infra%2F&up_message=online&up_color=8b5cf6&down_message=offline&label=live%20demo)](https://debshikhar-sec.github.io/private-ai-infra/)
 [![CI](https://github.com/debshikhar-sec/private-ai-infra/actions/workflows/ci.yml/badge.svg)](https://github.com/debshikhar-sec/private-ai-infra/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/debshikhar-sec/private-ai-infra/actions/workflows/codeql.yml/badge.svg)](https://github.com/debshikhar-sec/private-ai-infra/actions/workflows/codeql.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
