@@ -4,6 +4,29 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-07-01
+
+### Added
+- **Governance Console** — a zero-dependency, single-file web UI served by the gateway at
+  `GET /console`. The shell is static and carries no data: the operator pastes a bearer
+  token into the page and the console shows that principal's world — identity + enforced
+  autonomy ladder (`/v1/whoami`), a live decision-audit feed (`/v1/decisions`), enforcement
+  metrics (`/metrics`), granted MCP tools, the policy-derived A2A agent card, and a
+  "governed probe" panel that sends a chat request with a declared autonomy level so
+  denials (`403 model_not_allowed` / `autonomy_exceeded`) are visible on the wire. Pinned
+  by a strict `Content-Security-Policy` (`default-src 'none'`, same-origin API calls only).
+  Works out of the box after `pip install` + `private-ai-gateway serve`.
+- **`GET /v1/decisions` — governed audit tail.** Returns the newest decision-audit events
+  (bounded read, `limit` clamped to 500, torn/malformed lines tolerated). Reading the
+  audit is its own policy grant — a new per-principal `can_read_audit` flag (deny by
+  default; the owner break-glass identity has it) — because the audit reveals every
+  principal's allow/deny history. Denied reads are themselves audited and counted
+  (`gateway_authz_denials_total{reason="audit_not_allowed"}`). Proven by eval `AUDIT-001`.
+
+### Changed
+- Eval suite grows to 19 cases (`AUDIT-001`: low-privilege principal tails the audit →
+  `403 audit_not_allowed`).
+
 ## [0.13.0] - 2026-06-30
 
 ### Changed

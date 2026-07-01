@@ -335,6 +335,21 @@ MCP_CASES = [
     ),
 ]
 
+# === Decision-audit access — watching the watchers is a governed action =========
+# The audit tail reveals every principal's allow/deny history, so /v1/decisions is its
+# own policy grant (can_read_audit), not a perk of holding any valid key.
+AUDIT_CASES = [
+    EvalCase(
+        id="AUDIT-001",
+        category="audit_access",
+        owasp="ASI03 Identity and Privilege Abuse",
+        attack="low-privilege principal tails the decision audit via /v1/decisions",
+        expectation="403 audit_not_allowed — audit read access is an explicit grant",
+        run=lambda ctx: ctx.request("GET", "/v1/decisions?limit=10", token=ANALYST.token),
+        check=_denied("audit_not_allowed"),
+    ),
+]
+
 ALL_CASES = (
     AUTONOMY_CASES
     + AUTHZ_CASES
@@ -344,4 +359,5 @@ ALL_CASES = (
     + AGENTIC_CASES
     + A2A_CASES
     + MCP_CASES
+    + AUDIT_CASES
 )

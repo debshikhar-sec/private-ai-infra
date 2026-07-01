@@ -50,3 +50,39 @@ class DecisionLog:
         except OSError:
             # Never let audit-logging failure break the request path.
             pass
+
+    def tail(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return up to ``limit`` most-recent decisions, newest first.
+
+        Reads only the end of the file (bounded, so a large audit history cannot
+        be used to stall the gateway) and skips lines that fail to parse — the
+        reader must tolerate a torn final line from a concurrent append.
+        """
+        limit = max(1, min(int(limit), 500))
+        try:
+            with open(self._path, "rb") as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                # Generous per-line budget; decisions are ~200 bytes each.
+                window = min(size, limit * 1024)
+                fh.seek(size - window)
+                chunk = fh.read(window)
+        except OSError:
+            return []
+
+        lines = chunk.split(b"\n")
+        if window < size and lines:
+            lines = lines[1:]  # first line may be torn by the window boundary
+
+        events: list[dict[str, Any]] = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        return list(reversed(events[-limit:]))

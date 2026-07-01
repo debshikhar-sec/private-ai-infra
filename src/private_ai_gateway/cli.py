@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 
-__version__ = "0.13.0"
+__version__ = "0.14.0"
 
 
 def _serve(args: argparse.Namespace) -> int:
