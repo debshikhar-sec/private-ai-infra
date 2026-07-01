@@ -24,6 +24,8 @@ max_autonomy_level = "L1"   # suggest only — may propose, may not drive execut
 # A2A skills this principal may be delegated; MCP tools it may call.
 allowed_skills = ["plan.summarize"]
 allowed_tools = ["clock.now", "text.wordcount"]   # read-only (L0) tools only
+# can_read_audit = true   # grant GET /v1/decisions (the allow/deny history of EVERY
+                          # principal) — deny by default; the owner token always has it.
 
 [[principals]]
 name = "offsec-lead"

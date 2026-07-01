@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Governance Console — private-ai-gateway</title>
+<style>
+  :root {
+    --bg: #08090d; --panel: #0e1117; --line: #1c2230; --text: #dbe2ee; --dim: #7c8598;
+    --accent: #6d9cff; --allow: #34d399; --deny: #f87171; --filter: #fbbf24;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: .75rem; padding: .9rem 1.4rem;
+           border-bottom: 1px solid var(--line); }
+  header .dot { width: 10px; height: 10px; border-radius: 50%;
+                background: linear-gradient(135deg, #8b5cf6, #3b82f6, #22d3ee); }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+  header .sub { color: var(--dim); font-size: .8rem; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 1rem; padding: 1rem 1.4rem;
+         max-width: 1400px; margin-inline: auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 1rem; }
+  .card h2 { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase;
+             color: var(--dim); margin: 0 0 .7rem; }
+  label { display: block; font-size: .75rem; color: var(--dim); margin: .6rem 0 .25rem; }
+  input, select, textarea, button {
+    width: 100%; background: #0a0d13; color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: .5rem .65rem; font: inherit;
+  }
+  textarea { font-family: var(--mono); font-size: .8rem; resize: vertical; }
+  button { cursor: pointer; background: #14213d; border-color: #27406e; font-weight: 600; }
+  button:hover { background: #1a2b50; }
+  button.ghost { background: transparent; border-color: var(--line); font-weight: 400; }
+  .row { display: flex; gap: .5rem; }
+  .row > * { flex: 1; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: .15rem .8rem;
+        font-family: var(--mono); font-size: .78rem; }
+  .kv dt { color: var(--dim); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .ladder { display: flex; gap: 3px; margin-top: .5rem; }
+  .ladder span { flex: 1; text-align: center; font-family: var(--mono); font-size: .68rem;
+                 padding: .25rem 0; border-radius: 4px; background: #10141c; color: var(--dim);
+                 border: 1px solid var(--line); }
+  .ladder span.on { background: #12321f; color: var(--allow); border-color: #1f5c39; }
+  .ladder span.cap { outline: 1px solid var(--allow); }
+  .feed { font-family: var(--mono); font-size: .74rem; max-height: 420px; overflow-y: auto; }
+  .feed .ev { display: grid; grid-template-columns: 62px 56px 1fr auto; gap: .6rem;
+              padding: .3rem .4rem; border-bottom: 1px solid #12161f; align-items: baseline; }
+  .feed .ev:first-child { animation: flash .8s ease-out; }
+  @keyframes flash { from { background: #14213d; } to { background: transparent; } }
+  .pill { font-weight: 700; text-transform: uppercase; font-size: .66rem; }
+  .allow { color: var(--allow); } .deny { color: var(--deny); } .filter { color: var(--filter); }
+  .dimtx { color: var(--dim); }
+  .out { font-family: var(--mono); font-size: .76rem; white-space: pre-wrap;
+         background: #0a0d13; border: 1px solid var(--line); border-radius: 7px;
+         padding: .6rem; margin-top: .6rem; max-height: 260px; overflow-y: auto; }
+  .status-line { font-size: .74rem; color: var(--dim); margin-top: .5rem; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+  .metric-rows { font-family: var(--mono); font-size: .74rem; }
+  .metric-rows div { display: flex; justify-content: space-between; gap: 1rem;
+                     padding: .18rem 0; border-bottom: 1px solid #12161f; }
+  .stack { display: flex; flex-direction: column; gap: 1rem; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot"></span>
+  <h1>Governance Console</h1>
+  <span class="sub">private-ai-gateway — capability is not authority</span>
+</header>
+
+<main>
+  <div class="stack">
+    <section class="card" aria-labelledby="id-h">
+      <h2 id="id-h">Identity</h2>
+      <label for="token">Bearer token (kept in this tab only)</label>
+      <input id="token" type="password" placeholder="paste an API key…" autocomplete="off" />
+      <div class="row" style="margin-top:.6rem">
+        <button id="connect">Connect</button>
+        <button id="disconnect" class="ghost">Clear</button>
+      </div>
+      <div id="who" class="hidden" style="margin-top: .8rem">
+        <dl class="kv">
+          <dt>principal</dt><dd id="w-principal">—</dd>
+          <dt>models</dt><dd id="w-models">—</dd>
+          <dt>rpm cap</dt><dd id="w-rpm">—</dd>
+          <dt>token cap</dt><dd id="w-cap">—</dd>
+          <dt>ceiling</dt><dd id="w-ceiling">—</dd>
+        </dl>
+        <div class="ladder" id="ladder" title="Autonomy ladder — enforced ceiling"></div>
+      </div>
+      <div class="status-line" id="id-status">Not connected.</div>
+    </section>
+
+    <section class="card">
+      <h2>Governed probe</h2>
+      <label for="p-model">Model alias</label>
+      <input id="p-model" value="strategy" />
+      <label for="p-level">Declared autonomy level</label>
+      <select id="p-level">
+        <option value="">(none declared)</option>
+        <option>0</option><option>1</option><option>2</option><option>3</option>
+        <option>4</option><option>5</option><option>6</option>
+      </select>
+      <label for="p-msg">Message</label>
+      <textarea id="p-msg" rows="3">Reply with one short sentence.</textarea>
+      <div class="row" style="margin-top:.6rem">
+        <button id="p-send">Send through the plane</button>
+      </div>
+      <div class="out hidden" id="p-out"></div>
+    </section>
+
+    <section class="card">
+      <h2>Granted tools (MCP)</h2>
+      <div class="metric-rows" id="tools">—</div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <h2>Decision audit — live <span class="dimtx" id="feed-state"></span></h2>
+      <div class="feed" id="feed"><div class="dimtx">Connect to stream decisions.</div></div>
+    </section>
+    <div class="grid2">
+      <section class="card">
+        <h2>Enforcement metrics</h2>
+        <div class="metric-rows" id="mx">—</div>
+      </section>
+      <section class="card">
+        <h2>Agent card (A2A)</h2>
+        <div class="out" id="cardout" style="margin-top:0">—</div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  let token = "";
+  let pollTimer = null;
+  let lastSeen = "";
+
+  const api = async (path, opts = {}) => {
+    const res = await fetch(path, {
+      ...opts,
+      headers: { "Authorization": "Bearer " + token,
+                 "Content-Type": "application/json", ...(opts.headers || {}) },
+    });
+    const text = await res.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = text; }
+    return { ok: res.ok, status: res.status, body };
+  };
+
+  const renderLadder = (ceiling) => {
+    const names = ["L0","L1","L2","L3","L4","L5","L6"];
+    $("ladder").innerHTML = names.map((n, i) => {
+      const cls = (ceiling !== null && i <= ceiling) ? "on" + (i === ceiling ? " cap" : "") : "";
+      return `<span class="${cls}">${n}</span>`;
+    }).join("");
+  };
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+    (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+  const renderFeed = (events) => {
+    if (!events.length) { $("feed").innerHTML = '<div class="dimtx">No decisions yet.</div>'; return; }
+    const newest = JSON.stringify(events[0]);
+    if (newest === lastSeen) return;
+    lastSeen = newest;
+    $("feed").innerHTML = events.map((e) => `
+      <div class="ev">
+        <span class="dimtx">${esc((e.ts || "").slice(11, 19))}</span>
+        <span class="pill ${esc(e.decision)}">${esc(e.decision)}</span>
+        <span>${esc(e.principal ?? "anonymous")} ${esc(e.method)} ${esc(e.path)}${e.model ? " · " + esc(e.model) : ""}<br>
+              <span class="dimtx">${esc(e.reason)}</span></span>
+        <span class="dimtx">${esc(e.status)}</span>
+      </div>`).join("");
+  };
+
+  const refreshDecisions = async () => {
+    const r = await api("/v1/decisions?limit=60");
+    if (r.ok) { renderFeed(r.body.decisions || []); $("feed-state").textContent = "· streaming"; }
+    else if (r.status === 403) {
+      $("feed").innerHTML = '<div class="dimtx">403 — this principal is not granted the decision audit (can_read_audit). The plane is governing you right now.</div>';
+      $("feed-state").textContent = "· denied";
+    }
+  };
+
+  const refreshMetrics = async () => {
+    const r = await fetch("/metrics", { headers: { "Authorization": "Bearer " + token } });
+    if (!r.ok) { $("mx").innerHTML = '<div class="dimtx">' + r.status + " — metrics denied</div>"; return; }
+    const text = await r.text();
+    const rows = text.split("\n")
+      .filter((l) => l && !l.startsWith("#"))
+      .map((l) => {
+        const sp = l.lastIndexOf(" ");
+        return `<div><span>${esc(l.slice(0, sp))}</span><span>${esc(l.slice(sp + 1))}</span></div>`;
+      }).join("");
+    $("mx").innerHTML = rows || '<div class="dimtx">no samples yet</div>';
+  };
+
+  const refreshTools = async () => {
+    const r = await api("/mcp/tools");
+    if (!r.ok) { $("tools").innerHTML = '<div class="dimtx">denied</div>'; return; }
+    const tools = r.body.tools || [];
+    $("tools").innerHTML = tools.length
+      ? tools.map((t) => `<div><span>${esc(t.name)}</span><span class="dimtx">≥ L${esc(t.min_autonomy_level ?? t.min_level ?? 0)}</span></div>`).join("")
+      : '<div class="dimtx">none granted</div>';
+  };
+
+  const refreshCard = async () => {
+    const r = await api("/.well-known/agent-card.json");
+    $("cardout").textContent = r.ok ? JSON.stringify(r.body, null, 2) : r.status + " — denied";
+  };
+
+  const connect = async () => {
+    token = $("token").value.trim();
+    if (!token) { $("id-status").textContent = "Paste a token first."; return; }
+    const r = await api("/v1/whoami");
+    if (!r.ok) {
+      $("id-status").textContent = r.status + " — " + (r.body?.error?.message || "unauthorized");
+      $("who").classList.add("hidden");
+      return;
+    }
+    const w = r.body;
+    $("w-principal").textContent = w.principal;
+    $("w-models").textContent = (w.allowed_models || []).join(", ") || "(none)";
+    $("w-rpm").textContent = w.requests_per_minute ?? "unlimited";
+    $("w-cap").textContent = w.max_output_tokens ?? "unlimited";
+    $("w-ceiling").textContent = w.max_autonomy_level === null || w.max_autonomy_level === undefined
+      ? "none configured" : "L" + w.max_autonomy_level + " — " + w.max_autonomy_name;
+    renderLadder(w.max_autonomy_level ?? null);
+    $("who").classList.remove("hidden");
+    $("id-status").textContent = "Connected as '" + w.principal + "'.";
+    refreshDecisions(); refreshMetrics(); refreshTools(); refreshCard();
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => { refreshDecisions(); refreshMetrics(); }, 2500);
+  };
+
+  const disconnect = () => {
+    token = ""; $("token").value = ""; lastSeen = "";
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    $("who").classList.add("hidden");
+    $("id-status").textContent = "Not connected.";
+    $("feed").innerHTML = '<div class="dimtx">Connect to stream decisions.</div>';
+    $("feed-state").textContent = "";
+    $("mx").textContent = "—"; $("tools").textContent = "—"; $("cardout").textContent = "—";
+  };
+
+  const probe = async () => {
+    const payload = {
+      model: $("p-model").value.trim() || "strategy",
+      messages: [{ role: "user", content: $("p-msg").value }],
+      max_tokens: 200,
+    };
+    const level = $("p-level").value;
+    if (level !== "") payload.autonomy_level = Number(level);
+    $("p-out").classList.remove("hidden");
+    $("p-out").textContent = "→ POST /v1/chat/completions …";
+    const r = await api("/v1/chat/completions", { method: "POST", body: JSON.stringify(payload) });
+    if (r.ok) {
+      const msg = r.body?.choices?.[0]?.message?.content ?? JSON.stringify(r.body);
+      $("p-out").textContent = "HTTP 200 — allowed\n\n" + msg;
+    } else {
+      const err = r.body?.error || {};
+      $("p-out").textContent =
+        "HTTP " + r.status + " — " + (err.code || "error") + "\n\n" + (err.message || "");
+    }
+    refreshDecisions(); refreshMetrics();
+  };
+
+  $("connect").addEventListener("click", connect);
+  $("disconnect").addEventListener("click", disconnect);
+  $("p-send").addEventListener("click", probe);
+  $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
+})();
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ Client -> Nginx -> Flask -> MLX
 
 import gc
 import hmac
+import importlib.resources
 import json
 import logging
 import os
@@ -81,6 +82,7 @@ OWNER_PRINCIPAL = Principal(
     max_autonomy_level=autonomy.MAX_LEVEL,
     allowed_skills=frozenset({"*"}),
     allowed_tools=frozenset({"*"}),
+    can_read_audit=True,
 )
 
 
@@ -411,8 +413,10 @@ def authenticate_request():
     g.request_id = uuid.uuid4().hex
     g.principal = None
 
-    # Allow health only without auth.
-    if request.path in ("/health", "/v1/health"):
+    # Allow health and the console *shell* without auth. The console HTML carries no
+    # data — every API call it makes presents a bearer token the operator pastes in,
+    # so serving the static page is no more sensitive than serving /health.
+    if request.path in ("/health", "/v1/health", "/console"):
         return None
 
     header = request.headers.get("Authorization", "")
@@ -557,6 +561,59 @@ def whoami():
 def metrics():
     """Prometheus text-format metrics (requires auth; safe to scrape with a token)."""
     return Response(METRICS.render(), mimetype="text/plain; version=0.0.4")
+
+
+@app.route("/v1/decisions", methods=["GET"])
+def decisions():
+    """Tail the decision audit (who was allowed/denied what, and why).
+
+    The audit reveals every principal's allow/deny history, so reading it is its own
+    policy grant (``can_read_audit``) rather than something any authenticated caller
+    gets for free. Denials are themselves recorded — watching the watchers is also a
+    governed action.
+    """
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    if not principal.can_read_audit:
+        METRICS.inc("gateway_authz_denials_total", {"reason": "audit_not_allowed"})
+        METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "deny"})
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny", reason="audit_not_allowed", status=403,
+        )
+        return jsonify(
+            {"error": {"message": (
+                f"Principal '{principal.name}' is not granted access to the decision audit"),
+                "type": "permission_error", "code": "audit_not_allowed"}}
+        ), 403
+
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    events = DECISION_LOG.tail(limit)
+    return jsonify({"decisions": events, "count": len(events)})
+
+
+@app.route("/console", methods=["GET"])
+def console():
+    """Serve the Governance Console — a single-file, zero-dependency web UI.
+
+    The shell is static and holds no data: the operator pastes a bearer token into the
+    page, and everything it shows (whoami, decisions, metrics, tools, chat probes) is
+    fetched from the governed API with that token. A strict CSP pins the page to
+    same-origin API calls and inline assets only — no external scripts, no images,
+    no frames.
+    """
+    html = importlib.resources.files("private_ai_gateway").joinpath(
+        "static/console.html"
+    ).read_text(encoding="utf-8")
+    response = Response(html, mimetype="text/html")
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+        "connect-src 'self'; base-uri 'none'; form-action 'none'"
+    )
+    return response
 
 
 # -----------------------------

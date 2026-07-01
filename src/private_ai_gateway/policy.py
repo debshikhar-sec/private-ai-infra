@@ -40,6 +40,9 @@ class Principal:
     # allowlist-with-wildcard model as ``allowed_models``. Empty means "none granted".
     allowed_skills: frozenset[str] = frozenset()
     allowed_tools: frozenset[str] = frozenset()
+    # Governance-plane introspection: reading the decision audit reveals every
+    # principal's allow/deny history, so it is its own grant — deny by default.
+    can_read_audit: bool = False
 
     def may_use(self, alias: str) -> bool:
         """True if this principal may call the given model alias."""
@@ -111,6 +114,7 @@ class Policy:
                     max_autonomy_level=autonomy_mod.parse_level(autonomy),
                     allowed_skills=frozenset(entry.get("allowed_skills", [])),
                     allowed_tools=frozenset(entry.get("allowed_tools", [])),
+                    can_read_audit=bool(entry.get("can_read_audit", False)),
                 )
             except (KeyError, TypeError, ValueError):
                 continue

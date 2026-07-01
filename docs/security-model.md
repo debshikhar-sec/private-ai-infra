@@ -92,6 +92,13 @@ This gateway targets a focused subset rather than claiming broad coverage:
   key cannot saturate the single-process gateway.
 - **Unbounded autonomy** — there is no agent loop in the gateway; the operator runs
   deterministic commands.
+- **Audit confidentiality (ASI03 Identity and Privilege Abuse)** — the decision audit
+  reveals every principal's allow/deny history, so reading it (`GET /v1/decisions`) is its
+  own policy grant: `can_read_audit`, deny by default. A denied read is itself audited and
+  counted — watching the watchers is a governed action. The Governance Console (`/console`)
+  is a static, data-free shell pinned by a strict CSP (`default-src 'none'`, same-origin
+  `connect-src` only); it holds no credential and displays only what the pasted token is
+  authorized to fetch.
 
 ## MITRE ATLAS technique coverage
 

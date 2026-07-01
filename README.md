@@ -106,6 +106,7 @@ Each row is a control, the attack against it, and where that attack is proven to
 | **Captured-model bound** | injection / context-poisoning hijacks the model itself | authority decided **off the prompt path** | `evals` **AGENTIC-001/002/003** — OWASP Agentic ASI01/03/06 |
 | **A2A delegation** | an agent is handed a skill / autonomy beyond its mandate | `/a2a/tasks` → `403` skill_not_allowed / autonomy_exceeded | `evals` **A2A-001/002** — OWASP Agentic ASI03/07 |
 | **MCP tool access** | a principal invokes an ungranted or over-privileged tool | `/mcp/call` → `403` tool_not_allowed / autonomy_exceeded | `evals` **MCP-001** — OWASP Agentic ASI02 |
+| **Audit read access** | a low-priv key tails every principal's allow/deny history | `/v1/decisions` → `403` audit_not_allowed (`can_read_audit` grant) | `evals` **AUDIT-001** — OWASP Agentic ASI03 |
 | Apply integrity | an apply runs ungated or escapes its sandbox | `opencode_sandbox/apply.py` | OpenClaw `AC-APPLY-INTEGRITY` · `test_opencode_act` |
 
 → Run the attacks yourself: `make evals` · Re-verify the controls: `make` + see [docs/threat-model.md](docs/threat-model.md).
@@ -181,6 +182,12 @@ pip install .                      # Apple Silicon / MLX; installs the console c
 export PRIVATE_AI_AUTH_TOKEN=...    # fail-closed: required to serve
 private-ai-gateway serve            # Flask on 127.0.0.1:8080
 ```
+
+Then open **http://127.0.0.1:8080/console** — the built-in **Governance Console**. Paste a
+bearer token and watch the plane work: your identity and enforced autonomy ladder, a live
+decision-audit feed, enforcement metrics, granted tools, your policy-derived agent card,
+and a probe panel that shows 403 denials on the wire. (The page is a static, data-free
+shell under a strict CSP; every byte it displays is fetched with the token you paste.)
 
 **Or the hardened loopback stack (Flask behind the nginx boundary):**
 
