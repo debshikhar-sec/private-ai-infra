@@ -1,3 +1,3 @@
-"""Private AI Gateway — local-first AI governance plane over an OpenAI-compatible MLX gateway."""
+"""Private AI Gateway — a model-plane-agnostic AI governance gateway (OpenAI-compatible)."""
 
-__version__ = "0.9.0"
+__version__ = "0.15.0"

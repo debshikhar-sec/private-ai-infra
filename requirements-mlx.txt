@@ -1,0 +1,3 @@
+# Optional MLX backend (Apple Silicon only) — equivalent to `pip install .[mlx]`.
+mlx==0.31.2
+mlx-lm==0.31.3

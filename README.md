@@ -9,10 +9,12 @@
 
 > ## AI capability is not AI authority.
 >
-> A **local-first AI governance plane** for Apple Silicon (MLX): an OpenAI-compatible
-> gateway that mediates every call to a local model — **policy-as-code identity, model
-> authorization, an enforced L0–L6 autonomy ceiling, egress guardrails, and a structured
-> decision audit**, behind an nginx loopback boundary.
+> A **model-plane-agnostic AI governance gateway**: OpenAI-compatible on both sides, it
+> sits in front of **whatever serves your models** — an enterprise LLM-as-a-Service
+> platform, vLLM/TGI/Ollama/LM Studio, or in-process Apple Silicon MLX — and enforces
+> **policy-as-code identity, model authorization, an enforced L0–L6 autonomy ceiling,
+> per-tool and per-skill grants (MCP/A2A), egress guardrails, and a structured decision
+> audit** before any token is generated.
 >
 > A leaked low-privilege key can't reach a model it was never granted; an agent capped at
 > *suggest* can't be handed work that *executes*. Enforced in code, **before any model
@@ -51,7 +53,7 @@ flowchart TB
       A3{"Model in<br/>allowlist?"}
       A4{"Autonomy ≤<br/>principal ceiling?"}
       A5{"Within rate<br/>budget?"}
-      INF["MLX inference<br/><sub>lazy model load</sub>"]
+      INF["Inference backend<br/><sub>MLX · OpenAI-compatible upstream · demo</sub>"]
       G{"Secret-shaped<br/>output?"}
       OUT["Response"]
 
@@ -105,7 +107,7 @@ Each row is a control, the attack against it, and where that attack is proven to
 | Secret egress | model surfaces an AWS key / JWT / PEM | `guardrails.py` redact/block | `evals` EGRESS-001…004 · `test_guardrails` |
 | **Captured-model bound** | injection / context-poisoning hijacks the model itself | authority decided **off the prompt path** | `evals` **AGENTIC-001/002/003** — OWASP Agentic ASI01/03/06 |
 | **A2A delegation** | an agent is handed a skill / autonomy beyond its mandate | `/a2a/tasks` → `403` skill_not_allowed / autonomy_exceeded | `evals` **A2A-001/002** — OWASP Agentic ASI03/07 |
-| **MCP tool access** | a principal invokes an ungranted or over-privileged tool | `/mcp/call` → `403` tool_not_allowed / autonomy_exceeded | `evals` **MCP-001** — OWASP Agentic ASI02 |
+| **MCP tool access** | a principal invokes an ungranted or over-privileged tool | `/mcp/call` → `403` tool_not_allowed / autonomy_exceeded | `evals` **MCP-001/002** — OWASP Agentic ASI02 (incl. *granted-but-floor-gated* `payments.initiate`) |
 | **Audit read access** | a low-priv key tails every principal's allow/deny history | `/v1/decisions` → `403` audit_not_allowed (`can_read_audit` grant) | `evals` **AUDIT-001** — OWASP Agentic ASI03 |
 | Apply integrity | an apply runs ungated or escapes its sandbox | `opencode_sandbox/apply.py` | OpenClaw `AC-APPLY-INTEGRITY` · `test_opencode_act` |
 
@@ -174,20 +176,47 @@ The denials land in `logs/decisions.jsonl` and `/metrics`; OpenClaw then reconci
 
 ## Quickstart
 
-**Install and run (loopback, no nginx):**
+**Try it in 60 seconds — any machine, no model, no network (starter kit):**
 
 ```bash
 python -m venv venv && source venv/bin/activate
-pip install .                      # Apple Silicon / MLX; installs the console command
-export PRIVATE_AI_AUTH_TOKEN=...    # fail-closed: required to serve
+pip install .                       # platform-agnostic; installs the console command
+private-ai-gateway demo             # demo policy + scripted governed traffic + console
+```
+
+The demo loads a simulated financial-enterprise cast of agent principals
+(research-copilot, kyc-screening-agent, a suggest-only trading-assistant, an
+ops-automation agent, an auditor), replays a scripted day of traffic through the **real
+enforcement code** — model denials, autonomy-ceiling refusals, a granted-but-floor-gated
+payments tool, A2A delegation, a live guardrail redaction — and prints the demo tokens.
+Then open **http://127.0.0.1:8080/console** and explore what just happened.
+
+**Point it at the model plane you already have (any OpenAI-compatible endpoint):**
+
+```bash
+export PRIVATE_AI_AUTH_TOKEN=...                        # fail-closed: required to serve
+export PRIVATE_AI_UPSTREAM_API_KEY=...                  # upstream credential (if any)
+private-ai-gateway serve --backend openai \
+  --upstream-base-url http://127.0.0.1:11434/v1         # Ollama, vLLM, TGI, LLMaaS, …
+```
+
+Model aliases stay stable while the plane changes: map them in `config/policy.toml`
+under `[models.routes]` (e.g. `strategy = "mistral-large-latest"`).
+
+**Or fully local, in-process on Apple Silicon:**
+
+```bash
+pip install .[mlx]
+export PRIVATE_AI_AUTH_TOKEN=...
 private-ai-gateway serve            # Flask on 127.0.0.1:8080
 ```
 
-Then open **http://127.0.0.1:8080/console** — the built-in **Governance Console**. Paste a
-bearer token and watch the plane work: your identity and enforced autonomy ladder, a live
-decision-audit feed, enforcement metrics, granted tools, your policy-derived agent card,
-and a probe panel that shows 403 denials on the wire. (The page is a static, data-free
-shell under a strict CSP; every byte it displays is fetched with the token you paste.)
+Every path serves the **Governance Console** at `/console` — an app-style dashboard:
+overview stat cards and the allow/deny enforcement ratio, a live filterable
+decision-audit feed, a probe lab (chat, tool calls, A2A delegation), your granted tools
+with their autonomy floors, your policy-derived agent card, and one-click boundary
+probes that get themselves refused on the wire. (The page is a static, data-free shell
+under a strict CSP; every byte it displays is fetched with the token you paste.)
 
 **Or the hardened loopback stack (Flask behind the nginx boundary):**
 
@@ -220,6 +249,7 @@ $ curl :8080/mcp/call   -H "$H" -d '{"tool":"clock.now"}'          # 200 — gra
 | Doc | What it covers |
 |---|---|
 | [Architecture](docs/architecture.md) | request path, planes, model routing |
+| [**Starter kit / demo**](docs/demo.md) | the one-command scripted governance demo and its simulated principals |
 | [Security model](docs/security-model.md) | trust boundaries, OWASP-LLM risks + a **MITRE ATLAS technique map** (pertinent vs. out-of-scope), honest limits |
 | [**Threat model**](docs/threat-model.md) | STRIDE per trust boundary → control → the eval that proves it |
 | [Orchestration](docs/orchestration.md) | the control plane, autonomy ladder, closed loop |
@@ -245,7 +275,11 @@ docs/                     # architecture, security & threat model, orchestration
 - Autonomy/egress gating is **opt-in via policy**; with no policy file the owner token is all-models break-glass.
 - Guardrails are high-precision **regex denylists** (defense-in-depth, not exhaustive recall).
 - API keys are **static** (no rotation/expiry yet); rate limiting is **in-process, per-node**.
-- **No TLS** — loopback use only. **MLX is Apple-Silicon only.**
+- **No TLS** — loopback use only. The optional MLX backend is Apple-Silicon only; the
+  gateway itself (and its full test suite) runs on any platform.
+- The starter-kit tools are **simulated** (pure, deterministic) — they exist to make the
+  *enforcement* demonstrable, and are labeled `"simulated": true` so nobody mistakes the
+  demo for a payments system.
 
 ## License
 

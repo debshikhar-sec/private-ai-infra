@@ -1,10 +1,6 @@
 """Unit tests for the pure request-normalization helpers."""
 
-import pytest
-
-pytest.importorskip("mlx", reason="MLX is only available on Apple Silicon")
-
-from private_ai_gateway.app import (  # noqa: E402
+from private_ai_gateway.app import (
     estimate_tokens_rough,
     normalize_content,
     normalize_messages,

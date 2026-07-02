@@ -81,3 +81,14 @@ default_max_level = "L2"
 #   block  -> withhold the whole response and return a refusal
 [guardrails]
 action = "redact"
+
+# Model routing (optional): stable aliases -> backend model ids. Aliases keep client
+# configs and per-principal allowlists unchanged when the model plane changes — the
+# same "strategy" alias can point at an MLX model locally and at an internal
+# LLM-as-a-Service model id in openai-backend mode (PRIVATE_AI_UPSTREAM_BASE_URL).
+# Unset aliases fall back to the built-in MLX defaults.
+[models]
+default_alias = "strategy"
+# [models.routes]
+# strategy = "mistral-large-latest"
+# engineering = "qwen2.5-coder-32b"

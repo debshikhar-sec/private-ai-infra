@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-Local OpenAI-compatible MLX Gateway
-Client -> Nginx -> Flask -> MLX
+OpenAI-compatible AI governance gateway
+Client -> (nginx) -> Flask enforcement plane -> inference backend
+
+The enforcement plane (identity, policy, autonomy ceilings, guardrails, audit) is
+model-plane-agnostic: the backend may be in-process MLX, any OpenAI-compatible
+upstream (an enterprise LLM-as-a-Service platform, vLLM, Ollama, …), or an offline
+demo simulator. See backends.py.
 """
 
-import gc
 import hmac
 import importlib.resources
 import json
@@ -14,11 +18,9 @@ import re
 import time
 import uuid
 
-import mlx.core as mx
 from flask import Flask, Response, g, jsonify, request
-from mlx_lm import generate, load
 
-from private_ai_gateway import a2a, autonomy, tools
+from private_ai_gateway import a2a, autonomy, backends, tools
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.metrics import Metrics
@@ -91,13 +93,26 @@ def autonomy_ceiling_for(principal: Principal) -> int | None:
     ceiling = principal.max_autonomy_level
     return POLICY.default_max_autonomy_level if ceiling is None else ceiling
 
-ROUTE_MAP = {
+# Model routing: alias -> backend model id. The defaults are the MLX line-up; a
+# ``[models.routes]`` table in policy.toml overrides/extends them, which is how the
+# same aliases point at an upstream platform's model ids in openai-backend mode.
+DEFAULT_ROUTE_MAP = {
     "strategy": "mlx-community/Qwen3.6-27B-OptiQ-4bit",
     "engineering": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit",
     "offsec": "mlx-community/Llama-3-70B-Instruct-Gradient-1048k-4bit",
 }
+ROUTE_MAP = {**DEFAULT_ROUTE_MAP, **POLICY.model_routes}
 
-DEFAULT_MODEL_ALIAS = "strategy"
+DEFAULT_MODEL_ALIAS = POLICY.default_model_alias or "strategy"
+
+# -----------------------------
+# Inference backend (model-plane-agnostic)
+# -----------------------------
+BACKEND = backends.select_backend(
+    os.environ.get("PRIVATE_AI_BACKEND", "auto"),
+    base_url=os.environ.get("PRIVATE_AI_UPSTREAM_BASE_URL"),
+    api_key=os.environ.get("PRIVATE_AI_UPSTREAM_API_KEY"),
+)
 
 # -----------------------------
 # Logging
@@ -110,57 +125,10 @@ if not logger.handlers:
     fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
     logger.addHandler(fh)
 
-# -----------------------------
-# Global MLX state
-# -----------------------------
-CURRENT_MODEL_NAME = None
-MODEL_REF = None
-TOKENIZER_REF = None
-
-
-def clear_mlx_cache():
-    gc.collect()
-    try:
-        mx.clear_cache()
-    except AttributeError:
-        mx.metal.clear_cache()
-
-
 def resolve_model(requested_model: str) -> str:
     if not requested_model:
         requested_model = DEFAULT_MODEL_ALIAS
     return ROUTE_MAP.get(requested_model, requested_model)
-
-
-def swap_model_if_needed(requested_model: str) -> bool:
-    global CURRENT_MODEL_NAME, MODEL_REF, TOKENIZER_REF
-
-    target_model = resolve_model(requested_model)
-
-    if target_model == CURRENT_MODEL_NAME and MODEL_REF is not None and TOKENIZER_REF is not None:
-        logger.info(f"MODEL_REUSE | {target_model}")
-        return True
-
-    logger.info(f"MODEL_SWAP_START | {CURRENT_MODEL_NAME} -> {target_model}")
-
-    try:
-        MODEL_REF = None
-        TOKENIZER_REF = None
-        clear_mlx_cache()
-
-        logger.info(f"MODEL_LOAD_START | {target_model}")
-        MODEL_REF, TOKENIZER_REF = load(target_model)
-        CURRENT_MODEL_NAME = target_model
-        logger.info(f"MODEL_LOAD_SUCCESS | {target_model}")
-        return True
-
-    except Exception as e:
-        logger.exception(f"MODEL_LOAD_FAILED | {target_model} | {str(e)}")
-        CURRENT_MODEL_NAME = None
-        MODEL_REF = None
-        TOKENIZER_REF = None
-        clear_mlx_cache()
-        return False
 
 
 def normalize_content(content):
@@ -332,60 +300,6 @@ def sanitize_model_output(text):
     return text
 
 
-def build_prompt(messages):
-    clean_messages = normalize_messages(messages)
-
-    # Qwen chat templates require system content to appear only at the beginning.
-    # Tool-safety preambles can create multiple system messages.
-    # Merge all system messages into one leading system message before rendering.
-    current_model_name = str(CURRENT_MODEL_NAME or "").lower()
-    if "qwen" in current_model_name:
-        system_parts = []
-        non_system_messages = []
-        for msg in clean_messages:
-            if msg.get("role") == "system":
-                content = str(msg.get("content", "")).strip()
-                if content:
-                    system_parts.append(content)
-            else:
-                non_system_messages.append(msg)
-
-        if system_parts:
-            clean_messages = [
-                {
-                    "role": "system",
-                    "content": "\n\n".join(system_parts),
-                }
-            ] + non_system_messages
-
-    try:
-        if hasattr(TOKENIZER_REF, "apply_chat_template"):
-            chat_template_kwargs = {
-                "tokenize": False,
-                "add_generation_prompt": True,
-            }
-
-            # Qwen3/Qwen3.6 thinking models must use the hard template switch.
-            # Prompt-only /no_think was tested and is not reliable enough for this gateway.
-            current_model_name = str(CURRENT_MODEL_NAME or "").lower()
-            if "qwen" in current_model_name:
-                chat_template_kwargs["enable_thinking"] = False
-
-            return TOKENIZER_REF.apply_chat_template(
-                clean_messages,
-                **chat_template_kwargs,
-            )
-    except Exception as e:
-        logger.exception(f"CHAT_TEMPLATE_FAILED | {str(e)}")
-
-    # Fallback prompt format
-    lines = []
-    for m in clean_messages:
-        lines.append(f"{m['role']}: {m['content']}")
-    lines.append("assistant:")
-    return "\n".join(lines)
-
-
 def estimate_tokens_rough(text: str) -> int:
     if not text:
         return 0
@@ -525,7 +439,8 @@ def health():
     return jsonify(
         {
             "status": "ok",
-            "current_model": CURRENT_MODEL_NAME,
+            "backend": BACKEND.info(),
+            "current_model": BACKEND.info().get("current_model"),
             "models": list(ROUTE_MAP.keys()),
         }
     )
@@ -973,7 +888,28 @@ def chat_completions():
     _ = req_data.get("metadata")
     _ = req_data.get("user")
 
-    if not swap_model_if_needed(requested_model):
+    clean_messages = normalize_messages(messages)
+    resolved_model = resolve_model(requested_model)
+    prompt_tokens_rough = estimate_tokens_rough(
+        "\n".join(str(m.get("content", "")) for m in clean_messages)
+    )
+
+    logger.info(
+        f"INFERENCE_START | RequestedModel={requested_model} | "
+        f"ResolvedModel={resolved_model} | Backend={BACKEND.name} | "
+        f"MaxTokens={max_tokens} | PromptTokensRough={prompt_tokens_rough}"
+    )
+
+    try:
+        result = BACKEND.complete(
+            resolved_model,
+            clean_messages,
+            max_tokens=max_tokens,
+            temperature=temperature if isinstance(temperature, (int, float)) else None,
+        )
+        response_text = sanitize_model_output(result.text)
+        served_model = result.model
+    except backends.ModelLoadError:
         return jsonify(
             {
                 "error": {
@@ -983,38 +919,17 @@ def chat_completions():
                 }
             }
         ), 500
-
-    try:
-        prompt = build_prompt(messages)
-    except Exception as e:
-        logger.exception(f"CONTEXT_FORMAT_ERROR | {str(e)}")
+    except backends.BackendError as e:
+        logger.error(f"UPSTREAM_FAILED | {str(e)}")
         return jsonify(
             {
                 "error": {
-                    "message": "Context formatting failed",
-                    "type": "invalid_request_error",
-                    "code": "context_format_error",
+                    "message": f"Inference backend failed: {e}",
+                    "type": "server_error",
+                    "code": "upstream_error",
                 }
             }
-        ), 400
-
-    prompt_tokens_rough = estimate_tokens_rough(prompt)
-
-    logger.info(
-        f"INFERENCE_START | RequestedModel={requested_model} | "
-        f"ResolvedModel={CURRENT_MODEL_NAME} | MaxTokens={max_tokens} | "
-        f"PromptChars={len(prompt)} | PromptTokensRough={prompt_tokens_rough}"
-    )
-
-    try:
-        response_text = generate(
-            MODEL_REF,
-            TOKENIZER_REF,
-            prompt=prompt,
-            max_tokens=max_tokens,
-            verbose=False,
-        )
-        response_text = sanitize_model_output(response_text)
+        ), 502
     except Exception as e:
         logger.exception(f"INFERENCE_FAILED | {str(e)}")
         return jsonify(
@@ -1070,7 +985,7 @@ def chat_completions():
                 "id": "chatcmpl-local",
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
-                "model": CURRENT_MODEL_NAME,
+                "model": served_model,
                 "choices": [
                     {
                         "index": 0,
@@ -1084,7 +999,7 @@ def chat_completions():
                 "id": "chatcmpl-local",
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
-                "model": CURRENT_MODEL_NAME,
+                "model": served_model,
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
             }
 
@@ -1107,7 +1022,7 @@ def chat_completions():
             "id": "chatcmpl-local",
             "object": "chat.completion",
             "created": int(time.time()),
-            "model": CURRENT_MODEL_NAME,
+            "model": served_model,
             "choices": [
                 {
                     "index": 0,
