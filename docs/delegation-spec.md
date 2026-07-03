@@ -1,6 +1,7 @@
-# GAD/1.0 — Governed Agent Delegation
+# GAD/1.1 — Governed Agent Delegation
 
-**Status:** v1.0, normative for this gateway as of v0.17.0.
+**Status:** v1.1, normative for this gateway as of v0.17.0. (1.1 adds the optional
+time-bound semantics of §3.1; the 1.0 core is unchanged.)
 **Conformance suite:** `tests/conformance/test_delegation_spec.py` (runs against this
 implementation in-process by default, or any other implementation over HTTP).
 
@@ -64,6 +65,21 @@ Additionally an implementation MUST:
 Implementations SHOULD bound `task` free-text length, and MAY expose the full ledger to
 principals holding an explicit audit-read grant only.
 
+### 3.1 Time bounds (optional, GAD/1.1)
+
+An implementation MAY bound delegation lifetime (`expires_at`, from a policy TTL).
+Unbounded grants are the *zombie-authority* hole: an agent that dies mid-task leaves a
+live, sub-delegable grant behind forever. If time bounds are implemented:
+
+| # | Invariant | Error code | HTTP |
+|---|---|---|---|
+| I14 | An expired task MUST NOT accept a result. | `task_expired` | 409 |
+| I15 | An expired task MUST NOT be sub-delegated. | `parent_not_active` | 409 |
+| I16 | A sub-delegation MUST NOT outlive its parent grant — time narrows like authority. | *(clamped, not refused)* | — |
+
+Expiry MAY be enforced lazily (checked at every read) rather than by a background
+reaper; what matters is that no operation ever succeeds against a lapsed grant.
+
 ## 4. Wire binding (HTTP/JSON, this implementation)
 
 - `GET /a2a/agents` → `{agents: [card…], max_delegation_depth}` — cards derived from
@@ -103,8 +119,9 @@ External targets MUST be configured with the **fixture cast** (any token values)
 | `checker` | `verify` | L2 | no |
 | `outsider` | *(none)* | L1 | no |
 
-Delegation `max_depth` MUST be set to 2 for the run. A target passes GAD/1.0 iff every
-test passes.
+Delegation `max_depth` MUST be set to 2 for the run (and any TTL left unset). A target
+passes the GAD/1.0 core iff every test passes; the optional §3.1 time-bound behaviour
+is covered by this implementation's unit suite rather than the portable core suite.
 
 ## 6. Versioning
 

@@ -104,6 +104,10 @@ block_threshold = "high"     # low | medium | high | critical
 # sub-delegation entirely; chains can only ever narrow authority, never widen it.
 [delegation]
 max_depth = 3
+# Bound how long a grant stays live (seconds). Expired tasks refuse results and
+# sub-delegation, and a child never outlives its parent grant — time narrows like
+# authority. Unset = unbounded (the zombie-authority risk is yours).
+# ttl_seconds = 3600
 
 # Context optimization: the gateway always *measures* achievable prompt-token savings;
 # set compress = true to actually rewrite prompts (deterministic dedup + whitespace,

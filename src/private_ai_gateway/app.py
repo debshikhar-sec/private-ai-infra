@@ -705,6 +705,7 @@ def _delegate_task(principal: Principal, skill: str, req_data: dict):
             parent_id=str(req_data.get("parent_task", "")).strip() or None,
             max_depth=POLICY.max_delegation_depth,
             task=str(req_data.get("task", ""))[:500],
+            ttl_seconds=POLICY.delegation_ttl_seconds,
         )
     except delegation.DelegationError as exc:
         return _delegation_error(principal, exc, detail)

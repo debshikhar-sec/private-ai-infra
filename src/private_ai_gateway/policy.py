@@ -77,6 +77,7 @@ class Policy:
         model_routes: dict[str, str] | None = None,
         default_model_alias: str | None = None,
         max_delegation_depth: int = 3,
+        delegation_ttl_seconds: int | None = None,
         context_compress: bool = False,
         context_budget: int | None = None,
         siem_webhook_url: str | None = None,
@@ -94,8 +95,10 @@ class Policy:
         # backend model ids, so switching model planes never rewrites client configs.
         self.model_routes = dict(model_routes or {})
         self.default_model_alias = default_model_alias
-        # How many links a delegation chain may grow (1 = no sub-delegation).
+        # How many links a delegation chain may grow (1 = no sub-delegation), and how
+        # long a grant stays live (None = unbounded; expiry closes zombie authority).
         self.max_delegation_depth = int(max_delegation_depth)
+        self.delegation_ttl_seconds = delegation_ttl_seconds
         # Context optimization: the gateway always *measures* achievable prompt-token
         # savings; ``context_compress`` opts in to actually rewriting prompts (off by
         # default — silently mutating a caller's prompt is a trust boundary).
@@ -175,6 +178,13 @@ class Policy:
         except (TypeError, ValueError):
             max_depth = 3
         max_depth = max(1, max_depth)
+        try:
+            ttl_raw = delegation_tbl.get("ttl_seconds")
+            delegation_ttl = int(ttl_raw) if ttl_raw is not None else None
+        except (TypeError, ValueError):
+            delegation_ttl = None
+        if delegation_ttl is not None and delegation_ttl <= 0:
+            delegation_ttl = None
 
         context_tbl = raw.get("context", {}) or {}
         context_compress = bool(context_tbl.get("compress", False))
@@ -209,6 +219,7 @@ class Policy:
             model_routes=model_routes,
             default_model_alias=default_alias,
             max_delegation_depth=max_depth,
+            delegation_ttl_seconds=delegation_ttl,
             context_compress=context_compress,
             context_budget=context_budget,
             siem_webhook_url=siem_url,

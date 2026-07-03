@@ -305,3 +305,75 @@ def test_outsider_cannot_view_or_list_others_tasks(client):
 
 def test_unknown_task_404(client):
     assert client.get("/a2a/tasks/dg-nope", headers=_hdr("planner")).status_code == 404
+
+
+# ---------------------------------------------------------------- expiry (GAD/1.1)
+def _expire(monkeypatch, offset: float):
+    """Shift the ledger's clock forward so lazily-checked expiries fire."""
+    import time as _time
+
+    real = _time.time()
+    monkeypatch.setattr(
+        "private_ai_gateway.delegation.time.time", lambda: real + offset
+    )
+
+
+def test_expired_task_loses_authority_lazily(monkeypatch):
+    ledger = DelegationLedger()
+    d = _create(ledger, ttl_seconds=60)
+    assert d.expires_at is not None and ledger.get(d.id).status == SUBMITTED
+    _expire(monkeypatch, 61)
+    assert ledger.get(d.id).status == "expired"
+
+
+def test_expired_task_cannot_be_reported(monkeypatch):
+    ledger = DelegationLedger()
+    d = _create(ledger, ttl_seconds=60)
+    _expire(monkeypatch, 61)
+    with pytest.raises(DelegationError) as err:
+        ledger.report(d.id, reporter="executor", status=COMPLETED)
+    assert err.value.code == "task_expired" and err.value.status == 409
+
+
+def test_expired_parent_cannot_be_subdelegated(monkeypatch):
+    ledger = DelegationLedger()
+    root = _create(ledger, ttl_seconds=60)
+    _expire(monkeypatch, 61)
+    with pytest.raises(DelegationError) as err:
+        _create(
+            ledger, delegator=EXECUTOR, delegatee=VERIFIER,
+            skill="assurance.verify", requested_level=2, delegatee_ceiling=2,
+            parent_id=root.id,
+        )
+    assert err.value.code == "parent_not_active"
+
+
+def test_subdelegation_cannot_outlive_parent_grant():
+    # Time narrows like authority: the child inherits the tighter bound.
+    ledger = DelegationLedger()
+    root = _create(ledger, ttl_seconds=60)
+    child = _create(
+        ledger, delegator=EXECUTOR, delegatee=VERIFIER,
+        skill="assurance.verify", requested_level=2, delegatee_ceiling=2,
+        parent_id=root.id, ttl_seconds=3600,
+    )
+    assert child.expires_at <= root.expires_at
+
+
+def test_no_ttl_means_no_time_bound():
+    d = _create(DelegationLedger())
+    assert d.expires_at is None and d.to_dict()["expires_at"] is None
+
+
+def test_expiry_enforced_on_the_wire(client, monkeypatch):
+    monkeypatch.setattr(gw.POLICY, "delegation_ttl_seconds", 60, raising=False)
+    root = _delegate(client, "planner", skill="code.apply",
+                     delegatee="executor", autonomy_level="L3").get_json()
+    assert root["expires_at"] is not None
+    _expire(monkeypatch, 61)
+    r = client.post(f"/a2a/tasks/{root['id']}/result",
+                    json={"status": "completed"}, headers=_hdr("executor"))
+    assert r.status_code == 409
+    assert r.get_json()["error"]["code"] == "task_expired"
+    r = client.get(f"/a2a/tasks/{root['id']}", headers=_hdr("planner"))
+    assert r.get_json()["task"]["status"] == "expired"

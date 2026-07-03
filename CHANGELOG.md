@@ -25,8 +25,15 @@ All notable changes to this project are documented here. Format based on
   `gateway_siem_events_total{outcome}`. `decisions.jsonl` remains the local source of
   truth.
 
+- **Delegation time bounds (GAD/1.1 §3.1).** `[delegation] ttl_seconds` closes the
+  zombie-authority hole: an agent that dies mid-task no longer leaves a live,
+  sub-delegable grant behind forever. Expiry is enforced lazily at every read (no
+  reaper): expired tasks refuse results (`task_expired`, 409) and sub-delegation
+  (`parent_not_active`), and a child's expiry is clamped to its parent's — time
+  narrows like authority. Unset by default (unbounded, as before).
+
 ### Changed
-- Test suite: 350 → 370 (14 conformance + 6 SIEM).
+- Test suite: 350 → 376 (14 conformance + 6 SIEM + 6 expiry).
 
 ## [0.16.0] - 2026-07-03
 
