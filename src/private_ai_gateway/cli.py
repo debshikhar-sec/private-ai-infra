@@ -91,10 +91,104 @@ def build_parser() -> argparse.ArgumentParser:
         ).main(a.host, a.port, serve=not a.no_serve)
     )
 
+    scan = sub.add_parser(
+        "scan",
+        help="Scan installed (or manifest-listed) dependencies for known AI-stack CVEs, "
+        "with a SonarQube-style severity gate.",
+    )
+    scan.add_argument(
+        "--manifest",
+        default=None,
+        help="JSON manifest {\"packages\": {name: version}} to scan instead of the live "
+        "environment (use 'demo' for the packaged deliberately-vulnerable AI stack).",
+    )
+    scan.add_argument(
+        "--gate",
+        choices=["critical", "high", "medium", "low"],
+        default="high",
+        help="Fail (exit 1) if any finding is at this severity or above (default: high).",
+    )
+    scan.add_argument(
+        "--live", action="store_true",
+        help="Also query OSV.dev over the network for current breadth (opt-in).",
+    )
+    scan.add_argument("--format", choices=["text", "json"], default="text")
+    scan.set_defaults(func=_scan)
+
+    opt = sub.add_parser(
+        "optimize",
+        help="Measure deterministic prompt-compression savings on a sample RAG-style "
+        "agent conversation (LLMLingua-inspired, model-free).",
+    )
+    opt.add_argument(
+        "--budget", type=int, default=None,
+        help="Token budget to window the conversation to (default: no windowing).",
+    )
+    opt.set_defaults(func=_optimize)
+
     ver = sub.add_parser("version", help="Print the version and exit.")
     ver.set_defaults(func=lambda _a: (print(__version__) or 0))
 
     return p
+
+
+def _optimize(args: argparse.Namespace) -> int:
+    from private_ai_gateway import contextopt
+
+    # A representative long-context agent turn: a system preamble, a big shared context
+    # block pasted into two turns (the common RAG anti-pattern), and messy whitespace.
+    context_block = (
+        "PORTFOLIO CONTEXT: Counterparty ACME Shipping SA holds a EUR interest-rate "
+        "swap notional 50,000,000 maturing 2027-03-15; concentration in EU rates "
+        "exceeds the 30% desk threshold and is flagged for review by the risk engine."
+    )
+    messages = [
+        {"role": "system", "content": "You are a governed research copilot.    "
+                                      "Answer only within the provided context.\n\n\n"},
+        {"role": "user", "content": f"{context_block}\n\nSummarize the exposure."},
+        {"role": "assistant", "content": "The EU-rate concentration is above threshold."},
+        {"role": "user", "content": f"{context_block}\n\nNow draft the review note."},
+    ]
+    result = contextopt.compress_messages(messages, budget=args.budget, apply=True)
+    print("Deterministic context compression (LLMLingua-inspired, model-free)")
+    print("  arXiv:2310.05736 / arXiv:2310.06839\n")
+    print(f"  original tokens:   {result.original_tokens}")
+    print(f"  compressed tokens: {result.compressed_tokens}")
+    print(f"  saved:             {result.saved_tokens} tokens "
+          f"({result.saved_pct}%), ratio {result.ratio}x")
+    print(f"  steps:             {', '.join(result.steps) or '(none)'}")
+    return 0
+
+
+def _scan(args: argparse.Namespace) -> int:
+    import importlib.resources
+    import json
+
+    from private_ai_gateway import vulnintel
+
+    if args.manifest == "demo":
+        raw = importlib.resources.files("private_ai_gateway").joinpath(
+            "demo_sbom.json"
+        ).read_text(encoding="utf-8")
+        packages = json.loads(raw).get("packages", {})
+    elif args.manifest:
+        with open(args.manifest, encoding="utf-8") as fh:
+            packages = json.load(fh).get("packages", {})
+    else:
+        packages = vulnintel.installed_packages()
+
+    normalized = {vulnintel._normalize(n): v for n, v in packages.items()}
+    if args.live:
+        try:
+            report = vulnintel.scan_live(normalized, gate_threshold=args.gate)
+        except vulnintel.OSVError as exc:
+            print(f"live OSV scan failed ({exc}); falling back to offline snapshot.")
+            report = vulnintel.scan_packages(normalized, gate_threshold=args.gate)
+    else:
+        report = vulnintel.scan_packages(normalized, gate_threshold=args.gate)
+
+    print(report.to_json() if args.format == "json" else report.to_text(), end="")
+    return report.exit_code()
 
 
 def main(argv: list[str] | None = None) -> int:

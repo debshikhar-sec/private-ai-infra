@@ -71,18 +71,34 @@ class Policy:
         *,
         default_requests_per_minute: int = 0,
         guardrail_action: str = "off",
+        ingress_action: str = "off",
+        ingress_block_threshold: str = "high",
         default_max_autonomy_level: int | None = None,
         model_routes: dict[str, str] | None = None,
         default_model_alias: str | None = None,
+        max_delegation_depth: int = 3,
+        context_compress: bool = False,
+        context_budget: int | None = None,
     ):
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
         self.guardrail_action = guardrail_action
+        # Ingress AI-firewall: off | flag (audit, allow) | block (refuse at/above
+        # block_threshold). Off by default — enforcement is opt-in policy.
+        self.ingress_action = ingress_action
+        self.ingress_block_threshold = ingress_block_threshold
         self.default_max_autonomy_level = default_max_autonomy_level
         # Model routing is policy too: the ``[models]`` table maps stable aliases to
         # backend model ids, so switching model planes never rewrites client configs.
         self.model_routes = dict(model_routes or {})
         self.default_model_alias = default_model_alias
+        # How many links a delegation chain may grow (1 = no sub-delegation).
+        self.max_delegation_depth = int(max_delegation_depth)
+        # Context optimization: the gateway always *measures* achievable prompt-token
+        # savings; ``context_compress`` opts in to actually rewriting prompts (off by
+        # default — silently mutating a caller's prompt is a trust boundary).
+        self.context_compress = bool(context_compress)
+        self.context_budget = context_budget
 
     @property
     def principal_count(self) -> int:
@@ -136,8 +152,31 @@ class Policy:
         if action not in ("off", "redact", "block"):
             action = "off"
 
+        ingress_tbl = raw.get("ingress", {}) or {}
+        ingress_action = str(ingress_tbl.get("action", "off")).strip().lower()
+        if ingress_action not in ("off", "flag", "block"):
+            ingress_action = "off"
+        ingress_threshold = str(ingress_tbl.get("block_threshold", "high")).strip().lower()
+        if ingress_threshold not in ("low", "medium", "high", "critical"):
+            ingress_threshold = "high"
+
         autonomy_tbl = raw.get("autonomy", {}) or {}
         default_autonomy = autonomy_mod.parse_level(autonomy_tbl.get("default_max_level"))
+
+        delegation_tbl = raw.get("delegation", {}) or {}
+        try:
+            max_depth = int(delegation_tbl.get("max_depth", 3))
+        except (TypeError, ValueError):
+            max_depth = 3
+        max_depth = max(1, max_depth)
+
+        context_tbl = raw.get("context", {}) or {}
+        context_compress = bool(context_tbl.get("compress", False))
+        try:
+            budget_raw = context_tbl.get("budget")
+            context_budget = int(budget_raw) if budget_raw is not None else None
+        except (TypeError, ValueError):
+            context_budget = None
 
         models_tbl = raw.get("models", {}) or {}
         routes_raw = models_tbl.get("routes", {}) or {}
@@ -152,9 +191,14 @@ class Policy:
             principals,
             default_requests_per_minute=default_rpm,
             guardrail_action=action,
+            ingress_action=ingress_action,
+            ingress_block_threshold=ingress_threshold,
             default_max_autonomy_level=default_autonomy,
             model_routes=model_routes,
             default_model_alias=default_alias,
+            max_delegation_depth=max_depth,
+            context_compress=context_compress,
+            context_budget=context_budget,
         )
 
     def identify(self, bearer_token: str) -> Principal | None:
@@ -162,3 +206,14 @@ class Policy:
         if not bearer_token:
             return None
         return self._by_hash.get(hash_token(bearer_token))
+
+    def find_principal(self, name: str) -> Principal | None:
+        """Look up a principal by name (for delegation targets and the agent directory)."""
+        for principal in self._by_hash.values():
+            if principal.name == name:
+                return principal
+        return None
+
+    def principals(self) -> list[Principal]:
+        """All configured principals, sorted by name (policy-derived, no key material)."""
+        return sorted(self._by_hash.values(), key=lambda p: p.name)

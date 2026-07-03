@@ -92,3 +92,23 @@ default_alias = "strategy"
 # [models.routes]
 # strategy = "mistral-large-latest"
 # engineering = "qwen2.5-coder-32b"
+
+# Ingress AI-firewall: inspect inbound prompts for prompt-injection / jailbreak / PII
+# before they reach the model (OWASP LLM01). Evasion-aware (Unicode-normalizing).
+#   action = "off" | "flag" (audit + allow) | "block" (refuse at/above block_threshold)
+[ingress]
+action = "off"
+block_threshold = "high"     # low | medium | high | critical
+
+# Governed agent-to-agent delegation: how many links a chain may grow. 1 disables
+# sub-delegation entirely; chains can only ever narrow authority, never widen it.
+[delegation]
+max_depth = 3
+
+# Context optimization: the gateway always *measures* achievable prompt-token savings;
+# set compress = true to actually rewrite prompts (deterministic dedup + whitespace,
+# and windowing to `budget` tokens if set). Off by default — rewriting a caller's
+# prompt is a trust boundary.
+[context]
+compress = false
+# budget = 4096

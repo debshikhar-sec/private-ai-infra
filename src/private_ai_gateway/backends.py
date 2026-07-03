@@ -268,6 +268,22 @@ class DemoBackend:
             "hedge the residual with futures. This is a proposal — execution authority "
             "is not granted at this autonomy level."
         ),
+        # A labelled-section plan in the Hermes planner-contract shape, so the
+        # orchestration demo can exercise a full governed plan->delegate->verify loop
+        # offline. The *routing* decisions are still made by code against agent cards.
+        "plan": (
+            "PHASE: delegation\n"
+            "CURRENT READ: A reviewed fix is approved and awaiting a governed apply.\n"
+            "SAFE NEXT ACTION: Delegate skill code.apply to a peer whose card "
+            "advertises it, at the lowest sufficient autonomy level.\n"
+            "AUTONOMY LEVEL: L1\n"
+            "DO NOT DO YET: Do not commit to the real target tree.\n"
+            "VALIDATION: Sub-delegated assurance.verify must return PASS.\n"
+            "EXPECTED RESULT: Chain completes with attenuated authority at each hop.\n"
+            "IF IT FAILS: Report the failed task; nothing was executed above ceiling.\n"
+            "APPROVAL REQUIRED: none\n"
+            "NEXT OWNER ACTION: Review the delegation chain in the audit."
+        ),
     }
 
     def __init__(self):

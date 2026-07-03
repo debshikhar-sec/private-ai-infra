@@ -12,6 +12,13 @@
 #   ops-automation     token: demo-ops-automation     L4 · granted payments.initiate, which
 #                                                       requires L5 — granted is not enough
 #   auditor            token: demo-auditor            L0 · no models; may read the audit
+#
+# Orchestration cast — the three cooperating agents (see docs/orchestration.md):
+#   hermes             token: demo-hermes             L1 · plans and *routes* work; holds the
+#                                                       delegable skills but can execute nothing
+#   opencode           token: demo-opencode           L3 · applies approved changes in a sandbox;
+#                                                       may sub-delegate verification
+#   openclaw           token: demo-openclaw           L2 · verifies evidence; reads the audit
 
 [[principals]]
 name = "research-copilot"
@@ -59,11 +66,48 @@ allowed_models = []                # observers observe; they do not generate
 max_autonomy_level = "L0"
 can_read_audit = true
 
+[[principals]]
+name = "hermes"
+key_sha256 = "2f6c11510be923ea57f462b4999e765f9254d4fd0d4333475efe646f4b9cf302"
+allowed_models = ["strategy"]
+max_output_tokens = 1024
+requests_per_minute = 120
+max_autonomy_level = "L1"          # the planner suggests and routes; it never executes
+# Skill possession is the right to *route* a task type, not to execute it: Hermes can
+# hand code.apply to a principal policy grants L3, while staying L1 itself.
+allowed_skills = ["plan.compose", "code.apply", "assurance.verify"]
+
+[[principals]]
+name = "opencode"
+key_sha256 = "4b516eb2b85bad0450e9c45a97f21577d5643065a8423c29d03aafed3b0ba661"
+allowed_models = ["engineering", "strategy"]
+max_output_tokens = 1024
+requests_per_minute = 120
+max_autonomy_level = "L3"          # owner-initiated execution: sandbox applies
+allowed_skills = ["code.apply", "assurance.verify"]  # holds assurance.verify to sub-delegate it
+allowed_tools = ["docs.search", "text.wordcount"]
+
+[[principals]]
+name = "openclaw"
+key_sha256 = "336c61d94b0accc95bb400d220a146b908f26816470bf99968da50eed9f41fcc"
+allowed_models = []                # verification needs evidence, not generation
+max_autonomy_level = "L2"          # dry-run/verification only
+allowed_skills = ["assurance.verify"]
+can_read_audit = true
+
 [ratelimit]
 default_requests_per_minute = 120
 
 [guardrails]
 action = "redact"                  # let the console show a live egress redaction
 
+[ingress]
+action = "block"                   # inbound AI-firewall: refuse prompt-injection/jailbreak
+block_threshold = "high"           # block at high+; lower-severity PII is flagged only
+
 [models]
 default_alias = "strategy"
+
+[delegation]
+max_depth = 2                      # hermes -> opencode -> openclaw; no deeper
+

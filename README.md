@@ -116,9 +116,12 @@ Each row is a control, the attack against it, and where that attack is proven to
 | **A2A delegation** | an agent is handed a skill / autonomy beyond its mandate | `/a2a/tasks` → `403` skill_not_allowed / autonomy_exceeded | `evals` **A2A-001/002** — OWASP Agentic ASI03/07 |
 | **MCP tool access** | a principal invokes an ungranted or over-privileged tool | `/mcp/call` → `403` tool_not_allowed / autonomy_exceeded | `evals` **MCP-001/002** — OWASP Agentic ASI02 (incl. *granted-but-floor-gated* `payments.initiate`) |
 | **Audit read access** | a low-priv key tails every principal's allow/deny history | `/v1/decisions` → `403` audit_not_allowed (`can_read_audit` grant) | `evals` **AUDIT-001** — OWASP Agentic ASI03 |
+| **Ingress prompt injection** | a jailbreak / instruction-override rides in on the prompt — even Unicode-obfuscated | `ingress.py` (normalize → detect) → `403` prompt_injection_blocked | `evals` **INGRESS-001…003** — OWASP **LLM01**, incl. homoglyph/zero-width evasion |
+| **Delegation attenuation** | an agent hands off more authority than it holds, or a chain widens/recurses | `delegation.py` → `403` autonomy_amplification / delegation_widening / too_deep | `test_delegation` · `test_orchestrate` (full governed loop + probes) |
+| **AI-stack CVE gate** | a known-vulnerable inference dependency ships to prod | `vulnintel.py` OSV/CVSS gate → non-zero exit | `test_vulnintel` · `make scan` (ShadowRay, SSTI, deserialization) |
 | Apply integrity | an apply runs ungated or escapes its sandbox | `opencode_sandbox/apply.py` | OpenClaw `AC-APPLY-INTEGRITY` · `test_opencode_act` |
 
-→ Run the attacks yourself: `make evals` · Re-verify the controls: `make` + see [docs/threat-model.md](docs/threat-model.md).
+→ Run the attacks yourself: `make evals` · Watch agents delegate under attenuating authority: `make orchestrate` · Scan the AI supply chain: `make scan`.
 
 ## Orchestration control plane
 
@@ -153,6 +156,27 @@ flowchart LR
 ```
 
 Full design and current-vs-planned status: **[docs/orchestration.md](docs/orchestration.md)**.
+
+**These agents now understand and delegate to each other autonomously — under governed,
+attenuating authority.** Discovery is from policy, not self-description: each agent reads
+the `GET /a2a/agents` directory (skills + enforced autonomy ceiling per peer) and routes
+work to the least-privileged capable peer. A hand-off is a policy decision — *skill
+possession* is the right to route a task type, *autonomy ceiling* the right to execute it —
+so a planner at L1 can route an L3 apply to an executor that policy grants L3, but nothing
+can amplify authority: chains only narrow, depth is bounded, only a task's holder may
+sub-delegate it, and only its delegatee may report the result. OpenCode applies in a
+confined sandbox and *sub-delegates* verification to OpenClaw, which verifies from gateway
+evidence and reports PASS/FAIL back up the chain.
+
+```console
+$ make orchestrate      # the full governed loop, offline, through the real enforcement plane
+hermes -> opencode  code.apply@L3   [completed PASS]
+  opencode -> openclaw  assurance.verify@L2   [completed PASS]
+  [PASS] hermes    asks opencode to run at L5 — above its enforced ceiling  -> 403 autonomy_amplification
+  [PASS] hermes    routes payments.initiate — a skill it was never granted  -> 403 skill_not_delegable
+  [PASS] openclaw  grows the chain past the policy depth limit              -> 403 delegation_too_deep
+  10/10 steps behaved exactly as policy demands.
+```
 
 ## See it enforce (no GIF)
 
@@ -260,17 +284,20 @@ $ curl :8080/mcp/call   -H "$H" -d '{"tool":"clock.now"}'          # 200 — gra
 | [Security model](docs/security-model.md) | trust boundaries, OWASP-LLM risks + a **MITRE ATLAS technique map** (pertinent vs. out-of-scope), honest limits |
 | [**Threat model**](docs/threat-model.md) | STRIDE per trust boundary → control → the eval that proves it |
 | [Orchestration](docs/orchestration.md) | the control plane, autonomy ladder, closed loop |
+| [**Delegation & defensive suite**](docs/delegation-and-defense.md) | governed A2A delegation (attenuation + sub-delegation), the ingress AI-firewall, AI-stack CVE intelligence, and the context optimizer — with honest scoping |
 | [Runbook](docs/runbook.md) | operating the stack + the live enforcement demo |
 | [**Product evolution**](docs/product-evolution.md) | OWASP Agentic Top-10 coverage map + threat-led roadmap vs. the AI-gateway field |
+| [Positioning](docs/positioning.md) | where this sits in the 2025–26 AI-security market — sourced, gaps stated |
 | [Roadmap](docs/roadmap.md) | what's hardened, what's next |
 
 ## Project layout
 
 ```text
 src/private_ai_gateway/   # gateway (app.py) + governance (policy, ratelimit, guardrails, metrics, audit, autonomy)
+                          #   + delegation.py, ingress.py (AI-firewall), vulnintel.py (CVE scan), contextopt.py
 config/                   # policy.example.toml — governance policy-as-code
 deploy/nginx/             # nginx loopback reverse-proxy config
-agents/                   # control plane: hermes/ (planner), opencode_sandbox/ (reviewer + gated apply), openclaw/ (assurance)
+agents/                   # control plane: hermes/ (planner + orchestrate), opencode_sandbox/ + openclaw/ (workers), interop/ (shared peer client)
 evals/                    # adversarial security evals — attack the controls, OWASP-LLM tagged
 tests/                    # unit/ (pytest) + integration/ (stack smoke test)
 docs/                     # architecture, security & threat model, orchestration, runbook, roadmap

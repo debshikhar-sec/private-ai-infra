@@ -4,6 +4,69 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-07-03
+
+### Added
+- **Governed agent-to-agent delegation.** A2A agent cards let agents *discover* each
+  other from policy; a new delegation protocol (`delegation.py`) governs the hand-off
+  itself so capability never becomes authority by being delegated. Two-axis rule:
+  **skill possession** is the right to *route* a task type, **autonomy ceiling** the
+  right to *execute* it — so an L1 planner can route an L3 task to a peer that policy
+  grants L3, but no request can amplify authority. Chains only narrow (no widening past
+  the parent grant), depth is policy-bounded (`[delegation] max_depth`), only a task's
+  current holder may sub-delegate it, and only its delegatee may report the outcome.
+  New endpoints: `GET /a2a/agents` (policy-derived directory), delegate-to-peer and
+  task inbox/outbox on `/a2a/tasks`, `GET /a2a/tasks/<id>` (task + custody chain), and
+  a delegatee-only `/a2a/tasks/<id>/result`. Every allow/deny is audited with a stable
+  code.
+- **Autonomous orchestration across Hermes / OpenCode / OpenClaw.** A shared interop
+  client (`agents/interop`) whose discovery prefers the least-privileged capable peer,
+  plus delegatable workers: OpenCode applies an approved change in a confined sandbox
+  and *sub-delegates* verification; OpenClaw verifies from gateway evidence and reports
+  PASS/FAIL up the chain. `python -m hermes.orchestrate` runs the full governed loop
+  offline through the real enforcement plane, then abuses the same wire on purpose
+  (amplification, routing an unheld skill, over-deep chains, forged results) — all
+  refused with exact audit codes.
+- **Ingress AI-firewall (`ingress.py`).** The inbound mirror of the egress guardrail:
+  heuristic, explainable prompt-injection / jailbreak / PII detection mapped to OWASP
+  LLM01:2025, with a Unicode **normalization pass** (NFKC, strip zero-width/invisible,
+  drop Unicode tag chars, fold a curated confusables subset, remove combining marks) so
+  homoglyph / zero-width / full-width evasions are folded before matching — and the
+  evasion attempt itself escalates severity. PII rules (email/SSN/card/IBAN) match with
+  a Luhn check for card precision and mask matches in findings. Policy-driven action
+  (`[ingress]` off | flag | block, `block_threshold`); metric
+  `gateway_ingress_events_total`. Off by default.
+- **AI-stack dependency CVE intelligence (`vulnintel.py`).** Snyk/SonarQube-inspired
+  scanner with PEP 440-aware version-range matching, CVSS→severity tiers, and a
+  configurable quality gate. Curated, source-cited snapshot of four real high-severity
+  AI-supply-chain CVEs (Ray ShadowRay CVE-2023-48022, llama-cpp-python Jinja2 SSTI
+  CVE-2024-34359, MLflow path-traversal CVE-2024-3573, vLLM torch.load deserialization
+  CVE-2025-62164 — ranges pulled from OSV.dev) plus a live OSV.dev `/v1/querybatch`
+  client (opt-in). New CLI `scan` (`--manifest`, `--gate`, `--live`) and a packaged
+  deliberately-vulnerable `demo_sbom.json`.
+- **Deterministic context optimizer (`contextopt.py`).** Model-free, LLMLingua-inspired
+  (arXiv:2310.05736 / 2310.06839) prompt compression to cut token exchange: lossless
+  whitespace normalization, near-lossless cross-message dedup of repeated context
+  blocks, and lossy budget windowing. The gateway always *measures* achievable savings
+  (metric `gateway_context_tokens_saved_total`) and only rewrites prompts when a
+  principal's `[context]` policy opts in. CLI `optimize` demo shows ~37% reduction on a
+  representative RAG turn.
+
+### Changed
+- Starter-kit demo gains the hermes/opencode/openclaw orchestration cast and two live
+  ingress blocks (plain + homoglyph/zero-width evasion); the demo plane is now
+  self-contained (fresh audit + metrics) so OpenClaw's reconciliation is exact.
+- Security eval suite: 20 → 23 cases (three ingress prompt-injection cases, one exercising
+  Unicode-evasion resistance). Test suite: 269 → 350.
+- Agent cards now surface `can_read_audit` under `x-governance` so peers can discover
+  which agent may consume governance telemetry.
+
+### Fixed
+- **Polynomial ReDoS in `contextopt.normalize_whitespace`** (CodeQL
+  `py/polynomial-redos`): the trailing-whitespace regex backtracked quadratically on
+  long tab runs in caller-supplied prompt text. Replaced with per-line `str.rstrip`
+  (linear, identical output) and pinned with a pathological-input regression test.
+
 ## [0.15.0] - 2026-07-02
 
 ### Added

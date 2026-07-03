@@ -20,9 +20,10 @@ import uuid
 
 from flask import Flask, Response, g, jsonify, request
 
-from private_ai_gateway import a2a, autonomy, backends, tools
+from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, tools
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
+from private_ai_gateway.ingress import IngressFirewall
 from private_ai_gateway.metrics import Metrics
 from private_ai_gateway.policy import Policy, Principal
 from private_ai_gateway.ratelimit import RateLimiter
@@ -63,6 +64,9 @@ DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"))
 #   * GUARDRAILS filters secret-like content out of model responses (egress).
 RATE_LIMITER = RateLimiter(POLICY.default_requests_per_minute)
 GUARDRAILS = Guardrails(POLICY.guardrail_action)
+#   * INGRESS is the inbound AI-firewall (prompt-injection / jailbreak / PII), the
+#     mirror of GUARDRAILS on the way in. Off by default; opt in via [ingress] policy.
+INGRESS = IngressFirewall(POLICY.ingress_action, block_threshold=POLICY.ingress_block_threshold)
 
 # Observability: in-process Prometheus counters exposed at /metrics.
 METRICS = Metrics()
@@ -70,8 +74,17 @@ METRICS.register("gateway_requests_total", "Terminal request decisions by princi
 METRICS.register("gateway_authz_denials_total", "Authorization denials by reason.")
 METRICS.register("gateway_rate_limited_total", "Requests rejected by the rate limiter.")
 METRICS.register("gateway_guardrail_events_total", "Responses that tripped an egress guardrail.")
+METRICS.register("gateway_ingress_events_total", "Inbound prompts flagged by the ingress firewall, by category.")
 METRICS.register("gateway_a2a_tasks_total", "A2A delegation decisions by decision.")
 METRICS.register("gateway_tool_calls_total", "MCP tool-call decisions by decision.")
+METRICS.register(
+    "gateway_context_tokens_saved_total",
+    "Prompt tokens saved by deterministic context compression (measured or applied).",
+)
+
+# Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
+# Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.
+DELEGATIONS = delegation.DelegationLedger()
 
 # The owner token (PRIVATE_AI_AUTH_TOKEN) maps to this break-glass admin identity:
 # every model, no token/rate cap, and the top of the autonomy ladder (L6). Finer-grained
@@ -567,6 +580,11 @@ def a2a_tasks():
                        "code": "invalid_request"}}
         ), 400
 
+    # Naming a delegatee turns this from a self-task acknowledgement into a governed
+    # hand-off between two principals, with attenuation and lifecycle (see delegation.py).
+    if str(req_data.get("delegatee", "")).strip():
+        return _delegate_task(principal, skill, req_data)
+
     # --- AUTHORIZATION: is this principal granted the delegated skill? ---
     if not principal.may_use_skill(skill):
         METRICS.inc("gateway_a2a_tasks_total", {"decision": "deny"})
@@ -618,6 +636,168 @@ def a2a_tasks():
             "accepted_autonomy_name": autonomy.level_name(declared),
         }
     ), 202
+
+
+def _delegation_error(principal: Principal, exc: delegation.DelegationError, detail: str):
+    """Audit and answer a refused delegation operation."""
+    METRICS.inc("gateway_a2a_tasks_total", {"decision": "deny"})
+    if exc.status == 403:
+        METRICS.inc("gateway_authz_denials_total", {"reason": exc.code})
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="deny", reason=f"{exc.code}:{detail}", status=exc.status,
+    )
+    return jsonify(
+        {"error": {"message": exc.message, "type": "permission_error", "code": exc.code}}
+    ), exc.status
+
+
+def _delegation_view(record: delegation.Delegation) -> dict:
+    view = record.to_dict()
+    view["granted_autonomy_name"] = autonomy.level_name(record.granted_level)
+    return view
+
+
+def _delegate_task(principal: Principal, skill: str, req_data: dict):
+    """Governed agent-to-agent hand-off: create a delegation if policy allows it.
+
+    The two-axis rule: both principals must *hold* the skill (the right to route that
+    task type), and the requested level must fit inside the delegatee's own policy
+    ceiling and — for sub-delegation — inside the parent grant. A delegation therefore
+    never manufactures authority: the delegatee only ever works under levels its own
+    policy grants, and chains can only narrow.
+    """
+    delegatee_name = str(req_data.get("delegatee", "")).strip()
+    delegatee = POLICY.find_principal(delegatee_name)
+    detail = f"{skill}->{delegatee_name}"
+    if delegatee is None:
+        exc = delegation.DelegationError(
+            "unknown_delegatee", f"No principal named '{delegatee_name}' in policy.", 404
+        )
+        return _delegation_error(principal, exc, detail)
+
+    requested = autonomy.parse_level(
+        req_data.get("autonomy_level"), autonomy.DEFAULT_REQUEST_LEVEL
+    )
+    try:
+        record = DELEGATIONS.create(
+            delegator=principal,
+            delegatee=delegatee,
+            skill=skill,
+            requested_level=requested,
+            delegatee_ceiling=autonomy_ceiling_for(delegatee),
+            parent_id=str(req_data.get("parent_task", "")).strip() or None,
+            max_depth=POLICY.max_delegation_depth,
+            task=str(req_data.get("task", ""))[:500],
+        )
+    except delegation.DelegationError as exc:
+        return _delegation_error(principal, exc, detail)
+
+    METRICS.inc("gateway_a2a_tasks_total", {"decision": "allow"})
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow",
+        reason=f"delegate:{skill}->{delegatee_name}@L{record.granted_level}"
+               f",depth={record.depth}",
+        status=202,
+    )
+    return jsonify(_delegation_view(record)), 202
+
+
+@app.route("/a2a/agents", methods=["GET"])
+def a2a_agents():
+    """Agent directory: every policy principal's card, for peer discovery.
+
+    This is how agents *understand each other* without hardcoding: each card is
+    rendered from enforced policy (granted skills + autonomy ceiling), so a planner
+    can match a task to a peer against authority facts, not self-descriptions.
+    """
+    base_url = request.host_url.rstrip("/")
+    principals = POLICY.principals() or [getattr(g, "principal", None) or OWNER_PRINCIPAL]
+    return jsonify(
+        {
+            "agents": [
+                a2a.agent_card(p, base_url=base_url, ceiling=autonomy_ceiling_for(p))
+                for p in principals
+            ],
+            "max_delegation_depth": POLICY.max_delegation_depth,
+        }
+    )
+
+
+@app.route("/a2a/tasks", methods=["GET"])
+def a2a_task_list():
+    """A principal's task inbox (or outbox with ``role=delegator``).
+
+    ``all=true`` widens to every delegation, but only for principals holding the
+    ``can_read_audit`` grant — task history is governance telemetry like the audit.
+    """
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    status = str(request.args.get("status", "")).strip() or None
+    if str(request.args.get("all", "")).lower() in ("1", "true", "yes"):
+        if not principal.can_read_audit:
+            exc = delegation.DelegationError(
+                "audit_not_allowed",
+                f"Principal '{principal.name}' lacks can_read_audit; it may only "
+                "list its own tasks.",
+            )
+            return _delegation_error(principal, exc, "list_all")
+        records = DELEGATIONS.all()
+        if status:
+            records = [r for r in records if r.status == status]
+    else:
+        role = "delegator" if request.args.get("role") == "delegator" else "delegatee"
+        records = DELEGATIONS.for_principal(principal.name, role=role, status=status)
+    return jsonify({"tasks": [_delegation_view(r) for r in records]})
+
+
+@app.route("/a2a/tasks/<task_id>", methods=["GET"])
+def a2a_task_get(task_id: str):
+    """One delegation plus its full custody chain (participants or auditors only)."""
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    record = DELEGATIONS.get(task_id)
+    if record is None:
+        return jsonify(
+            {"error": {"message": f"No delegation '{task_id}'",
+                       "type": "invalid_request_error", "code": "unknown_task"}}
+        ), 404
+    chain = DELEGATIONS.chain(task_id)
+    involved = {d.delegator for d in chain} | {d.delegatee for d in chain}
+    if principal.name not in involved and not principal.can_read_audit:
+        exc = delegation.DelegationError(
+            "not_task_participant",
+            f"Principal '{principal.name}' is not part of delegation '{task_id}' "
+            "and lacks can_read_audit.",
+        )
+        return _delegation_error(principal, exc, task_id)
+    return jsonify(
+        {"task": _delegation_view(record), "chain": [_delegation_view(d) for d in chain]}
+    )
+
+
+@app.route("/a2a/tasks/<task_id>/result", methods=["POST"])
+def a2a_task_result(task_id: str):
+    """The delegatee reports its outcome; nobody else may speak for the task."""
+    principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
+    req_data = request.get_json(force=True, silent=True) or {}
+    try:
+        record = DELEGATIONS.report(
+            task_id,
+            reporter=principal.name,
+            status=str(req_data.get("status", "")).strip(),
+            result=str(req_data.get("result", ""))[:2000],
+            verdict=str(req_data.get("verdict", ""))[:100],
+        )
+    except delegation.DelegationError as exc:
+        return _delegation_error(principal, exc, task_id)
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"task_result:{task_id}:{record.status}", status=200,
+    )
+    return jsonify(_delegation_view(record))
 
 
 # -----------------------------
@@ -889,6 +1069,77 @@ def chat_completions():
     _ = req_data.get("user")
 
     clean_messages = normalize_messages(messages)
+
+    # Ingress AI-firewall: inspect inbound prompt text for prompt-injection / jailbreak
+    # / PII before it reaches the model. 'flag' audits and continues; 'block' refuses at
+    # or above the configured severity. The scan is evasion-aware (Unicode-normalizing).
+    if INGRESS.action != "off":
+        user_text = "\n".join(
+            str(m.get("content", "")) for m in clean_messages
+            if m.get("role") in ("user", "tool")
+        )
+        scan = INGRESS.scan(user_text)
+        if scan.triggered:
+            for category in scan.categories:
+                METRICS.inc("gateway_ingress_events_total", {"category": category})
+            evasion_note = f",evasion={'+'.join(scan.evasions)}" if scan.evasions else ""
+            if INGRESS.should_block(scan):
+                METRICS.inc("gateway_authz_denials_total", {"reason": "prompt_injection"})
+                METRICS.inc(
+                    "gateway_requests_total",
+                    {"principal": principal.name, "decision": "deny"},
+                )
+                DECISION_LOG.record(
+                    request_id=getattr(g, "request_id", ""), principal=principal.name,
+                    method=request.method, path=request.path, model=requested_model,
+                    decision="deny",
+                    reason=f"prompt_injection:{scan.max_severity}:"
+                           f"{'+'.join(scan.categories)}{evasion_note}",
+                    status=403,
+                )
+                logger.warning(
+                    f"INGRESS_BLOCK | principal={principal.name} | "
+                    f"severity={scan.max_severity} | categories={scan.categories} | "
+                    f"evasions={scan.evasions}"
+                )
+                return jsonify(
+                    {"error": {"message": (
+                        "Prompt blocked by the ingress firewall: it matched a "
+                        f"{scan.max_severity}-severity {', '.join(scan.categories)} "
+                        "pattern."),
+                        "type": "permission_error", "code": "prompt_injection_blocked"}}
+                ), 403
+            # flag (or below threshold): record and continue.
+            DECISION_LOG.record(
+                request_id=getattr(g, "request_id", ""), principal=principal.name,
+                method=request.method, path=request.path, model=requested_model,
+                decision="flag",
+                reason=f"ingress_flag:{scan.max_severity}:"
+                       f"{'+'.join(scan.categories)}{evasion_note}",
+                status=200,
+            )
+            logger.info(
+                f"INGRESS_FLAG | principal={principal.name} | "
+                f"severity={scan.max_severity} | categories={scan.categories}"
+            )
+
+    # Context optimization: always measure the achievable prompt-token savings; only
+    # rewrite the prompt when policy opts in (context_compress). Silently mutating a
+    # caller's prompt is a trust boundary, so the safe default is measure-only.
+    ctx = contextopt.compress_messages(
+        clean_messages,
+        budget=POLICY.context_budget,
+        apply=POLICY.context_compress,
+    )
+    if ctx.saved_tokens:
+        METRICS.inc("gateway_context_tokens_saved_total", value=ctx.saved_tokens)
+        logger.info(
+            f"CONTEXT_OPT | applied={ctx.applied} | saved_tokens={ctx.saved_tokens} "
+            f"| saved_pct={ctx.saved_pct} | ratio={ctx.ratio} | steps={','.join(ctx.steps)}"
+        )
+    if ctx.applied:
+        clean_messages = ctx.messages
+
     resolved_model = resolve_model(requested_model)
     prompt_tokens_rough = estimate_tokens_rough(
         "\n".join(str(m.get("content", "")) for m in clean_messages)

@@ -1,0 +1,12 @@
+{
+  "_comment": "A deliberately-vulnerable AI-stack manifest for the offline scan demo. Every pinned version sits inside a real CVE's affected range (see vulnintel.AI_STACK_ADVISORIES), so `private-ai-gateway scan --manifest ...` produces true findings with no network. Bump these past the fixed versions and the gate flips to PASS.",
+  "packages": {
+    "ray": "2.6.0",
+    "llama-cpp-python": "0.2.20",
+    "mlflow": "2.9.0",
+    "vllm": "0.10.5",
+    "numpy": "1.26.4",
+    "flask": "3.0.3",
+    "pydantic": "2.7.1"
+  }
+}
