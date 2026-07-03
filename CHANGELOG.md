@@ -57,9 +57,15 @@ All notable changes to this project are documented here. Format based on
   ingress blocks (plain + homoglyph/zero-width evasion); the demo plane is now
   self-contained (fresh audit + metrics) so OpenClaw's reconciliation is exact.
 - Security eval suite: 20 → 23 cases (three ingress prompt-injection cases, one exercising
-  Unicode-evasion resistance). Test suite: 269 → 340.
+  Unicode-evasion resistance). Test suite: 269 → 350.
 - Agent cards now surface `can_read_audit` under `x-governance` so peers can discover
   which agent may consume governance telemetry.
+
+### Fixed
+- **Polynomial ReDoS in `contextopt.normalize_whitespace`** (CodeQL
+  `py/polynomial-redos`): the trailing-whitespace regex backtracked quadratically on
+  long tab runs in caller-supplied prompt text. Replaced with per-line `str.rstrip`
+  (linear, identical output) and pinned with a pathological-input regression test.
 
 ## [0.15.0] - 2026-07-02
 
