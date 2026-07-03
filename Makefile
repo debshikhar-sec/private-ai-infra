@@ -1,13 +1,16 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-dev start stop status test cov lint fmt sast audit check evals
+.PHONY: help install install-mlx install-dev start stop status test cov lint fmt sast audit check evals demo
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install runtime dependencies (Apple Silicon / MLX)
+install: ## Install runtime dependencies (platform-agnostic)
 	pip install -r requirements.txt
+
+install-mlx: ## Additionally install the MLX backend (Apple Silicon only)
+	pip install -r requirements-mlx.txt
 
 install-dev: ## Install dev dependencies (ruff, pytest, bandit, pip-audit)
 	pip install -r requirements-dev.txt
@@ -39,7 +42,10 @@ sast: ## Static security analysis (bandit)
 evals: ## Run the adversarial security eval suite
 	PYTHONPATH=src python -m evals.run
 
+demo: ## One-command starter kit: demo policy + scripted governed traffic + console
+	PYTHONPATH=src python -m private_ai_gateway.cli demo
+
 audit: ## Dependency vulnerability scan (pip-audit)
-	pip-audit -r requirements.txt
+	pip-audit -r requirements.txt -r requirements-mlx.txt
 
 check: lint sast audit cov ## Run all CI checks locally

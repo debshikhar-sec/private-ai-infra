@@ -3,10 +3,11 @@
 Drives the whole attack catalogue against the gateway's enforced controls and emits a
 pass/fail report. Two layers run:
 
-  - **egress probes** use only the gateway's `Guardrails` (pure Python), so they run
-    anywhere — including Linux CI;
-  - **request-level probes** drive the real gateway via a Flask test client, which imports
-    MLX; where MLX is unavailable those probes are reported SKIP rather than passed.
+  - **egress probes** use only the gateway's `Guardrails` (pure Python);
+  - **request-level probes** drive the real gateway via a Flask test client. The gateway
+    is backend-agnostic (no model is ever loaded by a denial probe), so these run
+    anywhere; if the gateway module cannot be imported at all, they are reported SKIP
+    rather than silently passed.
 
 The runner configures the gateway's policy with the harness's own test identities first,
 so every attack is judged against the real enforcement path. Exits non-zero on FAIL.
@@ -45,8 +46,8 @@ def make_flask_transport(client):
 def build_gateway_transport():
     """Configure the gateway policy with test identities and return a transport.
 
-    Returns ``None`` if the gateway cannot be imported (e.g. MLX absent), so the
-    request-level probes report SKIP instead of failing the run.
+    Returns ``None`` if the gateway cannot be imported at all, so the request-level
+    probes report SKIP instead of failing the run.
     """
     try:
         from private_ai_gateway import app as gw
@@ -97,7 +98,7 @@ def main(argv: list[str] | None = None, *, transport_factory=build_gateway_trans
     transport = transport_factory()
     if transport is None and args.require_gateway:
         print(
-            "error: gateway transport unavailable (MLX not importable) and --require-gateway set",
+            "error: gateway transport unavailable (gateway not importable) and --require-gateway set",
             file=sys.stderr,
         )
         return 2
@@ -122,7 +123,7 @@ def main(argv: list[str] | None = None, *, transport_factory=build_gateway_trans
     if skipped:
         print(
             f"[evals] note: {skipped} request-level probe(s) SKIPPED "
-            "(gateway/MLX unavailable here — run on Apple Silicon for full coverage).",
+            "(gateway not importable here — check the installation).",
             file=sys.stderr,
         )
     return report.exit_code()

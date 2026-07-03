@@ -45,3 +45,32 @@ if (y) y.textContent = new Date().getFullYear();
 
 // Diagrams are pre-rendered SVG (control plane) + hand-built CSS (gauntlet) —
 // no runtime diagram dependency, so nothing can fail to load or flash.
+
+/* ---- product tour: scroll-driven frame scrubbing ---- */
+const tourImg = document.getElementById("tour-frame");
+if (tourImg) {
+  const steps = [...document.querySelectorAll("#tour-steps .tstep")];
+  const actor = document.getElementById("tour-actor");
+  const progress = document.getElementById("tour-progress");
+
+  // Preload every frame once the tour approaches the viewport, so scrubbing never flashes.
+  const preload = () => steps.forEach((s) => { new Image().src = `assets/tour/${s.dataset.frame}.webp`; });
+  new IntersectionObserver((entries, obs) => {
+    if (entries.some((e) => e.isIntersecting)) { preload(); obs.disconnect(); }
+  }, { rootMargin: "600px" }).observe(tourImg);
+
+  const activate = (step) => {
+    const i = steps.indexOf(step);
+    if (i < 0 || !step.dataset.frame) return;
+    tourImg.src = `assets/tour/${step.dataset.frame}.webp`;
+    steps.forEach((s) => s.classList.toggle("active", s === step));
+    if (actor) actor.innerHTML = "connected as <b>" + step.dataset.actor + "</b>";
+    if (progress) progress.textContent = `${i + 1} / ${steps.length}`;
+  };
+
+  // A step becomes active when it crosses the middle band of the viewport.
+  const stepObs = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) activate(e.target); });
+  }, { rootMargin: "-42% 0px -42% 0px" });
+  steps.forEach((s) => stepObs.observe(s));
+}

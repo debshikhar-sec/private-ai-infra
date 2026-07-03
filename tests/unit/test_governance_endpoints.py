@@ -1,20 +1,33 @@
 """Integration tests for the governance endpoints and wiring.
 
-These import app.py (and therefore MLX), so they run on Apple Silicon and auto-skip
-elsewhere. They avoid real inference by hitting metadata endpoints or by
-monkeypatching the model load + generate calls.
+The gateway is backend-agnostic, so these run anywhere: inference is stubbed by
+swapping in a fake backend at the same seam the demo/evals use (``gw.BACKEND``).
 """
 
 import pytest
 
-pytest.importorskip("mlx", reason="MLX is only available on Apple Silicon")
-
-from private_ai_gateway import app as gw  # noqa: E402
-from private_ai_gateway.guardrails import Guardrails  # noqa: E402
-from private_ai_gateway.policy import Policy, Principal, hash_token  # noqa: E402
-from private_ai_gateway.ratelimit import RateLimiter  # noqa: E402
+from private_ai_gateway import app as gw
+from private_ai_gateway.backends import CompletionResult
+from private_ai_gateway.guardrails import Guardrails
+from private_ai_gateway.policy import Policy, Principal, hash_token
+from private_ai_gateway.ratelimit import RateLimiter
 
 AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+
+
+class FakeBackend:
+    """A stand-in backend that returns fixed text without loading anything."""
+
+    name = "fake"
+
+    def __init__(self, text="ok"):
+        self.text = text
+
+    def complete(self, resolved_model, messages, *, max_tokens, temperature=None):
+        return CompletionResult(text=self.text, model=resolved_model)
+
+    def info(self):
+        return {"mode": self.name, "current_model": None}
 
 
 @pytest.fixture
@@ -97,8 +110,7 @@ def test_autonomy_over_ceiling_denied(monkeypatch):
 def test_autonomy_at_or_below_ceiling_allowed(monkeypatch):
     # At/below the ceiling, the request passes the gate and proceeds to inference,
     # which we stub out so no model loads.
-    monkeypatch.setattr(gw, "swap_model_if_needed", lambda *a, **k: True)
-    monkeypatch.setattr(gw, "generate", lambda *a, **k: "ok")
+    monkeypatch.setattr(gw, "BACKEND", FakeBackend("ok"))
     client, key = _autonomy_client(monkeypatch, ceiling=3)
     r = client.post(
         "/v1/chat/completions",
@@ -215,8 +227,7 @@ def test_guardrail_redacts_secret_in_chat(monkeypatch):
     monkeypatch.setattr(gw, "AUTH_TOKEN", "test-token")
     monkeypatch.setattr(gw, "GUARDRAILS", Guardrails("redact"))
     monkeypatch.setattr(gw, "RATE_LIMITER", RateLimiter(0))
-    monkeypatch.setattr(gw, "swap_model_if_needed", lambda *a, **k: True)
-    monkeypatch.setattr(gw, "generate", lambda *a, **k: f"the key is {AWS_KEY} ok")
+    monkeypatch.setattr(gw, "BACKEND", FakeBackend(f"the key is {AWS_KEY} ok"))
 
     client = gw.app.test_client()
     r = client.post(

@@ -14,6 +14,7 @@ The card is derived from policy, never self-asserted by the agent.
 
 from __future__ import annotations
 
+from private_ai_gateway import __version__
 from private_ai_gateway import autonomy as autonomy_mod
 from private_ai_gateway.policy import Principal
 
@@ -36,7 +37,7 @@ def agent_card(principal: Principal, *, base_url: str, ceiling: int | None) -> d
             "Capability is bounded by an enforced autonomy ceiling."
         ),
         "url": f"{base_url}/a2a/tasks",
-        "version": "0.13.0",
+        "version": __version__,
         "capabilities": {"streaming": False, "pushNotifications": False},
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["application/json"],

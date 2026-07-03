@@ -16,11 +16,19 @@ from __future__ import annotations
 
 import argparse
 
-__version__ = "0.14.0"
+from private_ai_gateway import __version__
 
 
 def _serve(args: argparse.Namespace) -> int:
-    # Imported lazily so `version`/`--help` work without importing MLX.
+    import os
+
+    # Backend selection happens at app import, so flags must land in the
+    # environment first. Imported lazily so `version`/`--help` stay instant.
+    if args.backend:
+        os.environ["PRIVATE_AI_BACKEND"] = args.backend
+    if args.upstream_base_url:
+        os.environ["PRIVATE_AI_UPSTREAM_BASE_URL"] = args.upstream_base_url
+
     from private_ai_gateway import app as gw
 
     if not gw.AUTH_TOKEN:
@@ -51,7 +59,37 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="Run the gateway on loopback (Flask).")
     serve.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1).")
     serve.add_argument("--port", type=int, default=8080, help="Bind port (default: 8080).")
+    serve.add_argument(
+        "--backend",
+        choices=["auto", "mlx", "openai", "demo"],
+        default=None,
+        help="Inference backend (default: auto — upstream URL, then MLX, then demo).",
+    )
+    serve.add_argument(
+        "--upstream-base-url",
+        default=None,
+        help="OpenAI-compatible upstream, e.g. https://llm.internal/v1 or "
+        "http://127.0.0.1:11434/v1 (Ollama). Pass the upstream API key via "
+        "PRIVATE_AI_UPSTREAM_API_KEY, never on the command line.",
+    )
     serve.set_defaults(func=_serve)
+
+    demo = sub.add_parser(
+        "demo",
+        help="One-command starter kit: demo policy + offline backend + scripted "
+        "governed traffic, then serve the Governance Console.",
+    )
+    demo.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1).")
+    demo.add_argument("--port", type=int, default=8080, help="Bind port (default: 8080).")
+    demo.add_argument(
+        "--no-serve", action="store_true",
+        help="Run the scripted traffic and exit (CI / smoke-test mode).",
+    )
+    demo.set_defaults(
+        func=lambda a: __import__(
+            "private_ai_gateway.demo", fromlist=["main"]
+        ).main(a.host, a.port, serve=not a.no_serve)
+    )
 
     ver = sub.add_parser("version", help="Print the version and exit.")
     ver.set_defaults(func=lambda _a: (print(__version__) or 0))

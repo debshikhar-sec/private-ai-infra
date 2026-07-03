@@ -72,11 +72,17 @@ class Policy:
         default_requests_per_minute: int = 0,
         guardrail_action: str = "off",
         default_max_autonomy_level: int | None = None,
+        model_routes: dict[str, str] | None = None,
+        default_model_alias: str | None = None,
     ):
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
         self.guardrail_action = guardrail_action
         self.default_max_autonomy_level = default_max_autonomy_level
+        # Model routing is policy too: the ``[models]`` table maps stable aliases to
+        # backend model ids, so switching model planes never rewrites client configs.
+        self.model_routes = dict(model_routes or {})
+        self.default_model_alias = default_model_alias
 
     @property
     def principal_count(self) -> int:
@@ -133,11 +139,22 @@ class Policy:
         autonomy_tbl = raw.get("autonomy", {}) or {}
         default_autonomy = autonomy_mod.parse_level(autonomy_tbl.get("default_max_level"))
 
+        models_tbl = raw.get("models", {}) or {}
+        routes_raw = models_tbl.get("routes", {}) or {}
+        model_routes = {
+            str(alias): str(target)
+            for alias, target in routes_raw.items()
+            if str(alias).strip() and str(target).strip()
+        }
+        default_alias = str(models_tbl.get("default_alias", "")).strip() or None
+
         return cls(
             principals,
             default_requests_per_minute=default_rpm,
             guardrail_action=action,
             default_max_autonomy_level=default_autonomy,
+            model_routes=model_routes,
+            default_model_alias=default_alias,
         )
 
     def identify(self, bearer_token: str) -> Principal | None:

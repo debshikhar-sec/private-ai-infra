@@ -1,4 +1,3 @@
-# Runtime dependencies. Apple Silicon only (MLX). See pyproject.toml for the canonical list.
+# Runtime dependencies (platform-agnostic). See pyproject.toml for the canonical list.
+# For in-process Apple Silicon inference add: -r requirements-mlx.txt
 flask==3.1.3
-mlx==0.31.2
-mlx-lm==0.31.3

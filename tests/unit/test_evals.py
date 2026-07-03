@@ -1,15 +1,14 @@
 """Tests for the adversarial security eval harness.
 
-The harness *scoring* is validated with canned transports (no MLX). The egress probes run
-for real against the pure `Guardrails`. A final MLX-gated test drives the live gateway and
-asserts every attack is repelled — the security regression gate.
+The harness *scoring* is validated with canned transports. The egress probes run for
+real against the pure `Guardrails`. A final test drives the live gateway (any backend)
+and asserts every attack is repelled — the security regression gate.
 """
 
 from __future__ import annotations
 
 import json
 
-import pytest
 from evals import run as evalrun
 from evals.cases import AGENTIC_CASES, ALL_CASES, EGRESS_CASES
 from evals.harness import (
@@ -162,7 +161,6 @@ def test_cli_json_output_to_file(tmp_path):
 # --------------------------------------------------------------- live gateway gate
 def test_live_gateway_repels_every_attack():
     """The real enforcement path must pass the full suite (incl. the autonomy-bypass)."""
-    pytest.importorskip("mlx", reason="MLX is only available on Apple Silicon")
     transport = evalrun.build_gateway_transport()
     assert transport is not None
     ctx = Context(transport=transport, guardrails=evalrun._build_guardrails())

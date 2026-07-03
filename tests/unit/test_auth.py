@@ -1,15 +1,12 @@
 """Unit tests for the gateway's auth boundary and request-size limit.
 
-app.py imports MLX at module load, so these run on Apple Silicon and auto-skip
-elsewhere. AUTH_TOKEN is read from the environment at import; tests monkeypatch
-the module global, which the auth handler reads at request time.
+AUTH_TOKEN is read from the environment at import; tests monkeypatch the module
+global, which the auth handler reads at request time.
 """
 
 import pytest
 
-pytest.importorskip("mlx", reason="MLX is only available on Apple Silicon")
-
-from private_ai_gateway import app as gw  # noqa: E402
+from private_ai_gateway import app as gw
 
 
 @pytest.fixture

@@ -6,137 +6,292 @@
 <title>Governance Console — private-ai-gateway</title>
 <style>
   :root {
-    --bg: #08090d; --panel: #0e1117; --line: #1c2230; --text: #dbe2ee; --dim: #7c8598;
-    --accent: #6d9cff; --allow: #34d399; --deny: #f87171; --filter: #fbbf24;
+    --bg: #07080c; --rail: #0a0c12; --panel: #0e1117; --panel2: #10141d;
+    --line: #1c2230; --line2: #232b3d; --text: #dbe2ee; --dim: #7c8598;
+    --accent: #6d9cff; --accent2: #8b5cf6;
+    --allow: #34d399; --deny: #f87171; --filter: #fbbf24;
     --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: center; gap: .75rem; padding: .9rem 1.4rem;
-           border-bottom: 1px solid var(--line); }
-  header .dot { width: 10px; height: 10px; border-radius: 50%;
-                background: linear-gradient(135deg, #8b5cf6, #3b82f6, #22d3ee); }
-  header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
-  header .sub { color: var(--dim); font-size: .8rem; }
-  main { display: grid; grid-template-columns: 340px 1fr; gap: 1rem; padding: 1rem 1.4rem;
-         max-width: 1400px; margin-inline: auto; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-          padding: 1rem; }
-  .card h2 { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase;
-             color: var(--dim); margin: 0 0 .7rem; }
-  label { display: block; font-size: .75rem; color: var(--dim); margin: .6rem 0 .25rem; }
-  input, select, textarea, button {
-    width: 100%; background: #0a0d13; color: var(--text); border: 1px solid var(--line);
-    border-radius: 7px; padding: .5rem .65rem; font: inherit;
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         display: grid; grid-template-columns: 212px 1fr; grid-template-rows: 54px 1fr;
+         grid-template-areas: "rail top" "rail main"; }
+
+  /* ---- left rail ---- */
+  nav { grid-area: rail; background: var(--rail); border-right: 1px solid var(--line);
+        display: flex; flex-direction: column; padding: .9rem .6rem; gap: .15rem; }
+  nav .brand { display: flex; align-items: center; gap: .55rem; padding: .2rem .5rem 1rem; }
+  nav .brand .dot { width: 12px; height: 12px; border-radius: 4px; flex: none;
+                    background: linear-gradient(135deg, #8b5cf6, #3b82f6, #22d3ee); }
+  nav .brand b { font-size: .86rem; letter-spacing: .01em; }
+  nav .brand small { display: block; color: var(--dim); font-size: .64rem; font-weight: 400; }
+  nav button.nv { display: flex; align-items: center; gap: .6rem; width: 100%;
+        background: transparent; border: 0; color: var(--dim); text-align: left;
+        padding: .5rem .6rem; border-radius: 8px; font: inherit; font-size: .82rem;
+        cursor: pointer; }
+  nav button.nv:hover { background: var(--panel); color: var(--text); }
+  nav button.nv.active { background: #131a2a; color: var(--text);
+        box-shadow: inset 2px 0 0 var(--accent); }
+  nav button.nv .ic { width: 1.1rem; text-align: center; font-size: .82rem; opacity: .9; }
+  nav .foot { margin-top: auto; padding: .6rem .5rem 0; color: var(--dim);
+              font-size: .64rem; border-top: 1px solid var(--line); }
+
+  /* ---- top bar ---- */
+  header { grid-area: top; display: flex; align-items: center; gap: .7rem;
+           padding: 0 1.1rem; border-bottom: 1px solid var(--line); background: var(--rail); }
+  header h1 { font-size: .92rem; margin: 0; font-weight: 600; }
+  .chip { display: inline-flex; align-items: center; gap: .4rem; font-family: var(--mono);
+          font-size: .68rem; color: var(--dim); border: 1px solid var(--line);
+          border-radius: 999px; padding: .18rem .6rem; white-space: nowrap; }
+  .chip .st { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .chip.ok .st { background: var(--allow); }
+  .chip.bad .st { background: var(--deny); }
+  header .space { flex: 1; }
+  header input { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+                 border-radius: 7px; padding: .38rem .6rem; font: inherit; font-size: .78rem;
+                 width: 240px; }
+  header button { background: #14213d; color: var(--text); border: 1px solid #27406e;
+                  border-radius: 7px; padding: .38rem .8rem; font: inherit; font-size: .78rem;
+                  font-weight: 600; cursor: pointer; }
+  header button:hover { background: #1a2b50; }
+  header button.ghost { background: transparent; border-color: var(--line); font-weight: 400; }
+
+  /* ---- main ---- */
+  main { grid-area: main; overflow-y: auto; padding: 1.1rem 1.3rem 2rem; }
+  .pane { display: none; max-width: 1180px; margin-inline: auto; }
+  .pane.active { display: block; }
+  .pane > h2 { font-size: 1.02rem; margin: .1rem 0 .9rem; font-weight: 650; }
+  .pane > h2 small { color: var(--dim); font-weight: 400; font-size: .78rem; margin-left: .6rem; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+           gap: .8rem; margin-bottom: 1rem; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: .85rem .95rem; }
+  .stat .n { font-size: 1.55rem; font-weight: 700; font-family: var(--mono); }
+  .stat .l { color: var(--dim); font-size: .72rem; margin-top: .1rem; }
+  .stat.allow .n { color: var(--allow); } .stat.deny .n { color: var(--deny); }
+  .stat.filter .n { color: var(--filter); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  .card h3 { font-size: .74rem; letter-spacing: .09em; text-transform: uppercase;
+             color: var(--dim); margin: 0 0 .7rem; font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 980px) { .grid2 { grid-template-columns: 1fr; } }
+
+  label { display: block; font-size: .73rem; color: var(--dim); margin: .6rem 0 .25rem; }
+  input.f, select, textarea {
+    width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: .5rem .65rem; font: inherit; font-size: .82rem;
   }
-  textarea { font-family: var(--mono); font-size: .8rem; resize: vertical; }
-  button { cursor: pointer; background: #14213d; border-color: #27406e; font-weight: 600; }
-  button:hover { background: #1a2b50; }
-  button.ghost { background: transparent; border-color: var(--line); font-weight: 400; }
-  .row { display: flex; gap: .5rem; }
-  .row > * { flex: 1; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: .15rem .8rem;
+  textarea { font-family: var(--mono); font-size: .78rem; resize: vertical; }
+  button.act { background: #14213d; color: var(--text); border: 1px solid #27406e;
+               border-radius: 7px; padding: .5rem .9rem; font: inherit; font-size: .8rem;
+               font-weight: 600; cursor: pointer; margin-top: .7rem; }
+  button.act:hover { background: #1a2b50; }
+  button.mini { background: var(--panel2); color: var(--text); border: 1px solid var(--line2);
+                border-radius: 7px; padding: .4rem .7rem; font: inherit; font-size: .74rem;
+                cursor: pointer; }
+  button.mini:hover { border-color: #3b4c6e; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: .18rem .9rem;
         font-family: var(--mono); font-size: .78rem; }
   .kv dt { color: var(--dim); } .kv dd { margin: 0; overflow-wrap: anywhere; }
-  .ladder { display: flex; gap: 3px; margin-top: .5rem; }
-  .ladder span { flex: 1; text-align: center; font-family: var(--mono); font-size: .68rem;
-                 padding: .25rem 0; border-radius: 4px; background: #10141c; color: var(--dim);
+  .ladder { display: flex; gap: 3px; margin-top: .6rem; }
+  .ladder span { flex: 1; text-align: center; font-family: var(--mono); font-size: .66rem;
+                 padding: .28rem 0; border-radius: 4px; background: #10141c; color: var(--dim);
                  border: 1px solid var(--line); }
   .ladder span.on { background: #12321f; color: var(--allow); border-color: #1f5c39; }
   .ladder span.cap { outline: 1px solid var(--allow); }
-  .feed { font-family: var(--mono); font-size: .74rem; max-height: 420px; overflow-y: auto; }
-  .feed .ev { display: grid; grid-template-columns: 62px 56px 1fr auto; gap: .6rem;
-              padding: .3rem .4rem; border-bottom: 1px solid #12161f; align-items: baseline; }
+
+  .feed { font-family: var(--mono); font-size: .74rem; max-height: 560px; overflow-y: auto; }
+  .feed .ev { display: grid; grid-template-columns: 60px 54px 1fr auto; gap: .6rem;
+              padding: .32rem .4rem; border-bottom: 1px solid #12161f; align-items: baseline; }
   .feed .ev:first-child { animation: flash .8s ease-out; }
   @keyframes flash { from { background: #14213d; } to { background: transparent; } }
-  .pill { font-weight: 700; text-transform: uppercase; font-size: .66rem; }
+  .pill { font-weight: 700; text-transform: uppercase; font-size: .65rem; }
   .allow { color: var(--allow); } .deny { color: var(--deny); } .filter { color: var(--filter); }
   .dimtx { color: var(--dim); }
+  .bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden;
+         border: 1px solid var(--line); background: var(--panel2); }
+  .bar i { display: block; height: 100%; }
+  .filters { display: flex; gap: .4rem; margin-bottom: .6rem; flex-wrap: wrap; }
+  .filters button.mini.sel { border-color: var(--accent); color: var(--accent); }
+  .filters input.f { flex: 1; min-width: 140px; width: auto; }
+
   .out { font-family: var(--mono); font-size: .76rem; white-space: pre-wrap;
-         background: #0a0d13; border: 1px solid var(--line); border-radius: 7px;
-         padding: .6rem; margin-top: .6rem; max-height: 260px; overflow-y: auto; }
-  .status-line { font-size: .74rem; color: var(--dim); margin-top: .5rem; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  @media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
-  .metric-rows { font-family: var(--mono); font-size: .74rem; }
-  .metric-rows div { display: flex; justify-content: space-between; gap: 1rem;
-                     padding: .18rem 0; border-bottom: 1px solid #12161f; }
-  .stack { display: flex; flex-direction: column; gap: 1rem; }
+         background: var(--panel2); border: 1px solid var(--line); border-radius: 7px;
+         padding: .6rem; margin-top: .7rem; max-height: 300px; overflow-y: auto; }
+  .metric-rows, .tool-rows { font-family: var(--mono); font-size: .74rem; }
+  .metric-rows div, .tool-rows .tr { display: flex; justify-content: space-between; gap: 1rem;
+                     padding: .22rem 0; border-bottom: 1px solid #12161f; }
+  .status-line { font-size: .74rem; color: var(--dim); margin-top: .55rem; }
+  .scenarios { display: flex; gap: .5rem; flex-wrap: wrap; }
   .hidden { display: none; }
+  .empty { color: var(--dim); font-size: .8rem; }
 </style>
 </head>
 <body>
+
+<nav>
+  <div class="brand">
+    <span class="dot"></span>
+    <b>Governance Console<br><small>private-ai-gateway</small></b>
+  </div>
+  <button class="nv active" data-pane="overview"><span class="ic">◧</span>Overview</button>
+  <button class="nv" data-pane="audit"><span class="ic">≣</span>Live audit</button>
+  <button class="nv" data-pane="probe"><span class="ic">⌁</span>Probe lab</button>
+  <button class="nv" data-pane="tools"><span class="ic">⚒</span>Tools</button>
+  <button class="nv" data-pane="agents"><span class="ic">⧉</span>Agents</button>
+  <button class="nv" data-pane="metrics"><span class="ic">∿</span>Metrics</button>
+  <div class="foot">capability is not authority — every decision below is enforced, then recorded.</div>
+</nav>
+
 <header>
-  <span class="dot"></span>
-  <h1>Governance Console</h1>
-  <span class="sub">private-ai-gateway — capability is not authority</span>
+  <h1 id="pane-title">Overview</h1>
+  <span class="chip" id="gw-chip"><span class="st"></span><span id="gw-chip-t">gateway</span></span>
+  <span class="chip" id="who-chip"><span class="st"></span><span id="who-chip-t">not connected</span></span>
+  <div class="space"></div>
+  <input id="token" type="password" placeholder="Bearer token (kept in this tab only)" autocomplete="off" />
+  <button id="connect">Connect</button>
+  <button id="disconnect" class="ghost">Clear</button>
 </header>
 
 <main>
-  <div class="stack">
-    <section class="card" aria-labelledby="id-h">
-      <h2 id="id-h">Identity</h2>
-      <label for="token">Bearer token (kept in this tab only)</label>
-      <input id="token" type="password" placeholder="paste an API key…" autocomplete="off" />
-      <div class="row" style="margin-top:.6rem">
-        <button id="connect">Connect</button>
-        <button id="disconnect" class="ghost">Clear</button>
-      </div>
-      <div id="who" class="hidden" style="margin-top: .8rem">
-        <dl class="kv">
-          <dt>principal</dt><dd id="w-principal">—</dd>
-          <dt>models</dt><dd id="w-models">—</dd>
-          <dt>rpm cap</dt><dd id="w-rpm">—</dd>
-          <dt>token cap</dt><dd id="w-cap">—</dd>
-          <dt>ceiling</dt><dd id="w-ceiling">—</dd>
-        </dl>
-        <div class="ladder" id="ladder" title="Autonomy ladder — enforced ceiling"></div>
-      </div>
-      <div class="status-line" id="id-status">Not connected.</div>
-    </section>
 
-    <section class="card">
-      <h2>Governed probe</h2>
-      <label for="p-model">Model alias</label>
-      <input id="p-model" value="strategy" />
-      <label for="p-level">Declared autonomy level</label>
-      <select id="p-level">
-        <option value="">(none declared)</option>
-        <option>0</option><option>1</option><option>2</option><option>3</option>
-        <option>4</option><option>5</option><option>6</option>
-      </select>
-      <label for="p-msg">Message</label>
-      <textarea id="p-msg" rows="3">Reply with one short sentence.</textarea>
-      <div class="row" style="margin-top:.6rem">
-        <button id="p-send">Send through the plane</button>
-      </div>
-      <div class="out hidden" id="p-out"></div>
-    </section>
-
-    <section class="card">
-      <h2>Granted tools (MCP)</h2>
-      <div class="metric-rows" id="tools">—</div>
-    </section>
-  </div>
-
-  <div class="stack">
-    <section class="card">
-      <h2>Decision audit — live <span class="dimtx" id="feed-state"></span></h2>
-      <div class="feed" id="feed"><div class="dimtx">Connect to stream decisions.</div></div>
-    </section>
-    <div class="grid2">
-      <section class="card">
-        <h2>Enforcement metrics</h2>
-        <div class="metric-rows" id="mx">—</div>
-      </section>
-      <section class="card">
-        <h2>Agent card (A2A)</h2>
-        <div class="out" id="cardout" style="margin-top:0">—</div>
-      </section>
+  <!-- ============ OVERVIEW ============ -->
+  <section class="pane active" id="pane-overview">
+    <div class="cards">
+      <div class="stat allow"><div class="n" id="s-allow">—</div><div class="l">requests allowed</div></div>
+      <div class="stat deny"><div class="n" id="s-deny">—</div><div class="l">requests denied</div></div>
+      <div class="stat deny"><div class="n" id="s-authz">—</div><div class="l">authorization denials</div></div>
+      <div class="stat filter"><div class="n" id="s-guard">—</div><div class="l">guardrail redactions</div></div>
+      <div class="stat"><div class="n" id="s-tools">—</div><div class="l">governed tool calls</div></div>
+      <div class="stat"><div class="n" id="s-a2a">—</div><div class="l">A2A delegations</div></div>
     </div>
-  </div>
+
+    <div class="card">
+      <h3>Enforcement ratio</h3>
+      <div class="bar" id="ratio-bar" title="allow / deny / filter"></div>
+      <div class="status-line" id="ratio-note">Connect to compute the allow/deny ratio.</div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>Connected identity</h3>
+        <div id="who" class="hidden">
+          <dl class="kv">
+            <dt>principal</dt><dd id="w-principal">—</dd>
+            <dt>models</dt><dd id="w-models">—</dd>
+            <dt>rpm cap</dt><dd id="w-rpm">—</dd>
+            <dt>token cap</dt><dd id="w-cap">—</dd>
+            <dt>ceiling</dt><dd id="w-ceiling">—</dd>
+          </dl>
+          <div class="ladder" id="ladder" title="Autonomy ladder — enforced ceiling"></div>
+        </div>
+        <div class="status-line" id="id-status">Paste a Bearer token above and press Connect.</div>
+      </div>
+      <div class="card">
+        <h3>Boundary probes — try to exceed this identity</h3>
+        <p class="dimtx" style="font-size:.78rem; margin:.1rem 0 .7rem">
+          Each button sends a real request designed to be refused. Watch it land in the
+          live audit as a 403 — enforcement on the wire, not narration.</p>
+        <div class="scenarios">
+          <button class="mini" id="sc-model">Request an ungranted model</button>
+          <button class="mini" id="sc-level">Declare L6 autonomy</button>
+          <button class="mini" id="sc-tool">Invoke payments.initiate</button>
+          <button class="mini" id="sc-skill">Delegate an ungranted skill</button>
+        </div>
+        <div class="out hidden" id="sc-out"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LIVE AUDIT ============ -->
+  <section class="pane" id="pane-audit">
+    <div class="card">
+      <h3>Decision audit — live <span class="dimtx" id="feed-state"></span></h3>
+      <div class="filters">
+        <button class="mini sel" data-f="">all</button>
+        <button class="mini" data-f="allow">allow</button>
+        <button class="mini" data-f="deny">deny</button>
+        <button class="mini" data-f="filter">filter</button>
+        <input class="f" id="feed-q" placeholder="search principal / reason / path…" />
+      </div>
+      <div class="feed" id="feed"><div class="empty">Connect to stream decisions.</div></div>
+    </div>
+  </section>
+
+  <!-- ============ PROBE LAB ============ -->
+  <section class="pane" id="pane-probe">
+    <div class="grid2">
+      <div class="card">
+        <h3>Chat completion (governed)</h3>
+        <label for="p-model">Model alias</label>
+        <input class="f" id="p-model" value="strategy" />
+        <label for="p-level">Declared autonomy level</label>
+        <select id="p-level">
+          <option value="">(none declared)</option>
+          <option>0</option><option>1</option><option>2</option><option>3</option>
+          <option>4</option><option>5</option><option>6</option>
+        </select>
+        <label for="p-msg">Message</label>
+        <textarea id="p-msg" rows="3">Reply with one short sentence.</textarea>
+        <button class="act" id="p-send">Send through the plane</button>
+        <div class="out hidden" id="p-out"></div>
+      </div>
+      <div class="card">
+        <h3>Tool call (MCP, governed)</h3>
+        <label for="t-name">Tool</label>
+        <select id="t-name"></select>
+        <label for="t-args">Arguments (JSON)</label>
+        <textarea id="t-args" rows="3">{"ticker": "EURUSD"}</textarea>
+        <button class="act" id="t-send">Call tool</button>
+        <div class="out hidden" id="t-out"></div>
+        <h3 style="margin-top:1.2rem">A2A delegation (governed)</h3>
+        <label for="a-skill">Skill</label>
+        <input class="f" id="a-skill" placeholder="e.g. research.summarize" />
+        <label for="a-level">Autonomy level</label>
+        <select id="a-level">
+          <option value="">(none declared)</option>
+          <option>0</option><option>1</option><option>2</option><option>3</option>
+          <option>4</option><option>5</option><option>6</option>
+        </select>
+        <button class="act" id="a-send">Delegate task</button>
+        <div class="out hidden" id="a-out"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TOOLS ============ -->
+  <section class="pane" id="pane-tools">
+    <div class="card">
+      <h3>Tools granted to this identity</h3>
+      <p class="dimtx" style="font-size:.78rem; margin:.1rem 0 .7rem">
+        Every tool declares the autonomy floor a caller must be permitted to reach.
+        A grant without the floor is refused; the floor without a grant is refused.</p>
+      <div class="tool-rows" id="tools"><div class="empty">Connect to list granted tools.</div></div>
+    </div>
+  </section>
+
+  <!-- ============ AGENTS ============ -->
+  <section class="pane" id="pane-agents">
+    <div class="card">
+      <h3>A2A agent card — rendered from policy, never self-asserted</h3>
+      <div class="out" id="cardout" style="margin-top:0">—</div>
+    </div>
+  </section>
+
+  <!-- ============ METRICS ============ -->
+  <section class="pane" id="pane-metrics">
+    <div class="card">
+      <h3>Prometheus samples (/metrics)</h3>
+      <div class="metric-rows" id="mx"><div class="empty">Connect to scrape metrics.</div></div>
+    </div>
+  </section>
+
 </main>
 
 <script>
@@ -146,6 +301,11 @@
   let token = "";
   let pollTimer = null;
   let lastSeen = "";
+  let events = [];
+  let feedFilter = "";
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+    (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
   const api = async (path, opts = {}) => {
     const res = await fetch(path, {
@@ -159,6 +319,32 @@
     return { ok: res.ok, status: res.status, body };
   };
 
+  /* ---------- navigation ---------- */
+  document.querySelectorAll("nav .nv").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("nav .nv").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".pane").forEach((p) => p.classList.remove("active"));
+      btn.classList.add("active");
+      $("pane-" + btn.dataset.pane).classList.add("active");
+      $("pane-title").textContent = btn.textContent.trim();
+    });
+  });
+
+  /* ---------- gateway health chip (unauthenticated, data-free) ---------- */
+  const refreshHealth = async () => {
+    try {
+      const r = await fetch("/health");
+      const b = await r.json();
+      const mode = b?.backend?.mode || "?";
+      $("gw-chip").className = "chip ok";
+      $("gw-chip-t").textContent = "gateway · backend: " + mode;
+    } catch {
+      $("gw-chip").className = "chip bad";
+      $("gw-chip-t").textContent = "gateway unreachable";
+    }
+  };
+
+  /* ---------- identity ---------- */
   const renderLadder = (ceiling) => {
     const names = ["L0","L1","L2","L3","L4","L5","L6"];
     $("ladder").innerHTML = names.map((n, i) => {
@@ -167,15 +353,14 @@
     }).join("");
   };
 
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
-    (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-
-  const renderFeed = (events) => {
-    if (!events.length) { $("feed").innerHTML = '<div class="dimtx">No decisions yet.</div>'; return; }
-    const newest = JSON.stringify(events[0]);
-    if (newest === lastSeen) return;
-    lastSeen = newest;
-    $("feed").innerHTML = events.map((e) => `
+  /* ---------- live audit feed ---------- */
+  const renderFeed = () => {
+    const q = ($("feed-q").value || "").toLowerCase();
+    const shown = events.filter((e) =>
+      (!feedFilter || e.decision === feedFilter) &&
+      (!q || JSON.stringify(e).toLowerCase().includes(q)));
+    if (!shown.length) { $("feed").innerHTML = '<div class="empty">No matching decisions.</div>'; return; }
+    $("feed").innerHTML = shown.map((e) => `
       <div class="ev">
         <span class="dimtx">${esc((e.ts || "").slice(11, 19))}</span>
         <span class="pill ${esc(e.decision)}">${esc(e.decision)}</span>
@@ -186,34 +371,82 @@
   };
 
   const refreshDecisions = async () => {
-    const r = await api("/v1/decisions?limit=60");
-    if (r.ok) { renderFeed(r.body.decisions || []); $("feed-state").textContent = "· streaming"; }
-    else if (r.status === 403) {
-      $("feed").innerHTML = '<div class="dimtx">403 — this principal is not granted the decision audit (can_read_audit). The plane is governing you right now.</div>';
+    const r = await api("/v1/decisions?limit=80");
+    if (r.ok) {
+      const evs = r.body.decisions || [];
+      const newest = JSON.stringify(evs[0] || "");
+      if (newest !== lastSeen) { lastSeen = newest; events = evs; renderFeed(); }
+      $("feed-state").textContent = "· streaming";
+    } else if (r.status === 403) {
+      $("feed").innerHTML = '<div class="empty">403 — this principal is not granted the decision audit (can_read_audit). The plane is governing you right now.</div>';
       $("feed-state").textContent = "· denied";
     }
   };
 
+  document.querySelectorAll(".filters [data-f]").forEach((b) => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".filters [data-f]").forEach((x) => x.classList.remove("sel"));
+      b.classList.add("sel");
+      feedFilter = b.dataset.f;
+      renderFeed();
+    });
+  });
+  $("feed-q").addEventListener("input", renderFeed);
+
+  /* ---------- metrics + overview stats ---------- */
+  const parseMetrics = (text) => text.split("\n")
+    .filter((l) => l && !l.startsWith("#"))
+    .map((l) => {
+      const sp = l.lastIndexOf(" ");
+      return { key: l.slice(0, sp), value: Number(l.slice(sp + 1)) || 0 };
+    });
+
+  const sumWhere = (rows, name, needle) => rows
+    .filter((r) => r.key.startsWith(name) && (!needle || r.key.includes(needle)))
+    .reduce((a, r) => a + r.value, 0);
+
   const refreshMetrics = async () => {
     const r = await fetch("/metrics", { headers: { "Authorization": "Bearer " + token } });
-    if (!r.ok) { $("mx").innerHTML = '<div class="dimtx">' + r.status + " — metrics denied</div>"; return; }
-    const text = await r.text();
-    const rows = text.split("\n")
-      .filter((l) => l && !l.startsWith("#"))
-      .map((l) => {
-        const sp = l.lastIndexOf(" ");
-        return `<div><span>${esc(l.slice(0, sp))}</span><span>${esc(l.slice(sp + 1))}</span></div>`;
-      }).join("");
-    $("mx").innerHTML = rows || '<div class="dimtx">no samples yet</div>';
+    if (!r.ok) { $("mx").innerHTML = '<div class="empty">' + r.status + " — metrics denied</div>"; return; }
+    const rows = parseMetrics(await r.text());
+
+    $("mx").innerHTML = rows.length
+      ? rows.map((x) => `<div><span>${esc(x.key)}</span><span>${esc(x.value)}</span></div>`).join("")
+      : '<div class="empty">no samples yet</div>';
+
+    const allow = sumWhere(rows, "gateway_requests_total", 'decision="allow"');
+    const deny  = sumWhere(rows, "gateway_requests_total", 'decision="deny"');
+    const guard = sumWhere(rows, "gateway_guardrail_events_total");
+    $("s-allow").textContent = allow;
+    $("s-deny").textContent = deny;
+    $("s-authz").textContent = sumWhere(rows, "gateway_authz_denials_total");
+    $("s-guard").textContent = guard;
+    $("s-tools").textContent = sumWhere(rows, "gateway_tool_calls_total");
+    $("s-a2a").textContent = sumWhere(rows, "gateway_a2a_tasks_total");
+
+    const total = allow + deny + guard;
+    if (total > 0) {
+      const pct = (n) => (100 * n / total).toFixed(1) + "%";
+      $("ratio-bar").innerHTML =
+        `<i style="width:${pct(allow)};background:var(--allow)"></i>` +
+        `<i style="width:${pct(deny)};background:var(--deny)"></i>` +
+        `<i style="width:${pct(guard)};background:var(--filter)"></i>`;
+      $("ratio-note").textContent =
+        `${allow} allowed · ${deny} denied · ${guard} filtered — deny-by-default means red is the system working.`;
+    }
   };
 
+  /* ---------- tools ---------- */
   const refreshTools = async () => {
     const r = await api("/mcp/tools");
-    if (!r.ok) { $("tools").innerHTML = '<div class="dimtx">denied</div>'; return; }
+    if (!r.ok) { $("tools").innerHTML = '<div class="empty">denied</div>'; return; }
     const tools = r.body.tools || [];
     $("tools").innerHTML = tools.length
-      ? tools.map((t) => `<div><span>${esc(t.name)}</span><span class="dimtx">≥ L${esc(t.min_autonomy_level ?? t.min_level ?? 0)}</span></div>`).join("")
-      : '<div class="dimtx">none granted</div>';
+      ? tools.map((t) => `<div class="tr"><span>${esc(t.name)} <span class="dimtx">— ${esc(t.description || "")}</span></span><span class="dimtx">floor ≥ L${esc(t.min_autonomy_level ?? t.min_level ?? 0)}</span></div>`).join("")
+      : '<div class="empty">none granted</div>';
+    const sel = $("t-name");
+    sel.innerHTML = tools.map((t) => `<option>${esc(t.name)}</option>`).join("")
+      || "<option value=''>(none granted)</option>";
   };
 
   const refreshCard = async () => {
@@ -221,6 +454,9 @@
     $("cardout").textContent = r.ok ? JSON.stringify(r.body, null, 2) : r.status + " — denied";
   };
 
+  const refreshAll = () => { refreshDecisions(); refreshMetrics(); };
+
+  /* ---------- connect / disconnect ---------- */
   const connect = async () => {
     token = $("token").value.trim();
     if (!token) { $("id-status").textContent = "Paste a token first."; return; }
@@ -228,6 +464,8 @@
     if (!r.ok) {
       $("id-status").textContent = r.status + " — " + (r.body?.error?.message || "unauthorized");
       $("who").classList.add("hidden");
+      $("who-chip").className = "chip bad";
+      $("who-chip-t").textContent = "rejected";
       return;
     }
     const w = r.body;
@@ -240,22 +478,43 @@
     renderLadder(w.max_autonomy_level ?? null);
     $("who").classList.remove("hidden");
     $("id-status").textContent = "Connected as '" + w.principal + "'.";
-    refreshDecisions(); refreshMetrics(); refreshTools(); refreshCard();
+    $("who-chip").className = "chip ok";
+    $("who-chip-t").textContent = w.principal +
+      (w.max_autonomy_level != null ? " · L" + w.max_autonomy_level : "");
+    refreshAll(); refreshTools(); refreshCard();
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(() => { refreshDecisions(); refreshMetrics(); }, 2500);
+    pollTimer = setInterval(refreshAll, 2500);
   };
 
   const disconnect = () => {
-    token = ""; $("token").value = ""; lastSeen = "";
+    token = ""; $("token").value = ""; lastSeen = ""; events = [];
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     $("who").classList.add("hidden");
-    $("id-status").textContent = "Not connected.";
-    $("feed").innerHTML = '<div class="dimtx">Connect to stream decisions.</div>';
+    $("id-status").textContent = "Paste a Bearer token above and press Connect.";
+    $("who-chip").className = "chip";
+    $("who-chip-t").textContent = "not connected";
+    $("feed").innerHTML = '<div class="empty">Connect to stream decisions.</div>';
     $("feed-state").textContent = "";
-    $("mx").textContent = "—"; $("tools").textContent = "—"; $("cardout").textContent = "—";
+    $("mx").innerHTML = '<div class="empty">Connect to scrape metrics.</div>';
+    $("tools").innerHTML = '<div class="empty">Connect to list granted tools.</div>';
+    $("cardout").textContent = "—";
+    ["s-allow","s-deny","s-authz","s-guard","s-tools","s-a2a"].forEach((i) => $(i).textContent = "—");
   };
 
-  const probe = async () => {
+  /* ---------- probes ---------- */
+  const showResult = (el, r, allowMsg) => {
+    el.classList.remove("hidden");
+    if (r.ok) {
+      el.textContent = "HTTP " + r.status + " — allowed\n\n" +
+        (allowMsg ?? JSON.stringify(r.body, null, 2));
+    } else {
+      const err = r.body?.error || {};
+      el.textContent = "HTTP " + r.status + " — " + (err.code || "error") + "\n\n" + (err.message || "");
+    }
+    refreshAll();
+  };
+
+  const probeChat = async () => {
     const payload = {
       model: $("p-model").value.trim() || "strategy",
       messages: [{ role: "user", content: $("p-msg").value }],
@@ -266,21 +525,64 @@
     $("p-out").classList.remove("hidden");
     $("p-out").textContent = "→ POST /v1/chat/completions …";
     const r = await api("/v1/chat/completions", { method: "POST", body: JSON.stringify(payload) });
-    if (r.ok) {
-      const msg = r.body?.choices?.[0]?.message?.content ?? JSON.stringify(r.body);
-      $("p-out").textContent = "HTTP 200 — allowed\n\n" + msg;
-    } else {
-      const err = r.body?.error || {};
-      $("p-out").textContent =
-        "HTTP " + r.status + " — " + (err.code || "error") + "\n\n" + (err.message || "");
-    }
-    refreshDecisions(); refreshMetrics();
+    showResult($("p-out"), r, r.body?.choices?.[0]?.message?.content);
   };
 
+  const probeTool = async () => {
+    let args = {};
+    try { args = JSON.parse($("t-args").value || "{}"); }
+    catch { $("t-out").classList.remove("hidden"); $("t-out").textContent = "arguments are not valid JSON"; return; }
+    const r = await api("/mcp/call", { method: "POST",
+      body: JSON.stringify({ tool: $("t-name").value, arguments: args }) });
+    showResult($("t-out"), r);
+  };
+
+  const probeA2A = async () => {
+    const payload = { skill: $("a-skill").value.trim() };
+    const level = $("a-level").value;
+    if (level !== "") payload.autonomy_level = Number(level);
+    const r = await api("/a2a/tasks", { method: "POST", body: JSON.stringify(payload) });
+    showResult($("a-out"), r);
+  };
+
+  /* ---------- boundary scenario buttons ---------- */
+  const scenario = async (fn) => {
+    if (!token) { $("sc-out").classList.remove("hidden"); $("sc-out").textContent = "Connect first."; return; }
+    $("sc-out").classList.remove("hidden");
+    $("sc-out").textContent = "…";
+    const r = await fn();
+    const err = r.body?.error || {};
+    $("sc-out").textContent = r.ok
+      ? "HTTP " + r.status + " — this identity was actually allowed to do that."
+      : "HTTP " + r.status + " — " + (err.code || "denied") + "\n" + (err.message || "") +
+        "\n\nRefused by policy before any model or tool ran. See the live audit.";
+    refreshAll();
+  };
+
+  $("sc-model").addEventListener("click", () => scenario(() =>
+    api("/v1/chat/completions", { method: "POST", body: JSON.stringify({
+      model: "offsec", messages: [{ role: "user", content: "hi" }], max_tokens: 20 }) })));
+  $("sc-level").addEventListener("click", () => scenario(() =>
+    api("/v1/chat/completions", { method: "POST",
+      headers: { "X-Autonomy-Level": "L6" },
+      body: JSON.stringify({ model: "strategy",
+        messages: [{ role: "user", content: "act autonomously" }], max_tokens: 20 }) })));
+  $("sc-tool").addEventListener("click", () => scenario(() =>
+    api("/mcp/call", { method: "POST", body: JSON.stringify({
+      tool: "payments.initiate", arguments: { amount: 1000000 } }) })));
+  $("sc-skill").addEventListener("click", () => scenario(() =>
+    api("/a2a/tasks", { method: "POST", body: JSON.stringify({ skill: "deploy.prod" }) })));
+
+  /* ---------- wire up ---------- */
   $("connect").addEventListener("click", connect);
   $("disconnect").addEventListener("click", disconnect);
-  $("p-send").addEventListener("click", probe);
+  $("p-send").addEventListener("click", probeChat);
+  $("t-send").addEventListener("click", probeTool);
+  $("a-send").addEventListener("click", probeA2A);
   $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
+
+  refreshHealth();
+  setInterval(refreshHealth, 10000);
 })();
 </script>
 </body>

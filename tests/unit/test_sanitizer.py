@@ -1,15 +1,10 @@
 """Unit tests for the gateway output sanitizer.
 
 The sanitizer strips visible model control / thinking / tool-call markers before
-returning OpenAI-compatible content. app.py imports MLX at module load, so these
-tests run on Apple Silicon and auto-skip elsewhere (e.g. Linux CI).
+returning OpenAI-compatible content — regardless of which backend produced it.
 """
 
-import pytest
-
-pytest.importorskip("mlx", reason="MLX is only available on Apple Silicon")
-
-from private_ai_gateway.app import sanitize_model_output  # noqa: E402
+from private_ai_gateway.app import sanitize_model_output
 
 
 def test_strips_think_tags():

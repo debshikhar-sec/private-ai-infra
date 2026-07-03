@@ -23,7 +23,7 @@ jobs:
         run: bandit -c pyproject.toml -r src agents/hermes agents/openclaw agents/opencode_sandbox evals -q
 
       - name: pip-audit (dependency CVEs)
-        run: pip-audit -r requirements.txt
+        run: pip-audit -r requirements.txt -r requirements-mlx.txt
 
       - name: Shell script syntax
         run: |
@@ -33,9 +33,17 @@ jobs:
           done
 
   test:
-    # Apple Silicon runner so MLX installs and the tests actually run
-    # (they importorskip MLX and would otherwise all skip on Linux).
-    runs-on: macos-14
+    # The gateway is model-plane-agnostic: the full suite (269 tests) runs identically
+    # on Linux (no MLX — backends are faked/simulated) and on Apple Silicon (MLX
+    # installed). Both must pass; neither skips.
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            mlx: "no"
+          - os: macos-14
+            mlx: "yes"
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,5 +53,30 @@ jobs:
       - name: Install
         run: pip install -r requirements-dev.txt
 
+      - name: Install MLX backend (Apple Silicon only)
+        if: matrix.mlx == 'yes'
+        run: pip install -r requirements-mlx.txt
+
       - name: Tests with coverage
         run: pytest --cov=private_ai_gateway --cov=hermes --cov=openclaw --cov=opencode_sandbox --cov=evals --cov-report=term-missing --cov-fail-under=85
+
+      - name: Security evals (must not skip)
+        run: PYTHONPATH=src python -m evals.run --require-gateway
+
+      - name: Starter-kit demo smoke test
+        run: PYTHONPATH=src python -m private_ai_gateway.cli demo --no-serve
+
+  # Aggregator for branch protection: the ruleset requires a check named exactly
+  # "test", but matrix legs report as "test (os, mlx)". This job reports the "test"
+  # context and fails unless every matrix leg succeeded — same enforcement, one name.
+  test-gate:
+    name: test
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every test matrix leg succeeded
+        run: |
+          result="${{ needs.test.result }}"
+          echo "matrix result: $result"
+          [ "$result" = "success" ]

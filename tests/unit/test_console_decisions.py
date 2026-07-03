@@ -9,12 +9,9 @@ import json
 
 import pytest
 
+from private_ai_gateway import app as gw
 from private_ai_gateway.audit import DecisionLog
-
-pytest.importorskip("mlx", reason="MLX is only available on Apple Silicon")
-
-from private_ai_gateway import app as gw  # noqa: E402
-from private_ai_gateway.policy import Policy, Principal, hash_token  # noqa: E402
+from private_ai_gateway.policy import Policy, Principal, hash_token
 
 
 # -----------------------------

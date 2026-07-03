@@ -4,6 +4,57 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-07-02
+
+### Added
+- **Pluggable inference backends — the plane is now model-plane-agnostic.** Inference is
+  isolated behind one interface (`backends.py`) with three implementations: `mlx`
+  (in-process Apple Silicon, unchanged behaviour), `openai` (any OpenAI-compatible
+  upstream — enterprise LLM-as-a-Service, vLLM, TGI, Ollama, LM Studio — stdlib-only
+  HTTP client, scheme-validated URL, upstream failures surfaced as `502 upstream_error`),
+  and `demo` (deterministic offline simulator). Selection via `PRIVATE_AI_BACKEND`
+  (`auto` prefers a configured upstream, then MLX, then demo) or
+  `serve --backend/--upstream-base-url`. MLX moved to an optional extra
+  (`pip install .[mlx]`); the base install is platform-agnostic.
+- **Model routing as policy.** Optional `[models]` table in `policy.toml`
+  (`default_alias`, `[models.routes]` alias → backend model id) so aliases and
+  per-principal allowlists survive a change of model plane.
+- **Starter kit: `private-ai-gateway demo`.** One command loads a packaged demo policy
+  (five simulated financial-enterprise principals: research-copilot L2,
+  kyc-screening-agent L3, suggest-only trading-assistant L1, ops-automation L4, auditor
+  with `can_read_audit`), replays 13 scripted steps of governed traffic through the real
+  enforcement code — allows, model/tool/skill/autonomy denials, a granted-but-floor-gated
+  `payments.initiate`, an A2A delegation, a live guardrail redaction, an audited audit-read
+  denial — prints the tally and the demo tokens, then serves the console. Five new
+  simulated line-of-business tools with honest autonomy floors (`market.snapshot` L0,
+  `docs.search` L1, `kyc.sanctions_screen` L2, `email.draft` L3, `payments.initiate` L5).
+- **Governance Console v2 — an app-style dashboard.** Sidebar navigation (Overview,
+  Live audit, Probe lab, Tools, Agents, Metrics), overview stat cards with the
+  allow/deny/filter enforcement ratio, a filterable + searchable live audit feed,
+  probe panels for chat / MCP tool calls / A2A delegation, one-click boundary probes
+  that get themselves refused on the wire, and gateway/backend status chips. Still a
+  single static file under the same strict CSP.
+
+- **Console walkthrough + scroll-driven product tour.** A 16-frame end-to-end journey
+  through the console (captured from `private-ai-gateway demo` with a headless-Chrome
+  CDP rig — real enforcement, no mockups) ships as a 38-second GIF/MP4 and as an
+  Apple-style scroll-scrub tour on the GitHub Pages site (`#tour`): a sticky frame
+  viewer follows sixteen step captions, each grounding a feature in documented
+  real-world practice (regulator-proof AI audit trails at Point72/Balyasny, D.E. Shaw's
+  gateway-level redaction, the CSA zero-deny-rules finding, EU AI Act logging duties).
+  Static, dependency-free, degrades to the GIF without JavaScript.
+
+### Changed
+- Eval suite grows to 20 cases (`MCP-002`: an L4 principal invokes the granted
+  `payments.initiate`, which floors at L5 → `403 autonomy_exceeded` — a grant does not
+  outrank a tool's autonomy floor).
+- Site copy updated to the model-plane-agnostic positioning; stats refreshed
+  (11 enforced controls, 20 evals, 269 tests on 2 platforms); proof table gains the
+  A2A / MCP / audit-read rows.
+- CI now runs the full test suite on **both** ubuntu-latest (no MLX) and macos-14
+  (MLX), plus `evals.run --require-gateway` and a demo smoke test; 269 tests, no skips
+  on either platform.
+
 ## [0.14.0] - 2026-07-01
 
 ### Added

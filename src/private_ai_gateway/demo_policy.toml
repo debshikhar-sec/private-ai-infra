@@ -1,0 +1,69 @@
+# Starter-kit policy — a simulated financial-enterprise cast of agent principals.
+#
+# This file ships inside the package and is loaded by `private-ai-gateway demo`. The
+# bearer tokens below are DEMO CREDENTIALS, published on purpose so anyone can drive
+# the console; the policy file itself still follows the production rule of storing
+# only SHA-256 hashes.
+#
+#   research-copilot   token: demo-research-copilot   L2 · research tools · strategy model
+#   kyc-screening      token: demo-kyc-agent          L3 · KYC screening tools
+#   trading-assistant  token: demo-trading-assistant  L1 · suggest-only (email.draft granted
+#                                                       but floor-gated at L3 — it can never run)
+#   ops-automation     token: demo-ops-automation     L4 · granted payments.initiate, which
+#                                                       requires L5 — granted is not enough
+#   auditor            token: demo-auditor            L0 · no models; may read the audit
+
+[[principals]]
+name = "research-copilot"
+key_sha256 = "f49f397946d9a6daf27585a5b65f693cce4226947fb5b50dcfb654da5212e476"
+allowed_models = ["strategy"]
+max_output_tokens = 800
+requests_per_minute = 60
+max_autonomy_level = "L2"
+allowed_skills = ["research.summarize"]
+allowed_tools = ["market.snapshot", "docs.search", "text.wordcount", "clock.now"]
+
+[[principals]]
+name = "kyc-screening-agent"
+key_sha256 = "a1debe239858f1eb532e5c77a1254bd7715cca5c25e548117ec84c395b0be495"
+allowed_models = ["strategy"]
+max_output_tokens = 600
+requests_per_minute = 60
+max_autonomy_level = "L3"
+allowed_skills = ["kyc.screening"]
+allowed_tools = ["kyc.sanctions_screen", "docs.search"]
+
+[[principals]]
+name = "trading-assistant"
+key_sha256 = "2890e8e5e121268692e6521f2446823d9eb3ff4fedb556f2ff2f1021dca92a88"
+allowed_models = ["strategy"]
+max_output_tokens = 600
+requests_per_minute = 60
+max_autonomy_level = "L1"          # suggest-only: may draft, may never act
+allowed_skills = ["trade.draft"]
+allowed_tools = ["market.snapshot", "email.draft"]   # email.draft floors at L3 -> always refused
+
+[[principals]]
+name = "ops-automation"
+key_sha256 = "2cbc8fbd2aa75a04010577746bb42e730ece8832a145572b90aa689315660ed4"
+allowed_models = ["strategy"]
+requests_per_minute = 60
+max_autonomy_level = "L4"          # payments.initiate floors at L5 -> granted != permitted
+allowed_skills = ["ops.reconcile"]
+allowed_tools = ["payments.initiate", "clock.now"]
+
+[[principals]]
+name = "auditor"
+key_sha256 = "0515e564e3cdc6608115c45f19c07d2d8cc85a6dd5c99d900626720ae1e7f875"
+allowed_models = []                # observers observe; they do not generate
+max_autonomy_level = "L0"
+can_read_audit = true
+
+[ratelimit]
+default_requests_per_minute = 120
+
+[guardrails]
+action = "redact"                  # let the console show a live egress redaction
+
+[models]
+default_alias = "strategy"
