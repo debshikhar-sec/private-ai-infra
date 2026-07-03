@@ -101,6 +101,10 @@ default_requests_per_minute = 120
 [guardrails]
 action = "redact"                  # let the console show a live egress redaction
 
+[ingress]
+action = "block"                   # inbound AI-firewall: refuse prompt-injection/jailbreak
+block_threshold = "high"           # block at high+; lower-severity PII is flagged only
+
 [models]
 default_alias = "strategy"
 

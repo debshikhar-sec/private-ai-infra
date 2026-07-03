@@ -68,9 +68,13 @@ def build_gateway_transport():
         )
         for idt in IDENTITIES
     }
-    gw.POLICY = Policy(principals)
+    gw.POLICY = Policy(principals, ingress_action="block", ingress_block_threshold="high")
     gw.AUTH_TOKEN = ""  # nosec B105 — empties the owner break-glass fallback during evals
     gw.RATE_LIMITER = RateLimiter(0)  # default unlimited; per-principal rpm still enforced
+    # Turn the ingress AI-firewall on for the run so the injection-block evals exercise it.
+    from private_ai_gateway.ingress import IngressFirewall
+
+    gw.INGRESS = IngressFirewall("block", block_threshold="high")
     return make_flask_transport(gw.app.test_client())
 
 

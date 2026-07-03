@@ -71,6 +71,8 @@ class Policy:
         *,
         default_requests_per_minute: int = 0,
         guardrail_action: str = "off",
+        ingress_action: str = "off",
+        ingress_block_threshold: str = "high",
         default_max_autonomy_level: int | None = None,
         model_routes: dict[str, str] | None = None,
         default_model_alias: str | None = None,
@@ -81,6 +83,10 @@ class Policy:
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
         self.guardrail_action = guardrail_action
+        # Ingress AI-firewall: off | flag (audit, allow) | block (refuse at/above
+        # block_threshold). Off by default — enforcement is opt-in policy.
+        self.ingress_action = ingress_action
+        self.ingress_block_threshold = ingress_block_threshold
         self.default_max_autonomy_level = default_max_autonomy_level
         # Model routing is policy too: the ``[models]`` table maps stable aliases to
         # backend model ids, so switching model planes never rewrites client configs.
@@ -146,6 +152,14 @@ class Policy:
         if action not in ("off", "redact", "block"):
             action = "off"
 
+        ingress_tbl = raw.get("ingress", {}) or {}
+        ingress_action = str(ingress_tbl.get("action", "off")).strip().lower()
+        if ingress_action not in ("off", "flag", "block"):
+            ingress_action = "off"
+        ingress_threshold = str(ingress_tbl.get("block_threshold", "high")).strip().lower()
+        if ingress_threshold not in ("low", "medium", "high", "critical"):
+            ingress_threshold = "high"
+
         autonomy_tbl = raw.get("autonomy", {}) or {}
         default_autonomy = autonomy_mod.parse_level(autonomy_tbl.get("default_max_level"))
 
@@ -177,6 +191,8 @@ class Policy:
             principals,
             default_requests_per_minute=default_rpm,
             guardrail_action=action,
+            ingress_action=ingress_action,
+            ingress_block_threshold=ingress_threshold,
             default_max_autonomy_level=default_autonomy,
             model_routes=model_routes,
             default_model_alias=default_alias,

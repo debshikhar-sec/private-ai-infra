@@ -23,6 +23,7 @@ from flask import Flask, Response, g, jsonify, request
 from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, tools
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
+from private_ai_gateway.ingress import IngressFirewall
 from private_ai_gateway.metrics import Metrics
 from private_ai_gateway.policy import Policy, Principal
 from private_ai_gateway.ratelimit import RateLimiter
@@ -63,6 +64,9 @@ DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"))
 #   * GUARDRAILS filters secret-like content out of model responses (egress).
 RATE_LIMITER = RateLimiter(POLICY.default_requests_per_minute)
 GUARDRAILS = Guardrails(POLICY.guardrail_action)
+#   * INGRESS is the inbound AI-firewall (prompt-injection / jailbreak / PII), the
+#     mirror of GUARDRAILS on the way in. Off by default; opt in via [ingress] policy.
+INGRESS = IngressFirewall(POLICY.ingress_action, block_threshold=POLICY.ingress_block_threshold)
 
 # Observability: in-process Prometheus counters exposed at /metrics.
 METRICS = Metrics()
@@ -70,6 +74,7 @@ METRICS.register("gateway_requests_total", "Terminal request decisions by princi
 METRICS.register("gateway_authz_denials_total", "Authorization denials by reason.")
 METRICS.register("gateway_rate_limited_total", "Requests rejected by the rate limiter.")
 METRICS.register("gateway_guardrail_events_total", "Responses that tripped an egress guardrail.")
+METRICS.register("gateway_ingress_events_total", "Inbound prompts flagged by the ingress firewall, by category.")
 METRICS.register("gateway_a2a_tasks_total", "A2A delegation decisions by decision.")
 METRICS.register("gateway_tool_calls_total", "MCP tool-call decisions by decision.")
 METRICS.register(
@@ -1064,6 +1069,59 @@ def chat_completions():
     _ = req_data.get("user")
 
     clean_messages = normalize_messages(messages)
+
+    # Ingress AI-firewall: inspect inbound prompt text for prompt-injection / jailbreak
+    # / PII before it reaches the model. 'flag' audits and continues; 'block' refuses at
+    # or above the configured severity. The scan is evasion-aware (Unicode-normalizing).
+    if INGRESS.action != "off":
+        user_text = "\n".join(
+            str(m.get("content", "")) for m in clean_messages
+            if m.get("role") in ("user", "tool")
+        )
+        scan = INGRESS.scan(user_text)
+        if scan.triggered:
+            for category in scan.categories:
+                METRICS.inc("gateway_ingress_events_total", {"category": category})
+            evasion_note = f",evasion={'+'.join(scan.evasions)}" if scan.evasions else ""
+            if INGRESS.should_block(scan):
+                METRICS.inc("gateway_authz_denials_total", {"reason": "prompt_injection"})
+                METRICS.inc(
+                    "gateway_requests_total",
+                    {"principal": principal.name, "decision": "deny"},
+                )
+                DECISION_LOG.record(
+                    request_id=getattr(g, "request_id", ""), principal=principal.name,
+                    method=request.method, path=request.path, model=requested_model,
+                    decision="deny",
+                    reason=f"prompt_injection:{scan.max_severity}:"
+                           f"{'+'.join(scan.categories)}{evasion_note}",
+                    status=403,
+                )
+                logger.warning(
+                    f"INGRESS_BLOCK | principal={principal.name} | "
+                    f"severity={scan.max_severity} | categories={scan.categories} | "
+                    f"evasions={scan.evasions}"
+                )
+                return jsonify(
+                    {"error": {"message": (
+                        "Prompt blocked by the ingress firewall: it matched a "
+                        f"{scan.max_severity}-severity {', '.join(scan.categories)} "
+                        "pattern."),
+                        "type": "permission_error", "code": "prompt_injection_blocked"}}
+                ), 403
+            # flag (or below threshold): record and continue.
+            DECISION_LOG.record(
+                request_id=getattr(g, "request_id", ""), principal=principal.name,
+                method=request.method, path=request.path, model=requested_model,
+                decision="flag",
+                reason=f"ingress_flag:{scan.max_severity}:"
+                       f"{'+'.join(scan.categories)}{evasion_note}",
+                status=200,
+            )
+            logger.info(
+                f"INGRESS_FLAG | principal={principal.name} | "
+                f"severity={scan.max_severity} | categories={scan.categories}"
+            )
 
     # Context optimization: always measure the achievable prompt-token savings; only
     # rewrite the prompt when policy opts in (context_compress). Silently mutating a
