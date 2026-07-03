@@ -65,3 +65,18 @@ jobs:
 
       - name: Starter-kit demo smoke test
         run: PYTHONPATH=src python -m private_ai_gateway.cli demo --no-serve
+
+  # Aggregator for branch protection: the ruleset requires a check named exactly
+  # "test", but matrix legs report as "test (os, mlx)". This job reports the "test"
+  # context and fails unless every matrix leg succeeded — same enforcement, one name.
+  test-gate:
+    name: test
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every test matrix leg succeeded
+        run: |
+          result="${{ needs.test.result }}"
+          echo "matrix result: $result"
+          [ "$result" = "success" ]
