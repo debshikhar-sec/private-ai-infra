@@ -53,14 +53,18 @@ def messages_tokens(messages: list[dict]) -> int:
 
 
 # ------------------------------------------------------------------ normalization
-_TRAILING_WS = re.compile(r"[ \t]+(\n|$)")
 _MANY_BLANKLINES = re.compile(r"\n{3,}")
 _MANY_SPACES = re.compile(r"[ \t]{2,}")
 
 
 def normalize_whitespace(text: str) -> str:
-    """Lossless: collapse redundant spacing that costs tokens but carries no meaning."""
-    text = _TRAILING_WS.sub(r"\1", text)
+    """Lossless: collapse redundant spacing that costs tokens but carries no meaning.
+
+    Trailing whitespace is stripped with ``str.rstrip`` rather than a regex: this runs
+    on caller-supplied prompt text, and a backtracking pattern like ``[ \\t]+(\\n|$)``
+    is quadratic on long tab runs (CodeQL py/polynomial-redos). ``rstrip`` is linear.
+    """
+    text = "\n".join(line.rstrip(" \t") for line in text.split("\n"))
     text = _MANY_SPACES.sub(" ", text)
     text = _MANY_BLANKLINES.sub("\n\n", text)
     return text.strip()

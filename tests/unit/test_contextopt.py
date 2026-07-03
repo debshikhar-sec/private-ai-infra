@@ -21,6 +21,19 @@ def test_whitespace_normalization_is_lossless_in_meaning():
     assert clean.split() == ["hello", "world", "foo", "bar"]
 
 
+def test_normalization_is_linear_on_pathological_whitespace():
+    # Regression for CodeQL py/polynomial-redos: a long tab run *not* followed by a
+    # newline made the old `[ \t]+(\n|$)` regex quadratic. Must stay linear on
+    # caller-supplied prompt text.
+    import time
+
+    hostile = ("\t" * 100_000) + "x"
+    start = time.monotonic()
+    out = co.normalize_whitespace(hostile)
+    assert time.monotonic() - start < 1.0
+    assert out == "x"
+
+
 def test_compression_reports_before_and_after():
     messages = [{"role": "user", "content": "word " * 200}]
     result = co.compress_messages(messages)
