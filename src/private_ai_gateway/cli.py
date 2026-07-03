@@ -115,10 +115,49 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--format", choices=["text", "json"], default="text")
     scan.set_defaults(func=_scan)
 
+    opt = sub.add_parser(
+        "optimize",
+        help="Measure deterministic prompt-compression savings on a sample RAG-style "
+        "agent conversation (LLMLingua-inspired, model-free).",
+    )
+    opt.add_argument(
+        "--budget", type=int, default=None,
+        help="Token budget to window the conversation to (default: no windowing).",
+    )
+    opt.set_defaults(func=_optimize)
+
     ver = sub.add_parser("version", help="Print the version and exit.")
     ver.set_defaults(func=lambda _a: (print(__version__) or 0))
 
     return p
+
+
+def _optimize(args: argparse.Namespace) -> int:
+    from private_ai_gateway import contextopt
+
+    # A representative long-context agent turn: a system preamble, a big shared context
+    # block pasted into two turns (the common RAG anti-pattern), and messy whitespace.
+    context_block = (
+        "PORTFOLIO CONTEXT: Counterparty ACME Shipping SA holds a EUR interest-rate "
+        "swap notional 50,000,000 maturing 2027-03-15; concentration in EU rates "
+        "exceeds the 30% desk threshold and is flagged for review by the risk engine."
+    )
+    messages = [
+        {"role": "system", "content": "You are a governed research copilot.    "
+                                      "Answer only within the provided context.\n\n\n"},
+        {"role": "user", "content": f"{context_block}\n\nSummarize the exposure."},
+        {"role": "assistant", "content": "The EU-rate concentration is above threshold."},
+        {"role": "user", "content": f"{context_block}\n\nNow draft the review note."},
+    ]
+    result = contextopt.compress_messages(messages, budget=args.budget, apply=True)
+    print("Deterministic context compression (LLMLingua-inspired, model-free)")
+    print("  arXiv:2310.05736 / arXiv:2310.06839\n")
+    print(f"  original tokens:   {result.original_tokens}")
+    print(f"  compressed tokens: {result.compressed_tokens}")
+    print(f"  saved:             {result.saved_tokens} tokens "
+          f"({result.saved_pct}%), ratio {result.ratio}x")
+    print(f"  steps:             {', '.join(result.steps) or '(none)'}")
+    return 0
 
 
 def _scan(args: argparse.Namespace) -> int:

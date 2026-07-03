@@ -20,7 +20,7 @@ import uuid
 
 from flask import Flask, Response, g, jsonify, request
 
-from private_ai_gateway import a2a, autonomy, backends, delegation, tools
+from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, tools
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.metrics import Metrics
@@ -72,6 +72,10 @@ METRICS.register("gateway_rate_limited_total", "Requests rejected by the rate li
 METRICS.register("gateway_guardrail_events_total", "Responses that tripped an egress guardrail.")
 METRICS.register("gateway_a2a_tasks_total", "A2A delegation decisions by decision.")
 METRICS.register("gateway_tool_calls_total", "MCP tool-call decisions by decision.")
+METRICS.register(
+    "gateway_context_tokens_saved_total",
+    "Prompt tokens saved by deterministic context compression (measured or applied).",
+)
 
 # Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
 # Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.
@@ -1060,6 +1064,24 @@ def chat_completions():
     _ = req_data.get("user")
 
     clean_messages = normalize_messages(messages)
+
+    # Context optimization: always measure the achievable prompt-token savings; only
+    # rewrite the prompt when policy opts in (context_compress). Silently mutating a
+    # caller's prompt is a trust boundary, so the safe default is measure-only.
+    ctx = contextopt.compress_messages(
+        clean_messages,
+        budget=POLICY.context_budget,
+        apply=POLICY.context_compress,
+    )
+    if ctx.saved_tokens:
+        METRICS.inc("gateway_context_tokens_saved_total", value=ctx.saved_tokens)
+        logger.info(
+            f"CONTEXT_OPT | applied={ctx.applied} | saved_tokens={ctx.saved_tokens} "
+            f"| saved_pct={ctx.saved_pct} | ratio={ctx.ratio} | steps={','.join(ctx.steps)}"
+        )
+    if ctx.applied:
+        clean_messages = ctx.messages
+
     resolved_model = resolve_model(requested_model)
     prompt_tokens_rough = estimate_tokens_rough(
         "\n".join(str(m.get("content", "")) for m in clean_messages)

@@ -75,6 +75,8 @@ class Policy:
         model_routes: dict[str, str] | None = None,
         default_model_alias: str | None = None,
         max_delegation_depth: int = 3,
+        context_compress: bool = False,
+        context_budget: int | None = None,
     ):
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
@@ -86,6 +88,11 @@ class Policy:
         self.default_model_alias = default_model_alias
         # How many links a delegation chain may grow (1 = no sub-delegation).
         self.max_delegation_depth = int(max_delegation_depth)
+        # Context optimization: the gateway always *measures* achievable prompt-token
+        # savings; ``context_compress`` opts in to actually rewriting prompts (off by
+        # default — silently mutating a caller's prompt is a trust boundary).
+        self.context_compress = bool(context_compress)
+        self.context_budget = context_budget
 
     @property
     def principal_count(self) -> int:
@@ -149,6 +156,14 @@ class Policy:
             max_depth = 3
         max_depth = max(1, max_depth)
 
+        context_tbl = raw.get("context", {}) or {}
+        context_compress = bool(context_tbl.get("compress", False))
+        try:
+            budget_raw = context_tbl.get("budget")
+            context_budget = int(budget_raw) if budget_raw is not None else None
+        except (TypeError, ValueError):
+            context_budget = None
+
         models_tbl = raw.get("models", {}) or {}
         routes_raw = models_tbl.get("routes", {}) or {}
         model_routes = {
@@ -166,6 +181,8 @@ class Policy:
             model_routes=model_routes,
             default_model_alias=default_alias,
             max_delegation_depth=max_depth,
+            context_compress=context_compress,
+            context_budget=context_budget,
         )
 
     def identify(self, bearer_token: str) -> Principal | None:
