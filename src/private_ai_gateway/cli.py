@@ -91,10 +91,65 @@ def build_parser() -> argparse.ArgumentParser:
         ).main(a.host, a.port, serve=not a.no_serve)
     )
 
+    scan = sub.add_parser(
+        "scan",
+        help="Scan installed (or manifest-listed) dependencies for known AI-stack CVEs, "
+        "with a SonarQube-style severity gate.",
+    )
+    scan.add_argument(
+        "--manifest",
+        default=None,
+        help="JSON manifest {\"packages\": {name: version}} to scan instead of the live "
+        "environment (use 'demo' for the packaged deliberately-vulnerable AI stack).",
+    )
+    scan.add_argument(
+        "--gate",
+        choices=["critical", "high", "medium", "low"],
+        default="high",
+        help="Fail (exit 1) if any finding is at this severity or above (default: high).",
+    )
+    scan.add_argument(
+        "--live", action="store_true",
+        help="Also query OSV.dev over the network for current breadth (opt-in).",
+    )
+    scan.add_argument("--format", choices=["text", "json"], default="text")
+    scan.set_defaults(func=_scan)
+
     ver = sub.add_parser("version", help="Print the version and exit.")
     ver.set_defaults(func=lambda _a: (print(__version__) or 0))
 
     return p
+
+
+def _scan(args: argparse.Namespace) -> int:
+    import importlib.resources
+    import json
+
+    from private_ai_gateway import vulnintel
+
+    if args.manifest == "demo":
+        raw = importlib.resources.files("private_ai_gateway").joinpath(
+            "demo_sbom.json"
+        ).read_text(encoding="utf-8")
+        packages = json.loads(raw).get("packages", {})
+    elif args.manifest:
+        with open(args.manifest, encoding="utf-8") as fh:
+            packages = json.load(fh).get("packages", {})
+    else:
+        packages = vulnintel.installed_packages()
+
+    normalized = {vulnintel._normalize(n): v for n, v in packages.items()}
+    if args.live:
+        try:
+            report = vulnintel.scan_live(normalized, gate_threshold=args.gate)
+        except vulnintel.OSVError as exc:
+            print(f"live OSV scan failed ({exc}); falling back to offline snapshot.")
+            report = vulnintel.scan_packages(normalized, gate_threshold=args.gate)
+    else:
+        report = vulnintel.scan_packages(normalized, gate_threshold=args.gate)
+
+    print(report.to_json() if args.format == "json" else report.to_text(), end="")
+    return report.exit_code()
 
 
 def main(argv: list[str] | None = None) -> int:
