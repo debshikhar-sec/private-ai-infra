@@ -79,6 +79,8 @@ class Policy:
         max_delegation_depth: int = 3,
         context_compress: bool = False,
         context_budget: int | None = None,
+        siem_webhook_url: str | None = None,
+        siem_secret_env: str | None = None,
     ):
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
@@ -99,6 +101,10 @@ class Policy:
         # default — silently mutating a caller's prompt is a trust boundary).
         self.context_compress = bool(context_compress)
         self.context_budget = context_budget
+        # SIEM push export: decision events POSTed to a collector. The HMAC secret is
+        # named by env var, never stored in the policy file (same rule as key hashes).
+        self.siem_webhook_url = siem_webhook_url
+        self.siem_secret_env = siem_secret_env
 
     @property
     def principal_count(self) -> int:
@@ -178,6 +184,12 @@ class Policy:
         except (TypeError, ValueError):
             context_budget = None
 
+        siem_tbl = raw.get("siem", {}) or {}
+        siem_url = str(siem_tbl.get("webhook_url", "")).strip() or None
+        if siem_url and not siem_url.startswith(("http://", "https://")):
+            siem_url = None
+        siem_secret_env = str(siem_tbl.get("hmac_secret_env", "")).strip() or None
+
         models_tbl = raw.get("models", {}) or {}
         routes_raw = models_tbl.get("routes", {}) or {}
         model_routes = {
@@ -199,6 +211,8 @@ class Policy:
             max_delegation_depth=max_depth,
             context_compress=context_compress,
             context_budget=context_budget,
+            siem_webhook_url=siem_url,
+            siem_secret_env=siem_secret_env,
         )
 
     def identify(self, bearer_token: str) -> Principal | None:

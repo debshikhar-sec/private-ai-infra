@@ -20,7 +20,7 @@ import uuid
 
 from flask import Flask, Response, g, jsonify, request
 
-from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, tools
+from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, siem, tools
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.ingress import IngressFirewall
@@ -57,7 +57,6 @@ POLICY_PATH = os.environ.get(
     "PRIVATE_AI_POLICY_PATH", os.path.join(_PROJECT_ROOT, "config", "policy.toml")
 )
 POLICY = Policy.load(POLICY_PATH)
-DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"))
 
 # Cross-cutting controls, all driven by the same policy file:
 #   * RATE_LIMITER bounds request volume per principal (token bucket).
@@ -81,6 +80,22 @@ METRICS.register(
     "gateway_context_tokens_saved_total",
     "Prompt tokens saved by deterministic context compression (measured or applied).",
 )
+METRICS.register(
+    "gateway_siem_events_total",
+    "SIEM webhook export outcomes (delivered / failed / dropped).",
+)
+
+# SIEM push export (off unless [siem] webhook_url is set in policy): every decision
+# event is forwarded to the collector off the hot path, HMAC-signed when a secret is
+# configured. The decision log itself stays the local source of truth either way.
+SIEM = siem.from_policy(
+    POLICY.siem_webhook_url,
+    POLICY.siem_secret_env,
+    on_outcome=lambda outcome: METRICS.inc(
+        "gateway_siem_events_total", {"outcome": outcome}
+    ),
+)
+DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=SIEM)
 
 # Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
 # Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.

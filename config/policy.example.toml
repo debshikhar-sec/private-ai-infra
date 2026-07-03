@@ -112,3 +112,12 @@ max_depth = 3
 [context]
 compress = false
 # budget = 4096
+
+# SIEM push export: POST every decision event to an HTTP collector (Splunk HEC,
+# Elastic, etc.), off the request path (bounded queue; overflow drops + counts —
+# enforcement latency is never traded for telemetry). With hmac_secret_env set, each
+# event carries an X-Signature-256 HMAC header over the exact body; the secret is
+# read from that environment variable — never stored in this file.
+# [siem]
+# webhook_url = "https://collector.internal/gateway-decisions"
+# hmac_secret_env = "PRIVATE_AI_SIEM_HMAC_SECRET"
