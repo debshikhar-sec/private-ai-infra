@@ -30,7 +30,7 @@ private-ai-gateway demo
 2. **Swaps in the offline demo backend** — deterministic simulated completions, clearly
    labeled. The enforcement plane in front of it is the production code path.
 
-3. **Replays 13 scripted steps of governed traffic** through the real enforcement code
+3. **Replays 15 scripted steps of governed traffic** through the real enforcement code
    and prints the tally. The story covers every decision class the plane can produce:
 
    - routine allowed work (research summary, market snapshot, sanctions screen, A2A
@@ -41,8 +41,11 @@ private-ai-gateway demo
      (`email.draft` at L1, `payments.initiate` at L4), proving **a grant does not
      outrank a tool's autonomy floor**;
    - `403 tool_not_allowed` / `403 skill_not_allowed` — never granted in the first place;
-   - a prompt-injection that coaxes the simulated model into emitting a credential —
+   - a benign request that coaxes the simulated model into emitting a credential —
      **redacted by the egress guardrail on the wire**;
+   - `403 prompt_injection_blocked` — two inbound injection attempts (one plain, one
+     hidden with Cyrillic homoglyphs + a zero-width space) refused by the **ingress
+     AI-firewall** before any model runs, proving the block survives Unicode evasion;
    - `403 audit_not_allowed` — and that denial is itself audited, before the `auditor`
      principal (holding the explicit grant) reads the full history.
 
