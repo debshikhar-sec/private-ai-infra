@@ -8,7 +8,6 @@ normalization, and that the evasion attempt raises severity.
 import pytest
 
 from private_ai_gateway import app as gw
-from private_ai_gateway import ingress
 from private_ai_gateway.backends import CompletionResult
 from private_ai_gateway.ingress import IngressFirewall, normalize
 from private_ai_gateway.policy import Policy, Principal, hash_token

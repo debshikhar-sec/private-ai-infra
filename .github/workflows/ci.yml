@@ -17,10 +17,10 @@ jobs:
         run: pip install ruff bandit pip-audit
 
       - name: Ruff lint
-        run: ruff check src tests agents/hermes agents/openclaw agents/opencode_sandbox evals
+        run: ruff check src tests agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals
 
       - name: Bandit (Python SAST)
-        run: bandit -c pyproject.toml -r src agents/hermes agents/openclaw agents/opencode_sandbox evals -q
+        run: bandit -c pyproject.toml -r src agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals -q
 
       - name: pip-audit (dependency CVEs)
         run: pip-audit -r requirements.txt -r requirements-mlx.txt
@@ -58,13 +58,19 @@ jobs:
         run: pip install -r requirements-mlx.txt
 
       - name: Tests with coverage
-        run: pytest --cov=private_ai_gateway --cov=hermes --cov=openclaw --cov=opencode_sandbox --cov=evals --cov-report=term-missing --cov-fail-under=85
+        run: pytest --cov=private_ai_gateway --cov=hermes --cov=openclaw --cov=opencode_sandbox --cov=interop --cov=evals --cov-report=term-missing --cov-fail-under=85
 
       - name: Security evals (must not skip)
         run: PYTHONPATH=src python -m evals.run --require-gateway
 
       - name: Starter-kit demo smoke test
         run: PYTHONPATH=src python -m private_ai_gateway.cli demo --no-serve
+
+      - name: Governed-delegation orchestration smoke test
+        run: PYTHONPATH=src:agents python -m hermes.orchestrate
+
+      - name: Dependency CVE scan smoke test (offline snapshot)
+        run: PYTHONPATH=src python -m private_ai_gateway.cli scan --manifest demo --gate critical || true
 
   # Aggregator for branch protection: the ruleset requires a check named exactly
   # "test", but matrix legs report as "test (os, mlx)". This job reports the "test"

@@ -5,6 +5,8 @@ these tests assert the *matching logic* around them, and mock the OSV network se
 the live path is exercised deterministically and offline.
 """
 
+import pytest
+
 from private_ai_gateway import vulnintel as vi
 
 
@@ -132,3 +134,32 @@ def test_report_json_is_ordered_and_gated():
     # Findings are ordered most-severe first.
     assert severities == sorted(severities, key=lambda s: -vi.severity_rank(s))
     assert d["gate_passed"] is False
+
+
+def test_report_text_renders_findings_and_refs():
+    text = vi.scan_packages({"ray": "2.6.0"}).to_text()
+    assert "CVE-2023-48022" in text
+    assert "osv.dev" in text
+    assert "FAIL" in text
+
+
+def test_report_text_clean_case():
+    text = vi.scan_packages({"flask": "3.1.3"}).to_text()
+    assert "No known-vulnerable packages" in text
+
+
+def test_osv_error_type_exists():
+    # The live path raises OSVError on transport failure; the CLI catches it and falls
+    # back to the offline snapshot (exercised here at the type level).
+    def boom(path, body):
+        raise vi.OSVError("network down")
+
+    client = vi.OSVClient(send=boom)
+    with pytest.raises(vi.OSVError):
+        client.query_batch({"ray": "2.6.0"})
+
+
+def test_installed_packages_returns_versions():
+    pkgs = vi.installed_packages()
+    # Flask is a hard dependency, so it must be present and normalized.
+    assert "flask" in pkgs and pkgs["flask"]

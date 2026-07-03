@@ -7,9 +7,9 @@ refusal of every amplification attempt — not just that the modules import.
 """
 
 import pytest
-
 from hermes import orchestrate
 from interop import AgentPeer, PeerError
+
 from private_ai_gateway import app as gw
 from private_ai_gateway.demo import TOKENS, install_demo_plane
 
@@ -60,9 +60,9 @@ def test_find_peer_none_when_nobody_qualifies(peers):
 
 # ------------------------------------------------------------------ worker loop
 def test_code_worker_applies_and_sub_delegates(peers):
+    from openclaw.worker import AssuranceWorker
     from opencode_sandbox import apply as act
     from opencode_sandbox.worker import CodeActWorker
-    from openclaw.worker import AssuranceWorker
 
     root = peers["hermes"].delegate(
         "code.apply", "opencode", level=3, task="apply the reviewed fix"

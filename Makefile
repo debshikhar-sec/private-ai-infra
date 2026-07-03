@@ -28,16 +28,22 @@ test: ## Run unit tests
 	pytest
 
 cov: ## Run tests with coverage (fails under 85%)
-	pytest --cov=private_ai_gateway --cov=hermes --cov=openclaw --cov=opencode_sandbox --cov=evals --cov-report=term-missing --cov-fail-under=85
+	pytest --cov=private_ai_gateway --cov=hermes --cov=openclaw --cov=opencode_sandbox --cov=interop --cov=evals --cov-report=term-missing --cov-fail-under=85
 
 lint: ## Lint with ruff
-	ruff check src tests agents/hermes agents/openclaw agents/opencode_sandbox evals
+	ruff check src tests agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals
 
 fmt: ## Auto-format with ruff
-	ruff format src tests agents/hermes agents/openclaw agents/opencode_sandbox evals
+	ruff format src tests agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals
 
 sast: ## Static security analysis (bandit)
-	bandit -c pyproject.toml -r src agents/hermes agents/openclaw agents/opencode_sandbox evals -q
+	bandit -c pyproject.toml -r src agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals -q
+
+orchestrate: ## Run the governed autonomous delegation loop (offline demo)
+	PYTHONPATH=src:agents python -m hermes.orchestrate
+
+scan: ## Scan the AI-stack dependency manifest for known CVEs (offline snapshot)
+	PYTHONPATH=src python -m private_ai_gateway.cli scan --manifest demo
 
 evals: ## Run the adversarial security eval suite
 	PYTHONPATH=src python -m evals.run
