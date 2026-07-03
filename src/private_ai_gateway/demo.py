@@ -23,6 +23,10 @@ TOKENS = {
     "trading-assistant": "demo-trading-assistant",
     "ops-automation": "demo-ops-automation",
     "auditor": "demo-auditor",
+    # The orchestration cast (governed agent-to-agent delegation):
+    "hermes": "demo-hermes",
+    "opencode": "demo-opencode",
+    "openclaw": "demo-openclaw",
 }
 
 _LEAKED_EXAMPLE_KEY = "AKIAIOSFODNN7EXAMPLE"  # AWS's documented example key  # nosec B105
@@ -165,8 +169,13 @@ def install_demo_plane(gw) -> None:
     Mutates the module's wiring directly (the same seam the tests and the eval runner
     use) so the demo works regardless of what environment the process started with.
     """
+    import tempfile
+
     from private_ai_gateway import backends
+    from private_ai_gateway.audit import DecisionLog
+    from private_ai_gateway.delegation import DelegationLedger
     from private_ai_gateway.guardrails import Guardrails
+    from private_ai_gateway.metrics import Metrics
     from private_ai_gateway.policy import Policy
     from private_ai_gateway.ratelimit import RateLimiter
 
@@ -176,6 +185,19 @@ def install_demo_plane(gw) -> None:
     gw.BACKEND = backends.DemoBackend()
     gw.RATE_LIMITER = RateLimiter(policy.default_requests_per_minute)
     gw.GUARDRAILS = Guardrails(policy.guardrail_action)
+    gw.DELEGATIONS = DelegationLedger()
+    # A self-contained demo: fresh audit + metrics so the story shows only this run's
+    # traffic (and so OpenClaw's audit/metrics reconciliation is exact, not skewed by
+    # a persistent on-disk log left over from earlier runs).
+    demo_audit = tempfile.NamedTemporaryFile(
+        "w", suffix=".jsonl", prefix="demo_decisions_", delete=False
+    )
+    demo_audit.close()
+    gw.DECISION_LOG = DecisionLog(demo_audit.name)
+    fresh = Metrics()
+    for name, help_text in gw.METRICS._help.items():  # noqa: SLF001 — re-register same set
+        fresh.register(name, help_text)
+    gw.METRICS = fresh
 
 
 def format_results(results: list[StepResult]) -> str:

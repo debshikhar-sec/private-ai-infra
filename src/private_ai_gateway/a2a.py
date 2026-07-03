@@ -60,5 +60,6 @@ def agent_card(principal: Principal, *, base_url: str, ceiling: int | None) -> d
             "autonomy_ceiling_name": autonomy_mod.level_name(ceiling),
             "allowed_models": sorted(m for m in principal.allowed_models if m != "*"),
             "wildcard_models": "*" in principal.allowed_models,
+            "can_read_audit": principal.can_read_audit,
         },
     }

@@ -74,6 +74,7 @@ class Policy:
         default_max_autonomy_level: int | None = None,
         model_routes: dict[str, str] | None = None,
         default_model_alias: str | None = None,
+        max_delegation_depth: int = 3,
     ):
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
@@ -83,6 +84,8 @@ class Policy:
         # backend model ids, so switching model planes never rewrites client configs.
         self.model_routes = dict(model_routes or {})
         self.default_model_alias = default_model_alias
+        # How many links a delegation chain may grow (1 = no sub-delegation).
+        self.max_delegation_depth = int(max_delegation_depth)
 
     @property
     def principal_count(self) -> int:
@@ -139,6 +142,13 @@ class Policy:
         autonomy_tbl = raw.get("autonomy", {}) or {}
         default_autonomy = autonomy_mod.parse_level(autonomy_tbl.get("default_max_level"))
 
+        delegation_tbl = raw.get("delegation", {}) or {}
+        try:
+            max_depth = int(delegation_tbl.get("max_depth", 3))
+        except (TypeError, ValueError):
+            max_depth = 3
+        max_depth = max(1, max_depth)
+
         models_tbl = raw.get("models", {}) or {}
         routes_raw = models_tbl.get("routes", {}) or {}
         model_routes = {
@@ -155,6 +165,7 @@ class Policy:
             default_max_autonomy_level=default_autonomy,
             model_routes=model_routes,
             default_model_alias=default_alias,
+            max_delegation_depth=max_depth,
         )
 
     def identify(self, bearer_token: str) -> Principal | None:
@@ -162,3 +173,14 @@ class Policy:
         if not bearer_token:
             return None
         return self._by_hash.get(hash_token(bearer_token))
+
+    def find_principal(self, name: str) -> Principal | None:
+        """Look up a principal by name (for delegation targets and the agent directory)."""
+        for principal in self._by_hash.values():
+            if principal.name == name:
+                return principal
+        return None
+
+    def principals(self) -> list[Principal]:
+        """All configured principals, sorted by name (policy-derived, no key material)."""
+        return sorted(self._by_hash.values(), key=lambda p: p.name)
