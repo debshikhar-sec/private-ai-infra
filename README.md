@@ -287,6 +287,7 @@ $ curl :8080/mcp/call   -H "$H" -d '{"tool":"clock.now"}'          # 200 — gra
 | [**Delegation & defensive suite**](docs/delegation-and-defense.md) | governed A2A delegation (attenuation + sub-delegation), the ingress AI-firewall, AI-stack CVE intelligence, and the context optimizer — with honest scoping |
 | [Runbook](docs/runbook.md) | operating the stack + the live enforcement demo |
 | [**Product evolution**](docs/product-evolution.md) | OWASP Agentic Top-10 coverage map + threat-led roadmap vs. the AI-gateway field |
+| [Positioning](docs/positioning.md) | where this sits in the 2025–26 AI-security market — sourced, gaps stated |
 | [Roadmap](docs/roadmap.md) | what's hardened, what's next |
 
 ## Project layout
