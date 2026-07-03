@@ -27,6 +27,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from private_ai_gateway.logutil import log_safe
+
 logger = logging.getLogger("AuditTrail")
 
 
@@ -86,19 +88,21 @@ class MLXBackend:
 
     def _swap_if_needed(self, target_model: str) -> None:
         if target_model == self.current_model and self._model_ref is not None:
-            logger.info(f"MODEL_REUSE | {target_model}")
+            logger.info(f"MODEL_REUSE | {log_safe(target_model)}")
             return
         loader, _ = self._runtime()
-        logger.info(f"MODEL_SWAP_START | {self.current_model} -> {target_model}")
+        logger.info(
+            f"MODEL_SWAP_START | {log_safe(self.current_model)} -> {log_safe(target_model)}"
+        )
         try:
             self._model_ref = None
             self._tokenizer_ref = None
             self._clear_cache()
             self._model_ref, self._tokenizer_ref = loader(target_model)
             self.current_model = target_model
-            logger.info(f"MODEL_LOAD_SUCCESS | {target_model}")
+            logger.info(f"MODEL_LOAD_SUCCESS | {log_safe(target_model)}")
         except Exception as exc:
-            logger.exception(f"MODEL_LOAD_FAILED | {target_model} | {exc}")
+            logger.exception(f"MODEL_LOAD_FAILED | {log_safe(target_model)} | {log_safe(exc)}")
             self.current_model = None
             self._model_ref = None
             self._tokenizer_ref = None
@@ -131,7 +135,7 @@ class MLXBackend:
                     kwargs["enable_thinking"] = False
                 return self._tokenizer_ref.apply_chat_template(clean, **kwargs)
         except Exception as exc:
-            logger.exception(f"CHAT_TEMPLATE_FAILED | {exc}")
+            logger.exception(f"CHAT_TEMPLATE_FAILED | {log_safe(exc)}")
 
         lines = [f"{m['role']}: {m['content']}" for m in clean]
         lines.append("assistant:")
@@ -219,10 +223,10 @@ class OpenAIBackend:
                 detail = exc.read().decode("utf-8", errors="replace")[:500]
             except Exception:  # nosec B110 — best-effort error detail only
                 pass
-            logger.error(f"UPSTREAM_HTTP_ERROR | status={exc.code} | {detail}")
+            logger.error(f"UPSTREAM_HTTP_ERROR | status={exc.code} | {log_safe(detail)}")
             raise BackendError(f"upstream returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            logger.error(f"UPSTREAM_UNREACHABLE | {exc}")
+            logger.error(f"UPSTREAM_UNREACHABLE | {log_safe(exc)}")
             raise BackendError("upstream unreachable or returned invalid JSON") from exc
 
         try:

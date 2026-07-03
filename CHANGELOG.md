@@ -32,8 +32,19 @@ All notable changes to this project are documented here. Format based on
   (`parent_not_active`), and a child's expiry is clamped to its parent's — time
   narrows like authority. Unset by default (unbounded, as before).
 
+### Security
+- **Log-injection hardening (CWE-117).** A new `logutil.log_safe` neutralizes CR/LF and
+  C0/C1 control characters, and now wraps every request-derived value interpolated into
+  an audit line (model names, URL paths, tool names, remote address, upstream error
+  text) across `app.py` and `backends.py`. A caller can no longer smuggle a forged event
+  onto its own line in the audit trail. Clears twelve CodeQL `py/log-injection` alerts.
+- **Internal-error exposure removed (CWE-209).** The inference backend-failure path no
+  longer echoes the exception text to the caller (`"Inference backend failed: {e}"` →
+  `"Inference backend failed"`); the detail is logged server-side only. Clears one
+  CodeQL `py/stack-trace-exposure` alert.
+
 ### Changed
-- Test suite: 350 → 376 (14 conformance + 6 SIEM + 6 expiry).
+- Test suite: 350 → 381 (14 conformance + 6 SIEM + 6 expiry + 5 log hygiene).
 
 ## [0.16.0] - 2026-07-03
 
