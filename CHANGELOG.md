@@ -35,10 +35,22 @@ All notable changes to this project are documented here. Format based on
   that get themselves refused on the wire, and gateway/backend status chips. Still a
   single static file under the same strict CSP.
 
+- **Console walkthrough + scroll-driven product tour.** A 16-frame end-to-end journey
+  through the console (captured from `private-ai-gateway demo` with a headless-Chrome
+  CDP rig — real enforcement, no mockups) ships as a 38-second GIF/MP4 and as an
+  Apple-style scroll-scrub tour on the GitHub Pages site (`#tour`): a sticky frame
+  viewer follows sixteen step captions, each grounding a feature in documented
+  real-world practice (regulator-proof AI audit trails at Point72/Balyasny, D.E. Shaw's
+  gateway-level redaction, the CSA zero-deny-rules finding, EU AI Act logging duties).
+  Static, dependency-free, degrades to the GIF without JavaScript.
+
 ### Changed
 - Eval suite grows to 20 cases (`MCP-002`: an L4 principal invokes the granted
   `payments.initiate`, which floors at L5 → `403 autonomy_exceeded` — a grant does not
   outrank a tool's autonomy floor).
+- Site copy updated to the model-plane-agnostic positioning; stats refreshed
+  (11 enforced controls, 20 evals, 269 tests on 2 platforms); proof table gains the
+  A2A / MCP / audit-read rows.
 - CI now runs the full test suite on **both** ubuntu-latest (no MLX) and macos-14
   (MLX), plus `evals.run --require-gateway` and a demo smoke test; 269 tests, no skips
   on either platform.

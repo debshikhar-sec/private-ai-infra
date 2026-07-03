@@ -302,3 +302,45 @@ h1, h2, h3 { line-height: 1.08; letter-spacing: -0.03em; font-weight: 700; }
   .hero h1 .nope::after { animation: none; transform: scaleX(1); }
   .hero .pill .live { animation: none; }
 }
+
+/* ===================== PRODUCT TOUR (scroll-driven walkthrough) =====================
+   Apple-style scrollytelling, static-host friendly: a sticky frame viewer swaps
+   pre-rendered console captures as the reader scrolls the step captions. Pure
+   IntersectionObserver — no libraries, no build step, degrades to a GIF without JS. */
+.tour { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr);
+        gap: clamp(1.2rem, 3vw, 2.6rem); align-items: start;
+        width: min(100% - 2.5rem, 1240px); margin-inline: auto; }
+.tour-view { position: sticky; top: 84px; }
+.tour-view img { width: 100%; height: auto; display: block; border-radius: 14px;
+                 border: 1px solid var(--border); box-shadow: 0 24px 80px rgb(0 0 0 / .55); }
+.tour-hud { display: flex; justify-content: space-between; align-items: center;
+            margin-top: .65rem; font-family: var(--mono); font-size: .74rem; color: var(--muted); }
+.tour-hud .actor { border: 1px solid var(--border); border-radius: 999px; padding: .2rem .7rem; }
+.tour-hud .actor b { color: var(--text); font-weight: 600; }
+.tour-steps { display: flex; flex-direction: column; }
+.tstep { min-height: 72vh; display: flex; flex-direction: column; justify-content: center;
+         opacity: .28; transition: opacity .35s ease; padding: 1rem 0; }
+.tstep.active { opacity: 1; }
+.tstep .tk { font-family: var(--mono); font-size: .7rem; letter-spacing: .1em;
+             text-transform: uppercase; color: var(--accent); margin-bottom: .45rem; }
+.tstep h3 { font-size: clamp(1.05rem, 1.9vw, 1.35rem); margin: 0 0 .5rem; }
+.tstep p { color: var(--muted); font-size: .95rem; margin: 0; }
+.tstep p a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.tstep .status { display: inline-block; font-family: var(--mono); font-size: .72rem;
+                 margin-top: .6rem; padding: .18rem .6rem; border-radius: 6px;
+                 border: 1px solid var(--border); }
+.tstep .status.deny { color: #f87171; border-color: rgb(248 113 113 / .35); }
+.tstep .status.ok { color: #34d399; border-color: rgb(52 211 153 / .35); }
+.tstep .status.filter { color: #fbbf24; border-color: rgb(251 191 36 / .35); }
+.tour-alt { color: var(--muted); font-size: .92rem; margin-top: .9rem; }
+.tour-alt code { font-family: var(--mono); font-size: .84em; background: var(--bg-soft);
+                 border: 1px solid var(--border); border-radius: 6px; padding: .12rem .45rem; }
+@media (max-width: 880px) {
+  .tour { grid-template-columns: 1fr; }
+  .tour-view { position: sticky; top: 64px; z-index: 5; background: var(--bg);
+               padding-bottom: .5rem; }
+  .tstep { min-height: 58vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tstep { opacity: 1; transition: none; }
+}

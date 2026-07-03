@@ -28,6 +28,13 @@
 
 <p align="center"><sub>A principal capped at <b>L1 (suggest)</b> is refused <code>403</code> the instant it asks for more — autonomy it doesn't have, or a model it was never granted. Enforced <i>before</i> the model even loads. <a href="#see-it-enforce-no-gif">Text version ↓</a></sub></p>
 
+<!-- Console walkthrough: regenerate frames with the CDP capture rig against `private-ai-gateway demo` -->
+<p align="center">
+  <img src="docs/assets/console-walkthrough.gif" alt="38-second walkthrough of the Governance Console: an auditor reviews the live decision audit; a suggest-only trading assistant is refused a model, a tool, and an autonomy level; an ops agent holding the payments tool is still refused below its L5 floor; a prompt-injected credential is redacted on the wire." width="860">
+</p>
+
+<p align="center"><sub><b>The Governance Console, end to end</b> — five simulated enterprise agent identities driving the real enforcement code (<code>private-ai-gateway demo</code>). Scroll-driven, step-by-step version with the reasoning behind each frame: <a href="https://debshikhar-sec.github.io/private-ai-infra/#tour"><b>the product tour</b></a>.</sub></p>
+
 ---
 
 ## How it enforces

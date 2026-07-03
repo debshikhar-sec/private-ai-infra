@@ -3,6 +3,11 @@
 One command demonstrates the whole thesis on any machine, with no model weights and no
 network: **AI capability is not AI authority.**
 
+![Console walkthrough](assets/console-walkthrough.gif)
+
+*The full 16-step journey, with the reasoning behind each frame, is on the
+[project site's product tour](https://debshikhar-sec.github.io/private-ai-infra/#tour).*
+
 ```bash
 pip install .          # platform-agnostic (no MLX required)
 private-ai-gateway demo
