@@ -4,6 +4,33 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-07-04
+
+### Added
+- **Governed Chat Console** (`/chat`) — a conversational front-end to the *real*
+  orchestration loop, not a scripted demo. An operator types a goal; Hermes reads the
+  enforced agent directory, makes a governed **L1** plan, and **proposes** a delegation —
+  it executes nothing on its own. The operator approves the sandbox apply; OpenCode
+  applies in a confined sandbox and sub-delegates verification to OpenClaw; the verdict
+  and full attenuating chain come back. **Authority to change anything stays with the
+  human:** the apply step refuses (`REFUSED`, no sandbox mutation) unless an approval is
+  supplied — proven by test. On-thesis by construction: *AI capability is not AI
+  authority.*
+- **`POST /v1/orchestrate`** — phased orchestration endpoint (`plan` / `execute` /
+  `probe`). Authenticated and rate-limited like any request; each internal plan →
+  delegate → apply → verify hop goes back through the same enforced plane and is audited.
+  New metric `gateway_orchestrate_total{phase}`.
+- **`hermes.session.GovernedSession`** — the phased, transcript-producing driver behind
+  the endpoint, reusing the existing `interop`/workers/planner (no logic forked from
+  `hermes.orchestrate`). `src/private_ai_gateway/orchestration.py` bridges it to the
+  gateway, loading the out-of-package agents lazily and degrading with a clear message
+  when the demo plane is absent.
+
+### Changed
+- Test suite: 381 → 389 (8 orchestration-chat cases: plan-proposes-not-executes,
+  approved-applies-and-verifies, unapproved-refuses, boundary probes, endpoint phases +
+  auth). Verified end to end in a browser (approve → PASS, deny → REFUSED, zero errors).
+
 ## [0.17.0] - 2026-07-03
 
 ### Added

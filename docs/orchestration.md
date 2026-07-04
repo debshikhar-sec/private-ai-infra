@@ -104,6 +104,32 @@ Every delegation is an *authorization decision*, and every decision is recorded.
 audit trail (`logs/decisions.jsonl`) is therefore a complete record of which component
 was permitted to do what — the artifact a reviewer or SIEM actually wants.
 
+## The Governed Chat Console (`/chat`)
+
+The same loop, driven conversationally by a human. The chat console (served at `/chat`,
+backed by `POST /v1/orchestrate` → `hermes.session.GovernedSession`) splits the loop into
+phases so authority stays where it belongs:
+
+1. **Plan** — the operator types a goal. Hermes reads the enforced agent directory, makes
+   a governed **L1** model call, and **proposes** the delegation it would make (which peer,
+   which skill, at what level — discovered from cards, never named up front). It executes
+   nothing.
+2. **Approve** — the operator explicitly approves (or denies) the sandbox apply. This is
+   the keystone: *without a human approval the apply refuses* (`REFUSED`, no sandbox
+   mutation) — the model can propose, only the person can authorize a change.
+3. **Execute & verify** — on approval, `code.apply` delegates to the least-privileged
+   capable peer (OpenCode, L3), which applies in a confined sandbox and sub-delegates
+   `assurance.verify` to OpenClaw (L2); the attenuating chain and PASS/FAIL verdict return.
+4. **Probe** — one click abuses the same wire (amplification, an unheld skill); each is
+   refused with its exact audit code.
+
+Every phase runs through the *same* enforcement plane as any other request — authenticated,
+autonomy-capped, and audited. The page holds no authority of its own; it is a data-free
+shell under a strict CSP that carries the operator's token. This is the honest reading of
+"minimal human intervention": the human is removed from *typing every step*, not from
+*holding authority* — which is the whole thesis, `AI capability is not AI authority`, made
+interactive.
+
 ## Standards-aligned surfaces: A2A + MCP
 
 The 2026 agent stack splits into two protocols: **A2A** (Agent2Agent — *horizontal*, agent

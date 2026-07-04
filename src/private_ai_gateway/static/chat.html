@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Governed Chat Console — private-ai-infra</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --panel2:#171b25; --line:#232838;
+    --ink:#e7ebf3; --dim:#93a0b8; --brand:#7c9cff; --allow:#37d399; --deny:#ff6b7a;
+    --l0:#8b93a7; --l1:#7c9cff; --l3:#c08bff; --radius:14px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5}
+  header{position:sticky;top:0;background:rgba(11,13,18,.9);border-bottom:1px solid var(--line);padding:.7rem 1rem;display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;backdrop-filter:blur(8px)}
+  header .brand{font-weight:700;letter-spacing:.2px}
+  header .brand .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:linear-gradient(135deg,#8b5cf6,#22d3ee);margin-right:.5rem;vertical-align:middle}
+  header .tag{color:var(--dim);font-size:.82rem}
+  header input{flex:1;min-width:200px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:.5rem .7rem;font-family:var(--mono);font-size:.82rem}
+  .wrap{max-width:920px;margin:0 auto;padding:1rem 1rem 7rem}
+  .intro{color:var(--dim);font-size:.9rem;margin:.5rem 0 1.2rem;border-left:2px solid var(--line);padding-left:.9rem}
+  .intro b{color:var(--ink)}
+  .msg{display:flex;gap:.7rem;margin:.9rem 0;align-items:flex-start;animation:rise .25s ease}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .who{flex:0 0 auto;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:1.1rem;background:var(--panel2);border:1px solid var(--line)}
+  .bubble{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:.7rem .9rem;flex:1;min-width:0}
+  .bubble .top{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.15rem}
+  .name{font-weight:650}
+  .badge{font-family:var(--mono);font-size:.68rem;padding:.08rem .45rem;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+  .badge.l{color:#0b0d12;font-weight:700}
+  .badge.l0{background:var(--l0)} .badge.l1{background:var(--l1)} .badge.l2{background:#8bd0ff} .badge.l3{background:var(--l3)} .badge.l5{background:var(--deny);color:#0b0d12}
+  .badge.allow{border-color:var(--allow);color:var(--allow)}
+  .badge.deny{border-color:var(--deny);color:var(--deny)}
+  .action{color:var(--ink)}
+  .detail{color:var(--dim);font-size:.85rem;font-family:var(--mono);margin-top:.2rem;word-break:break-word}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:1rem;margin:1rem 0}
+  .card h4{margin:.1rem 0 .5rem}
+  .chain{font-family:var(--mono);font-size:.82rem;color:var(--dim);white-space:pre-wrap;margin:.4rem 0}
+  .chain .arrow{color:var(--brand)}
+  .verdict{font-weight:750;font-family:var(--mono)}
+  .verdict.pass{color:var(--allow)} .verdict.refused,.verdict.fail{color:var(--deny)}
+  .row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}
+  input.txt{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:.55rem .7rem;font-size:.9rem}
+  button{background:var(--brand);color:#0b0d12;border:0;border-radius:10px;padding:.55rem .95rem;font-weight:700;cursor:pointer;font-size:.9rem}
+  button.ghost{background:transparent;color:var(--dim);border:1px solid var(--line)}
+  button.danger{background:transparent;color:var(--deny);border:1px solid var(--deny)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .composer{position:fixed;left:0;right:0;bottom:0;background:rgba(11,13,18,.94);border-top:1px solid var(--line);padding:.8rem 1rem;backdrop-filter:blur(8px)}
+  .composer .inner{max-width:920px;margin:0 auto;display:flex;gap:.6rem}
+  .composer input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:.7rem .9rem;font-size:.95rem}
+  .hint{color:var(--dim);font-size:.78rem;text-align:center;max-width:920px;margin:.4rem auto 0}
+  a{color:var(--brand)}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand"><span class="dot"></span>Governed Chat Console</span>
+  <span class="tag">plan → approve → verify · every step enforced</span>
+  <input id="token" type="password" placeholder="Paste a bearer token (demo: the hermes identity)" autocomplete="off" />
+</header>
+
+<div class="wrap" id="wrap">
+  <div class="intro">
+    Type a goal. <b>Hermes</b> reads the enforced agent directory, makes a governed L1 plan, and
+    <b>proposes</b> a delegation — it executes nothing on its own. You approve the sandbox apply;
+    <b>OpenCode</b> applies in a confined sandbox and sub-delegates verification to <b>OpenClaw</b>.
+    Authority to change anything stays with you. Runs on the <b>demo plane</b> (<code>private-ai-gateway demo</code>).
+  </div>
+  <div id="thread"></div>
+</div>
+
+<div class="composer">
+  <div class="inner">
+    <input id="goal" placeholder="e.g. Apply the reviewed fix under governed delegation and verify it" />
+    <button id="send">Plan ▸</button>
+    <button id="probe" class="ghost" title="Abuse the same wire on purpose">Probe boundary</button>
+  </div>
+  <div class="hint">The page holds no authority — the apply refuses unless you approve it. Nothing here is narrated; each line is a real gateway decision.</div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const thread = $("thread");
+const ICON = { hermes:"🧭", opencode:"🛠️", openclaw:"🔍", owner:"👤", you:"💬", system:"⚙️" };
+const LNAME = { 0:"observe",1:"suggest",2:"propose",3:"execute",5:"unbounded" };
+
+function token(){ return $("token").value.trim(); }
+function scroll(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }
+
+function bubble({who, name, action, detail, level, decision}){
+  const m = document.createElement("div"); m.className = "msg";
+  const w = document.createElement("div"); w.className = "who"; w.textContent = ICON[who]||"•";
+  const b = document.createElement("div"); b.className = "bubble";
+  const top = document.createElement("div"); top.className = "top";
+  const nm = document.createElement("span"); nm.className = "name"; nm.textContent = name||who;
+  top.appendChild(nm);
+  if (level!==undefined && level!==null){
+    const lb = document.createElement("span"); lb.className = "badge l l"+level;
+    lb.textContent = "L"+level+(LNAME[level]?" · "+LNAME[level]:""); top.appendChild(lb);
+  }
+  if (decision){
+    const db = document.createElement("span"); db.className = "badge "+decision;
+    db.textContent = decision.toUpperCase(); top.appendChild(db);
+  }
+  b.appendChild(top);
+  if (action){ const a=document.createElement("div"); a.className="action"; a.textContent=action; b.appendChild(a); }
+  if (detail){ const d=document.createElement("div"); d.className="detail"; d.textContent=detail; b.appendChild(d); }
+  m.appendChild(w); m.appendChild(b); thread.appendChild(m); scroll(); return b;
+}
+
+function renderSteps(steps){
+  for (const s of steps){
+    bubble({ who:s.actor, name:s.actor, action:s.action, detail:s.detail,
+             level:s.level, decision:s.code||s.decision==="deny" ? s.decision : null });
+  }
+}
+
+async function api(phase, extra){
+  const t = token();
+  if (!t){ bubble({who:"system",name:"system",action:"Paste a bearer token above first.",decision:"deny"}); return null; }
+  let r;
+  try{
+    r = await fetch("/v1/orchestrate", { method:"POST",
+      headers:{ "Authorization":"Bearer "+t, "Content-Type":"application/json" },
+      body: JSON.stringify(Object.assign({ objective:$("goal").value.trim()||"Apply the reviewed fix and verify it", phase }, extra||{})) });
+  }catch(e){ bubble({who:"system",name:"system",action:"Network error",detail:String(e),decision:"deny"}); return null; }
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok){
+    const err = (j.error||{});
+    bubble({who:"system",name:"gateway",action:err.message||("HTTP "+r.status),detail:err.code||"",decision:"deny"});
+    return null;
+  }
+  return j;
+}
+
+function proposalCard(p){
+  const card = document.createElement("div"); card.className="card";
+  card.innerHTML = "<h4>Proposed delegation — awaiting your approval</h4>" +
+    "<div class='chain'><b>"+p.executor+"</b> would run <b>"+p.skill+"</b> at <b>L"+p.level+"</b> in a confined, sandboxed apply.</div>";
+  const row = document.createElement("div"); row.className="row"; row.style.marginTop=".6rem";
+  const who = document.createElement("input"); who.className="txt"; who.placeholder="approver (e.g. owner)"; who.value="owner"; who.style.width="150px";
+  const why = document.createElement("input"); why.className="txt"; why.placeholder="reason (reviewed the diff…)"; why.style.flex="1"; why.style.minWidth="180px"; why.value="reviewed the proposal; approved for sandbox apply";
+  const ok = document.createElement("button"); ok.textContent="Approve & apply ▸";
+  const no = document.createElement("button"); no.className="danger"; no.textContent="Deny (show refusal)";
+  row.appendChild(who); row.appendChild(why); row.appendChild(ok); row.appendChild(no);
+  card.appendChild(row); thread.appendChild(card); scroll();
+  ok.onclick = ()=>{ card.remove(); runExecute(who.value.trim(), why.value.trim()); };
+  no.onclick = ()=>{ card.remove(); runExecute("", ""); };
+}
+
+function resultCard(j){
+  const card = document.createElement("div"); card.className="card";
+  const v = (j.verdict||"—").toLowerCase();
+  const cls = j.applied ? "pass" : (v==="refused"?"refused":"fail");
+  let chain = "";
+  (j.chain||[]).forEach(d=>{
+    chain += "  ".repeat(d.depth||0) + d.delegator + " → " + d.delegatee + "  " + d.skill + "@L" + d.level +
+             "  [" + d.status + (d.verdict?(" "+d.verdict):"") + "]\n";
+  });
+  card.innerHTML = "<h4>Outcome</h4>" +
+    (chain?("<div class='chain'>"+chain.replace(/→/g,"<span class='arrow'>→</span>")+"</div>"):"") +
+    "<div>Verdict: <span class='verdict "+cls+"'>"+(j.verdict||"—")+"</span>" +
+    (j.applied?"  · applied in sandbox, verified end to end":"  · nothing was applied — authority was not granted")+"</div>";
+  thread.appendChild(card); scroll();
+}
+
+async function runPlan(){
+  const goal = $("goal").value.trim();
+  bubble({who:"you",name:"you",action:goal||"Apply the reviewed fix and verify it"});
+  $("send").disabled=true;
+  const j = await api("plan");
+  $("send").disabled=false;
+  if (!j) return;
+  renderSteps(j.steps||[]);
+  if (j.needs_approval && j.proposal) proposalCard(j.proposal);
+}
+
+async function runExecute(approver, reason){
+  const j = await api("execute", { approver, reason });
+  if (!j) return;
+  renderSteps(j.steps||[]);
+  resultCard(j);
+}
+
+async function runProbe(){
+  bubble({who:"you",name:"you",action:"Probe the boundary — try to break it."});
+  const j = await api("probe");
+  if (!j) return;
+  renderSteps(j.steps||[]);
+  bubble({who:"system",name:"boundary",action:"Every abuse was refused with its exact audit code.",decision:"allow"});
+}
+
+$("send").onclick = runPlan;
+$("probe").onclick = runProbe;
+$("goal").addEventListener("keydown", (e)=>{ if(e.key==="Enter"){ e.preventDefault(); runPlan(); }});
+</script>
+</body>
+</html>

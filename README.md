@@ -220,7 +220,11 @@ The demo loads a simulated financial-enterprise cast of agent principals
 ops-automation agent, an auditor), replays a scripted day of traffic through the **real
 enforcement code** — model denials, autonomy-ceiling refusals, a granted-but-floor-gated
 payments tool, A2A delegation, a live guardrail redaction — and prints the demo tokens.
-Then open **http://127.0.0.1:8080/console** and explore what just happened.
+Then open **http://127.0.0.1:8080/console** and explore what just happened — or
+**http://127.0.0.1:8080/chat**, the **Governed Chat Console**: type a goal and watch
+Hermes plan → propose → (you approve) → OpenCode apply in a sandbox → OpenClaw verify,
+every hop enforced and audited. Withhold approval and the apply refuses — authority stays
+with you.
 
 **Point it at the model plane you already have (any OpenAI-compatible endpoint):**
 

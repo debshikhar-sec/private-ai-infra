@@ -52,7 +52,7 @@ audit trail in which every deny carries a stable machine-readable code.
 ## What the moat is — and is not
 
 **Is:** the policy model itself (two-axis skill-vs-autonomy rule, attenuation-only
-chains), proven by 381 tests, 23 adversarial evals, and a reproducible three-agent
+chains), proven by 389 tests, 23 adversarial evals, and a reproducible three-agent
 orchestration demo; local-first architecture that regulated buyers (the design
 persona is a bank) can run with zero data egress.
 
