@@ -77,8 +77,11 @@ class Policy:
         model_routes: dict[str, str] | None = None,
         default_model_alias: str | None = None,
         max_delegation_depth: int = 3,
+        delegation_ttl_seconds: int | None = None,
         context_compress: bool = False,
         context_budget: int | None = None,
+        siem_webhook_url: str | None = None,
+        siem_secret_env: str | None = None,
     ):
         self._by_hash = dict(principals_by_hash)
         self.default_requests_per_minute = int(default_requests_per_minute)
@@ -92,13 +95,19 @@ class Policy:
         # backend model ids, so switching model planes never rewrites client configs.
         self.model_routes = dict(model_routes or {})
         self.default_model_alias = default_model_alias
-        # How many links a delegation chain may grow (1 = no sub-delegation).
+        # How many links a delegation chain may grow (1 = no sub-delegation), and how
+        # long a grant stays live (None = unbounded; expiry closes zombie authority).
         self.max_delegation_depth = int(max_delegation_depth)
+        self.delegation_ttl_seconds = delegation_ttl_seconds
         # Context optimization: the gateway always *measures* achievable prompt-token
         # savings; ``context_compress`` opts in to actually rewriting prompts (off by
         # default — silently mutating a caller's prompt is a trust boundary).
         self.context_compress = bool(context_compress)
         self.context_budget = context_budget
+        # SIEM push export: decision events POSTed to a collector. The HMAC secret is
+        # named by env var, never stored in the policy file (same rule as key hashes).
+        self.siem_webhook_url = siem_webhook_url
+        self.siem_secret_env = siem_secret_env
 
     @property
     def principal_count(self) -> int:
@@ -169,6 +178,13 @@ class Policy:
         except (TypeError, ValueError):
             max_depth = 3
         max_depth = max(1, max_depth)
+        try:
+            ttl_raw = delegation_tbl.get("ttl_seconds")
+            delegation_ttl = int(ttl_raw) if ttl_raw is not None else None
+        except (TypeError, ValueError):
+            delegation_ttl = None
+        if delegation_ttl is not None and delegation_ttl <= 0:
+            delegation_ttl = None
 
         context_tbl = raw.get("context", {}) or {}
         context_compress = bool(context_tbl.get("compress", False))
@@ -177,6 +193,12 @@ class Policy:
             context_budget = int(budget_raw) if budget_raw is not None else None
         except (TypeError, ValueError):
             context_budget = None
+
+        siem_tbl = raw.get("siem", {}) or {}
+        siem_url = str(siem_tbl.get("webhook_url", "")).strip() or None
+        if siem_url and not siem_url.startswith(("http://", "https://")):
+            siem_url = None
+        siem_secret_env = str(siem_tbl.get("hmac_secret_env", "")).strip() or None
 
         models_tbl = raw.get("models", {}) or {}
         routes_raw = models_tbl.get("routes", {}) or {}
@@ -197,8 +219,11 @@ class Policy:
             model_routes=model_routes,
             default_model_alias=default_alias,
             max_delegation_depth=max_depth,
+            delegation_ttl_seconds=delegation_ttl,
             context_compress=context_compress,
             context_budget=context_budget,
+            siem_webhook_url=siem_url,
+            siem_secret_env=siem_secret_env,
         )
 
     def identify(self, bearer_token: str) -> Principal | None:

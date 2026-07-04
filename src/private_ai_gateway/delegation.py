@@ -28,6 +28,7 @@ allow/deny is the gateway decision audit, same as all other enforcement.
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -35,10 +36,13 @@ from datetime import datetime, timezone
 from private_ai_gateway.policy import Principal
 
 # Task lifecycle states. A delegation is created ``submitted`` and ends in exactly one
-# of the terminal states, reported by its delegatee.
+# of the terminal states: reported by its delegatee, or expired by the clock. Expiry
+# closes the zombie-authority hole — a grant whose holder died mid-task must not stay
+# live (sub-delegable, reportable) forever.
 SUBMITTED = "submitted"
 COMPLETED = "completed"
 FAILED = "failed"
+EXPIRED = "expired"
 TERMINAL = (COMPLETED, FAILED)
 
 DEFAULT_MAX_DEPTH = 3
@@ -70,6 +74,7 @@ class Delegation:
     task: str = ""      # short description of the delegated work
     result: str = ""    # delegatee-reported outcome summary
     verdict: str = ""   # optional structured outcome (e.g. PASS / FAIL)
+    expires_at: float | None = None  # epoch seconds; None = no time bound
 
     def to_dict(self) -> dict:
         return {
@@ -85,6 +90,13 @@ class Delegation:
             "task": self.task,
             "result": self.result,
             "verdict": self.verdict,
+            "expires_at": (
+                datetime.fromtimestamp(self.expires_at, timezone.utc).isoformat(
+                    timespec="seconds"
+                )
+                if self.expires_at is not None
+                else None
+            ),
         }
 
 
@@ -99,6 +111,22 @@ class DelegationLedger:
         self._by_id: dict[str, Delegation] = {}
         self._lock = threading.Lock()
 
+    def _refresh_locked(self, record: Delegation | None) -> Delegation | None:
+        """Expire a live record whose time bound has passed (caller holds the lock).
+
+        Expiry is enforced lazily at every read, so an orphaned task loses its
+        authority the moment anyone tries to use it — no background reaper needed.
+        """
+        if (
+            record is not None
+            and record.status == SUBMITTED
+            and record.expires_at is not None
+            and time.time() > record.expires_at
+        ):
+            record = replace(record, status=EXPIRED)
+            self._by_id[record.id] = record
+        return record
+
     # -- creation (the enforcement point) -------------------------------------
 
     def create(
@@ -112,6 +140,7 @@ class DelegationLedger:
         parent_id: str | None = None,
         max_depth: int = DEFAULT_MAX_DEPTH,
         task: str = "",
+        ttl_seconds: int | None = None,
     ) -> Delegation:
         """Create a delegation if — and only if — every governance check passes.
 
@@ -149,10 +178,13 @@ class DelegationLedger:
                 "delegation cannot amplify authority.",
             )
 
+        expires_at = (
+            time.time() + ttl_seconds if ttl_seconds and ttl_seconds > 0 else None
+        )
         depth = 1
         if parent_id is not None:
             with self._lock:
-                parent = self._by_id.get(parent_id)
+                parent = self._refresh_locked(self._by_id.get(parent_id))
             if parent is None:
                 raise DelegationError(
                     "unknown_parent_task", f"No delegation '{parent_id}'.", status=404
@@ -187,6 +219,13 @@ class DelegationLedger:
                     f"Sub-delegation depth {depth} exceeds the policy "
                     f"maximum of {max_depth}.",
                 )
+            # Time narrows like authority: a sub-task cannot outlive its parent grant.
+            if parent.expires_at is not None:
+                expires_at = (
+                    parent.expires_at
+                    if expires_at is None
+                    else min(expires_at, parent.expires_at)
+                )
 
         record = Delegation(
             id=f"dg-{uuid.uuid4().hex[:12]}",
@@ -198,6 +237,7 @@ class DelegationLedger:
             depth=depth,
             created_at=_now(),
             task=task,
+            expires_at=expires_at,
         )
         with self._lock:
             self._by_id[record.id] = record
@@ -207,7 +247,7 @@ class DelegationLedger:
 
     def get(self, delegation_id: str) -> Delegation | None:
         with self._lock:
-            return self._by_id.get(delegation_id)
+            return self._refresh_locked(self._by_id.get(delegation_id))
 
     def report(
         self,
@@ -226,7 +266,7 @@ class DelegationLedger:
                 status=400,
             )
         with self._lock:
-            record = self._by_id.get(delegation_id)
+            record = self._refresh_locked(self._by_id.get(delegation_id))
             if record is None:
                 raise DelegationError(
                     "unknown_task", f"No delegation '{delegation_id}'.", status=404
@@ -236,6 +276,13 @@ class DelegationLedger:
                     "not_task_holder",
                     f"Only the delegatee '{record.delegatee}' may report on "
                     f"'{delegation_id}'.",
+                )
+            if record.status == EXPIRED:
+                raise DelegationError(
+                    "task_expired",
+                    f"Task '{delegation_id}' expired before a result was reported; "
+                    "its authority has lapsed.",
+                    status=409,
                 )
             if record.status != SUBMITTED:
                 raise DelegationError(
@@ -253,11 +300,13 @@ class DelegationLedger:
         """The chain from root grant to the given delegation, in order."""
         out: list[Delegation] = []
         with self._lock:
-            current = self._by_id.get(delegation_id)
+            current = self._refresh_locked(self._by_id.get(delegation_id))
             while current is not None:
                 out.append(current)
                 current = (
-                    self._by_id.get(current.parent_id) if current.parent_id else None
+                    self._refresh_locked(self._by_id.get(current.parent_id))
+                    if current.parent_id
+                    else None
                 )
         return list(reversed(out))
 
@@ -266,7 +315,7 @@ class DelegationLedger:
     ) -> list[Delegation]:
         """Tasks where the principal is the delegatee (its inbox) or delegator."""
         with self._lock:
-            records = list(self._by_id.values())
+            records = [self._refresh_locked(r) for r in list(self._by_id.values())]
         key = (lambda d: d.delegatee) if role == "delegatee" else (lambda d: d.delegator)
         picked = [d for d in records if key(d) == name]
         if status:
@@ -275,4 +324,5 @@ class DelegationLedger:
 
     def all(self) -> list[Delegation]:
         with self._lock:
-            return sorted(self._by_id.values(), key=lambda d: d.created_at)
+            refreshed = [self._refresh_locked(r) for r in list(self._by_id.values())]
+        return sorted(refreshed, key=lambda d: d.created_at)

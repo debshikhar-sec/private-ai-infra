@@ -20,10 +20,11 @@ import uuid
 
 from flask import Flask, Response, g, jsonify, request
 
-from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, tools
+from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, siem, tools
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.ingress import IngressFirewall
+from private_ai_gateway.logutil import log_safe
 from private_ai_gateway.metrics import Metrics
 from private_ai_gateway.policy import Policy, Principal
 from private_ai_gateway.ratelimit import RateLimiter
@@ -57,7 +58,6 @@ POLICY_PATH = os.environ.get(
     "PRIVATE_AI_POLICY_PATH", os.path.join(_PROJECT_ROOT, "config", "policy.toml")
 )
 POLICY = Policy.load(POLICY_PATH)
-DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"))
 
 # Cross-cutting controls, all driven by the same policy file:
 #   * RATE_LIMITER bounds request volume per principal (token bucket).
@@ -81,6 +81,22 @@ METRICS.register(
     "gateway_context_tokens_saved_total",
     "Prompt tokens saved by deterministic context compression (measured or applied).",
 )
+METRICS.register(
+    "gateway_siem_events_total",
+    "SIEM webhook export outcomes (delivered / failed / dropped).",
+)
+
+# SIEM push export (off unless [siem] webhook_url is set in policy): every decision
+# event is forwarded to the collector off the hot path, HMAC-signed when a secret is
+# configured. The decision log itself stays the local source of truth either way.
+SIEM = siem.from_policy(
+    POLICY.siem_webhook_url,
+    POLICY.siem_secret_env,
+    on_outcome=lambda outcome: METRICS.inc(
+        "gateway_siem_events_total", {"outcome": outcome}
+    ),
+)
+DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=SIEM)
 
 # Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
 # Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.
@@ -352,7 +368,9 @@ def authenticate_request():
 
     # The Authorization header is never logged (it carries the bearer credential).
     if principal is None:
-        logger.warning(f"AUTH_FAILURE | IP={request.remote_addr} | Path={request.path}")
+        logger.warning(
+            f"AUTH_FAILURE | IP={log_safe(request.remote_addr)} | Path={log_safe(request.path)}"
+        )
         METRICS.inc("gateway_requests_total", {"principal": "anonymous", "decision": "deny"})
         DECISION_LOG.record(
             request_id=g.request_id,
@@ -380,7 +398,9 @@ def authenticate_request():
     # runaway key is rejected cheaply, ahead of model loading or inference.
     allowed, retry_after = RATE_LIMITER.allow(principal.name, principal.requests_per_minute)
     if not allowed:
-        logger.warning(f"RATE_LIMITED | principal={principal.name} | path={request.path}")
+        logger.warning(
+            f"RATE_LIMITED | principal={log_safe(principal.name)} | path={log_safe(request.path)}"
+        )
         METRICS.inc("gateway_rate_limited_total", {"principal": principal.name})
         METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "deny"})
         DECISION_LOG.record(
@@ -407,8 +427,8 @@ def authenticate_request():
         return response
 
     logger.info(
-        f"AUTH_SUCCESS | principal={principal.name} | "
-        f"IP={request.remote_addr} | Path={request.path}"
+        f"AUTH_SUCCESS | principal={log_safe(principal.name)} | "
+        f"IP={log_safe(request.remote_addr)} | Path={log_safe(request.path)}"
     )
     return None
 
@@ -690,6 +710,7 @@ def _delegate_task(principal: Principal, skill: str, req_data: dict):
             parent_id=str(req_data.get("parent_task", "")).strip() or None,
             max_depth=POLICY.max_delegation_depth,
             task=str(req_data.get("task", ""))[:500],
+            ttl_seconds=POLICY.delegation_ttl_seconds,
         )
     except delegation.DelegationError as exc:
         return _delegation_error(principal, exc, detail)
@@ -866,7 +887,7 @@ def mcp_call():
     try:
         result = tool.handler(dict(req_data.get("arguments", {}) or {}))
     except Exception as exc:  # a tool that errors is a failed call, never a silent pass
-        logger.exception(f"TOOL_FAILED | tool={name} | {exc}")
+        logger.exception(f"TOOL_FAILED | tool={log_safe(name)} | {log_safe(exc)}")
         return jsonify(
             {"error": {"message": "Tool execution failed", "type": "server_error",
                        "code": "tool_failed"}}
@@ -926,7 +947,7 @@ def chat_completions():
     principal = getattr(g, "principal", None) or OWNER_PRINCIPAL
     if not principal.may_use(requested_model):
         logger.warning(
-            f"AUTHZ_DENY | principal={principal.name} | model={requested_model}"
+            f"AUTHZ_DENY | principal={log_safe(principal.name)} | model={log_safe(requested_model)}"
         )
         METRICS.inc("gateway_authz_denials_total", {"reason": "model_not_allowed"})
         METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "deny"})
@@ -972,8 +993,8 @@ def chat_completions():
         and declared_level > autonomy_ceiling
     ):
         logger.warning(
-            f"AUTONOMY_DENY | principal={principal.name} | "
-            f"requested=L{declared_level} | ceiling=L{autonomy_ceiling}"
+            f"AUTONOMY_DENY | principal={log_safe(principal.name)} | "
+            f"requested=L{log_safe(declared_level)} | ceiling=L{autonomy_ceiling}"
         )
         METRICS.inc("gateway_authz_denials_total", {"reason": "autonomy_exceeded"})
         METRICS.inc("gateway_requests_total", {"principal": principal.name, "decision": "deny"})
@@ -1045,15 +1066,15 @@ def chat_completions():
 
     if requested_max_tokens != max_tokens:
         logger.info(
-            f"MAX_TOKENS_CLAMPED | model={requested_model_for_cap} | requested={requested_max_tokens} | effective={max_tokens} | cap={model_cap}"
+            f"MAX_TOKENS_CLAMPED | model={log_safe(requested_model_for_cap)} | requested={log_safe(requested_max_tokens)} | effective={max_tokens} | cap={model_cap}"
         )
     logger.info(
         "REQUEST_BODY_KEYS | "
-        f"keys={list(req_data.keys())} | "
-        f"model={requested_model} | "
+        f"keys={log_safe(list(req_data.keys()))} | "
+        f"model={log_safe(requested_model)} | "
         f"stream={stream} | "
         f"max_tokens={max_tokens} | "
-        f"temperature={temperature} | "
+        f"temperature={log_safe(temperature)} | "
         f"has_tools={'tools' in req_data} | "
         f"has_tool_choice={'tool_choice' in req_data} | "
         f"has_response_format={'response_format' in req_data}"
@@ -1098,9 +1119,9 @@ def chat_completions():
                     status=403,
                 )
                 logger.warning(
-                    f"INGRESS_BLOCK | principal={principal.name} | "
-                    f"severity={scan.max_severity} | categories={scan.categories} | "
-                    f"evasions={scan.evasions}"
+                    f"INGRESS_BLOCK | principal={log_safe(principal.name)} | "
+                    f"severity={log_safe(scan.max_severity)} | categories={log_safe(scan.categories)} | "
+                    f"evasions={log_safe(scan.evasions)}"
                 )
                 return jsonify(
                     {"error": {"message": (
@@ -1119,8 +1140,8 @@ def chat_completions():
                 status=200,
             )
             logger.info(
-                f"INGRESS_FLAG | principal={principal.name} | "
-                f"severity={scan.max_severity} | categories={scan.categories}"
+                f"INGRESS_FLAG | principal={log_safe(principal.name)} | "
+                f"severity={log_safe(scan.max_severity)} | categories={log_safe(scan.categories)}"
             )
 
     # Context optimization: always measure the achievable prompt-token savings; only
@@ -1135,7 +1156,7 @@ def chat_completions():
         METRICS.inc("gateway_context_tokens_saved_total", value=ctx.saved_tokens)
         logger.info(
             f"CONTEXT_OPT | applied={ctx.applied} | saved_tokens={ctx.saved_tokens} "
-            f"| saved_pct={ctx.saved_pct} | ratio={ctx.ratio} | steps={','.join(ctx.steps)}"
+            f"| saved_pct={ctx.saved_pct} | ratio={ctx.ratio} | steps={log_safe(','.join(ctx.steps))}"
         )
     if ctx.applied:
         clean_messages = ctx.messages
@@ -1146,8 +1167,8 @@ def chat_completions():
     )
 
     logger.info(
-        f"INFERENCE_START | RequestedModel={requested_model} | "
-        f"ResolvedModel={resolved_model} | Backend={BACKEND.name} | "
+        f"INFERENCE_START | RequestedModel={log_safe(requested_model)} | "
+        f"ResolvedModel={log_safe(resolved_model)} | Backend={BACKEND.name} | "
         f"MaxTokens={max_tokens} | PromptTokensRough={prompt_tokens_rough}"
     )
 
@@ -1171,18 +1192,20 @@ def chat_completions():
             }
         ), 500
     except backends.BackendError as e:
-        logger.error(f"UPSTREAM_FAILED | {str(e)}")
+        logger.error(f"UPSTREAM_FAILED | {log_safe(e)}")
+        # Detail is logged server-side only; never surface backend/exception text to the
+        # caller (CWE-209, stack-trace / internal-error exposure).
         return jsonify(
             {
                 "error": {
-                    "message": f"Inference backend failed: {e}",
+                    "message": "Inference backend failed",
                     "type": "server_error",
                     "code": "upstream_error",
                 }
             }
         ), 502
     except Exception as e:
-        logger.exception(f"INFERENCE_FAILED | {str(e)}")
+        logger.exception(f"INFERENCE_FAILED | {log_safe(e)}")
         return jsonify(
             {
                 "error": {

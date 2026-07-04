@@ -284,6 +284,7 @@ $ curl :8080/mcp/call   -H "$H" -d '{"tool":"clock.now"}'          # 200 — gra
 | [Security model](docs/security-model.md) | trust boundaries, OWASP-LLM risks + a **MITRE ATLAS technique map** (pertinent vs. out-of-scope), honest limits |
 | [**Threat model**](docs/threat-model.md) | STRIDE per trust boundary → control → the eval that proves it |
 | [Orchestration](docs/orchestration.md) | the control plane, autonomy ladder, closed loop |
+| [**GAD/1.0 delegation spec**](docs/delegation-spec.md) | the delegation invariants as a versioned, conformance-testable protocol (suite runs against any implementation) |
 | [**Delegation & defensive suite**](docs/delegation-and-defense.md) | governed A2A delegation (attenuation + sub-delegation), the ingress AI-firewall, AI-stack CVE intelligence, and the context optimizer — with honest scoping |
 | [Runbook](docs/runbook.md) | operating the stack + the live enforcement demo |
 | [**Product evolution**](docs/product-evolution.md) | OWASP Agentic Top-10 coverage map + threat-led roadmap vs. the AI-gateway field |

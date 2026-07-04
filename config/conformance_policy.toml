@@ -1,0 +1,46 @@
+# GAD/1.0 conformance fixture cast — see docs/delegation-spec.md §5.
+#
+# These are FIXTURE CREDENTIALS for running the conformance suite against a live
+# gateway; the file still follows the production rule of storing only SHA-256 hashes.
+#
+#   conductor   token: gad-conductor   L2 · review           · can_read_audit
+#   worker      token: gad-worker      L3 · review, verify
+#   checker     token: gad-checker     L2 · verify
+#   outsider    token: gad-outsider    L1 · (no skills)
+#
+# Run a target with this policy and max_depth=2, then:
+#   GAD_BASE_URL=http://127.0.0.1:8080 \
+#   GAD_TOKEN_CONDUCTOR=gad-conductor GAD_TOKEN_WORKER=gad-worker \
+#   GAD_TOKEN_CHECKER=gad-checker GAD_TOKEN_OUTSIDER=gad-outsider \
+#   pytest tests/conformance/
+
+[delegation]
+max_depth = 2
+
+[[principals]]
+name = "conductor"
+key_sha256 = "272b33d9ae5c60eb2dd4ef6fd6e25b7e239d80487d2ba0e8438fe129be419be6"
+allowed_models = []
+max_autonomy_level = "L2"
+allowed_skills = ["review"]
+can_read_audit = true
+
+[[principals]]
+name = "worker"
+key_sha256 = "a3f1f286acbb266e8e1739f8ec5bb64191d737a7ff2275aadf7ffb1cf709d413"
+allowed_models = []
+max_autonomy_level = "L3"
+allowed_skills = ["review", "verify"]
+
+[[principals]]
+name = "checker"
+key_sha256 = "ac1c58d989d64c0b4e16b0691076b05bbff5fe3919a3db12c8500f919535ea42"
+allowed_models = []
+max_autonomy_level = "L2"
+allowed_skills = ["verify"]
+
+[[principals]]
+name = "outsider"
+key_sha256 = "b570fa7b1c51c95e4e051b86edc11df8fb0ea64714a95bb6395b8f31a373ccf3"
+allowed_models = []
+max_autonomy_level = "L1"

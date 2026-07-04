@@ -4,6 +4,48 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-07-03
+
+### Added
+- **GAD/1.0 — the delegation semantics as a versioned spec** (`docs/delegation-spec.md`).
+  Thirteen RFC-2119 invariants with stable error codes (self-delegation, skill both
+  ends, no amplification, holder-only sub-delegation, narrowing-only chains, bounded
+  depth, delegatee-only report-once, audited denials, policy-derived discovery), so the
+  semantics are something other implementations can adopt — the protocol is the product.
+- **Conformance suite** (`tests/conformance/test_delegation_spec.py`): one test per
+  MUST, tagged `gad_i1`…`gad_i13`. Runs in-process in CI, and against **any**
+  implementation over HTTP via `GAD_BASE_URL` + fixture-cast tokens; the fixture policy
+  ships as `config/conformance_policy.toml`. Verified both ways (14/14 in-process and
+  14/14 over live HTTP against a served gateway).
+- **SIEM push export** (`siem.py`, `[siem]` policy table). Every decision event can be
+  POSTed to an HTTP collector off the hot path: bounded queue consumed by one daemon
+  thread — a slow or dead collector means counted drops/failures, never request
+  latency; optional GitHub-webhook-style `X-Signature-256` HMAC over the exact body
+  (secret named by env var in policy, never stored in the file); outcomes surfaced as
+  `gateway_siem_events_total{outcome}`. `decisions.jsonl` remains the local source of
+  truth.
+
+- **Delegation time bounds (GAD/1.1 §3.1).** `[delegation] ttl_seconds` closes the
+  zombie-authority hole: an agent that dies mid-task no longer leaves a live,
+  sub-delegable grant behind forever. Expiry is enforced lazily at every read (no
+  reaper): expired tasks refuse results (`task_expired`, 409) and sub-delegation
+  (`parent_not_active`), and a child's expiry is clamped to its parent's — time
+  narrows like authority. Unset by default (unbounded, as before).
+
+### Security
+- **Log-injection hardening (CWE-117).** A new `logutil.log_safe` neutralizes CR/LF and
+  C0/C1 control characters, and now wraps every request-derived value interpolated into
+  an audit line (model names, URL paths, tool names, remote address, upstream error
+  text) across `app.py` and `backends.py`. A caller can no longer smuggle a forged event
+  onto its own line in the audit trail. Clears twelve CodeQL `py/log-injection` alerts.
+- **Internal-error exposure removed (CWE-209).** The inference backend-failure path no
+  longer echoes the exception text to the caller (`"Inference backend failed: {e}"` →
+  `"Inference backend failed"`); the detail is logged server-side only. Clears one
+  CodeQL `py/stack-trace-exposure` alert.
+
+### Changed
+- Test suite: 350 → 381 (14 conformance + 6 SIEM + 6 expiry + 5 log hygiene).
+
 ## [0.16.0] - 2026-07-03
 
 ### Added

@@ -16,10 +16,16 @@ from typing import Any
 
 
 class DecisionLog:
-    """Append-only JSONL writer for authorization decisions."""
+    """Append-only JSONL writer for authorization decisions.
 
-    def __init__(self, path: str):
+    ``forwarder`` is an optional push sink (see :mod:`private_ai_gateway.siem`): any
+    object with a non-blocking ``emit(event: dict)``. Forwarding failures are the
+    forwarder's problem; the log never lets them reach the request path.
+    """
+
+    def __init__(self, path: str, forwarder=None):
         self._path = path
+        self._forwarder = forwarder
 
     def record(
         self,
@@ -50,6 +56,11 @@ class DecisionLog:
         except OSError:
             # Never let audit-logging failure break the request path.
             pass
+        if self._forwarder is not None:
+            try:
+                self._forwarder.emit(event)
+            except Exception:  # noqa: BLE001  # nosec B110 — deliberate: telemetry export must never break the request path
+                pass
 
     def tail(self, limit: int = 100) -> list[dict[str, Any]]:
         """Return up to ``limit`` most-recent decisions, newest first.
