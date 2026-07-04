@@ -65,7 +65,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">0</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">0</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="381">0</div><div class="lbl">tests · zero skips</div></div>
+        <div class="stat"><div class="num g" data-count="389">0</div><div class="lbl">tests · zero skips</div></div>
         <div class="stat"><div class="num g" data-count="2">0</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="93" data-suffix="%">0</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -229,7 +229,7 @@
             <div class="tk">16 · Red is the system working</div>
             <h3>The enforcement ratio is the product.</h3>
             <p>Allowed work flowed; everything over-mandate was refused and recorded. Deny-by-default means the red
-              in this bar is the control plane doing its job — backed by 381 tests on two platforms and
+              in this bar is the control plane doing its job — backed by 389 tests on two platforms and
               23 adversarial evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -317,6 +317,17 @@
           <h3>🔍 OpenClaw <span class="badge l0">L0 · observe</span></h3>
           <p>Read-only assurance. Reconciles the audit, metrics, isolation manifests, and policy across nine controls and emits a PASS/FAIL verdict — changing nothing, clearing nothing.</p>
         </article>
+      </div>
+
+      <div class="card reveal" style="margin-top:1.5rem">
+        <h3>💬 Governed Chat Console <span class="badge l1">/chat</span></h3>
+        <p>Drive that loop conversationally. Type a goal: Hermes plans at L1 and <em>proposes</em> a
+          delegation — it executes nothing. You approve the sandbox apply; OpenCode applies and
+          sub-delegates verification to OpenClaw; the attenuating chain and verdict come back.
+          <strong>Withhold approval and the apply refuses</strong> — the model proposes, only the
+          person authorizes. It's the honest reading of "minimal human intervention": the human is
+          out of typing every step, never out of holding authority. Run it yourself with
+          <code>private-ai-gateway demo</code>, then open <code>/chat</code>.</p>
       </div>
     </section>
 

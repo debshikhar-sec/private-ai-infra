@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import uuid
 
@@ -77,6 +78,7 @@ METRICS.register("gateway_guardrail_events_total", "Responses that tripped an eg
 METRICS.register("gateway_ingress_events_total", "Inbound prompts flagged by the ingress firewall, by category.")
 METRICS.register("gateway_a2a_tasks_total", "A2A delegation decisions by decision.")
 METRICS.register("gateway_tool_calls_total", "MCP tool-call decisions by decision.")
+METRICS.register("gateway_orchestrate_total", "Governed Chat Console orchestration phases run.")
 METRICS.register(
     "gateway_context_tokens_saved_total",
     "Prompt tokens saved by deterministic context compression (measured or applied).",
@@ -359,7 +361,7 @@ def authenticate_request():
     # Allow health and the console *shell* without auth. The console HTML carries no
     # data — every API call it makes presents a bearer token the operator pastes in,
     # so serving the static page is no more sensitive than serving /health.
-    if request.path in ("/health", "/v1/health", "/console"):
+    if request.path in ("/health", "/v1/health", "/console", "/chat"):
         return None
 
     header = request.headers.get("Authorization", "")
@@ -562,6 +564,64 @@ def console():
         "connect-src 'self'; base-uri 'none'; form-action 'none'"
     )
     return response
+
+
+@app.route("/chat", methods=["GET"])
+def chat_console():
+    """Serve the Governed Chat Console — a conversational front-end to the real loop.
+
+    Like ``/console`` the shell is static and data-free: the operator pastes a bearer
+    token, types a goal, and watches Hermes plan → delegate → verify through the same
+    enforced plane. The apply step is human-gated; the page cannot approve on its own.
+    """
+    html = importlib.resources.files("private_ai_gateway").joinpath(
+        "static/chat.html"
+    ).read_text(encoding="utf-8")
+    response = Response(html, mimetype="text/html")
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+        "connect-src 'self'; base-uri 'none'; form-action 'none'"
+    )
+    return response
+
+
+@app.route("/v1/orchestrate", methods=["POST"])
+def v1_orchestrate():
+    """Run one governed-orchestration phase for the Governed Chat Console.
+
+    Body: ``{"objective": str, "phase": "plan"|"execute"|"probe",
+    "approver": str, "reason": str}``. The caller is authenticated and rate-limited like
+    any request; the orchestration itself drives the demo principals back through this
+    same app, so every plan/delegate/apply/verify hop is enforced and audited. The
+    ``execute`` phase applies only when an ``approver`` is supplied — authority to change
+    anything stays with the human.
+    """
+    from private_ai_gateway import orchestration
+
+    body = request.get_json(silent=True) or {}
+    objective = body.get("objective") or body.get("goal") or ""
+    phase = (body.get("phase") or "plan").strip()
+    approver = body.get("approver") or ""
+    reason = body.get("reason") or ""
+
+    try:
+        result = orchestration.run_phase(
+            sys.modules[__name__], objective, phase, approver=approver, reason=reason
+        )
+    except orchestration.OrchestrationUnavailable as exc:
+        return jsonify({"error": {"message": str(exc), "type": "unavailable",
+                                  "code": "orchestration_unavailable"}}), 503
+    except ValueError as exc:
+        return jsonify({"error": {"message": str(exc), "type": "invalid_request_error",
+                                  "code": "invalid_request"}}), 400
+
+    METRICS.inc("gateway_orchestrate_total",
+                {"phase": phase, "principal": g.principal.name})
+    logger.info(
+        f"ORCHESTRATE | principal={log_safe(g.principal.name)} | phase={log_safe(phase)} "
+        f"| objective={log_safe(objective)[:80]}"
+    )
+    return jsonify(result)
 
 
 # -----------------------------
