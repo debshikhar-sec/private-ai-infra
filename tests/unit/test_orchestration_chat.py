@@ -263,6 +263,33 @@ def test_plan_fails_closed_when_policy_unreadable(client, monkeypatch):
     assert r.get_json()["error"]["code"] == "orchestration_unavailable"
 
 
+def test_demo_plane_repoints_policy_path_to_packaged_policy(monkeypatch, tmp_path):
+    # Regression for the CI false-green: the module default POLICY_PATH is the *untracked*
+    # config/policy.toml, absent in a fresh checkout. install_demo_plane must repoint
+    # POLICY_PATH at the packaged demo policy it actually loaded, so the authority-bearing
+    # canonical hash reads a file that ships with the package — never config/policy.toml.
+    from pathlib import Path
+
+    # Simulate CI: POLICY_PATH points at a nonexistent file *before* the demo plane installs.
+    missing = tmp_path / "config" / "policy.toml"
+    monkeypatch.setattr(gw, "POLICY_PATH", str(missing))
+    assert not missing.exists()
+
+    install_demo_plane(gw)
+
+    # POLICY_PATH now resolves to the packaged, existing demo policy.
+    assert Path(gw.POLICY_PATH).is_file()
+    assert Path(gw.POLICY_PATH).name == "demo_policy.toml"
+
+    # A plan succeeds end to end without relying on config/policy.toml.
+    c = gw.app.test_client()
+    body = _post(c, objective=_OBJ, phase="plan")
+    assert RUN_ID_RE.match(body["run_id"])
+    assert SHA256_RE.match(body["canonical_plan_hash"])
+    # The plan's policy_hash is sha256-formatted (hashed from the packaged demo policy).
+    assert SHA256_RE.match(body["canonical_plan"]["policy_hash"])
+
+
 # ---- D2a: owner-gated POST /v1/approvals (decision only; no execute enforcement) ----
 
 _OWNER_TOKEN = "test-owner-break-glass-token"

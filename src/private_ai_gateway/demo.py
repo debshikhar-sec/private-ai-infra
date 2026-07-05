@@ -203,6 +203,11 @@ def install_demo_plane(gw) -> None:
     policy_file = importlib.resources.files("private_ai_gateway").joinpath("demo_policy.toml")
     policy = Policy.load(str(policy_file))
     gw.POLICY = policy
+    # Point POLICY_PATH at the *packaged* policy we actually loaded — not the module default
+    # (`config/policy.toml`, which is untracked and absent in a fresh checkout/CI). The
+    # authority-bearing canonical plan hash reads POLICY_PATH, so on the demo plane it must
+    # resolve to this ships-with-the-package file that enforcement is really using.
+    gw.POLICY_PATH = str(policy_file)
     gw.BACKEND = backends.DemoBackend()
     gw.RATE_LIMITER = RateLimiter(policy.default_requests_per_minute)
     gw.GUARDRAILS = Guardrails(policy.guardrail_action)
