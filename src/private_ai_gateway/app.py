@@ -623,10 +623,15 @@ def v1_orchestrate():
             run_id=run_id, approval_id=approval_id,
         )
     except orchestration.OrchestrationUnavailable as exc:
-        return jsonify({"error": {"message": str(exc), "type": "unavailable",
+        # Keep internal detail server-side; return a static, client-safe message (CWE-209).
+        logger.warning(f"ORCHESTRATE_UNAVAILABLE | detail={log_safe(str(exc))}")
+        return jsonify({"error": {"message": "Orchestration is temporarily unavailable",
+                                  "type": "unavailable",
                                   "code": "orchestration_unavailable"}}), 503
     except ValueError as exc:
-        return jsonify({"error": {"message": str(exc), "type": "invalid_request_error",
+        logger.warning(f"ORCHESTRATE_INVALID_REQUEST | detail={log_safe(str(exc))}")
+        return jsonify({"error": {"message": "Invalid orchestration request",
+                                  "type": "invalid_request_error",
                                   "code": "invalid_request"}}), 400
 
     METRICS.inc("gateway_orchestrate_total",
@@ -702,8 +707,11 @@ def v1_approvals():
             approver=principal.name, reason=reason,
         )
     except ApprovalError as exc:
+        # Static, client-safe message; the specific reason stays in the server log (CWE-209).
+        logger.warning(f"APPROVAL_ERROR | run_id={log_safe(run_id)} | detail={log_safe(str(exc))}")
         return jsonify(
-            {"error": {"message": str(exc), "type": "invalid_request_error",
+            {"error": {"message": "Approval could not be recorded",
+                       "type": "invalid_request_error",
                        "code": "approval_error"}}
         ), 409
 
