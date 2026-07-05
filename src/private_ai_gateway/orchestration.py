@@ -14,9 +14,13 @@ apply step refuses unless the caller supplies an approval.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
+import uuid
 from pathlib import Path
+
+from private_ai_gateway import approvals, canonical
 
 
 class OrchestrationUnavailable(RuntimeError):
@@ -72,17 +76,23 @@ def _demo_tokens(gw) -> dict[str, str]:
     return TOKENS
 
 
-def _build_peers(gw, tokens: dict[str, str]) -> dict:
-    """One in-process AgentPeer per principal, all hitting this same governed app."""
+def _build_peers(gw, tokens: dict[str, str], run_id: str = "") -> dict:
+    """One in-process AgentPeer per principal, all hitting this same governed app.
+
+    When ``run_id`` is set, every sub-request carries it as ``X-Run-Id`` so the governed
+    hop's audit record can be correlated to the run (see ``before_request``). Correlation
+    only — nothing here validates it.
+    """
     from interop import AgentPeer
 
     client = gw.app.test_client()
 
     def factory(token: str):
         def send(method: str, path: str, body: dict | None = None):
-            resp = getattr(client, method.lower())(
-                path, headers={"Authorization": f"Bearer {token}"}, json=body
-            )
+            headers = {"Authorization": f"Bearer {token}"}
+            if run_id:
+                headers["X-Run-Id"] = run_id
+            resp = getattr(client, method.lower())(path, headers=headers, json=body)
             payload = resp.get_json(silent=True)
             if payload is None:
                 payload = resp.get_data(as_text=True)
@@ -95,14 +105,222 @@ def _build_peers(gw, tokens: dict[str, str]) -> dict:
 
 VALID_PHASES = ("plan", "execute", "probe")
 
+# --- D1: canonical plan assembly (metadata only; no enforcement yet) ----------
+# Plan-time-deterministic, authority-bearing values. Never the random per-run sandbox
+# path, never a delegation id (which only exists at execute); system/policy constants
+# only, never model text. See docs/canonical-plan-hashing.md.
+_RESOURCE_ROOT_ID = "opencode/review_target"
+_PLAN_TASK_CLASS = "code_apply"
+_PLAN_ENVIRONMENT = "demo"
+_PLAN_CONSTRAINTS = {"no_commit": True, "sandbox_only": True}
+_POLICY_VERSION = "policy-file-sha256"
+_PLAN_PRINCIPAL = "hermes"
+
+
+def _policy_hash(gw) -> str:
+    """Deterministic hash of the active policy file (Policy exposes no version/hash).
+
+    ``policy_hash`` is authority-bearing, so if the active policy file cannot be read this
+    fails closed — no fallback/placeholder value is ever substituted. The caller aborts
+    plan-run registration, so no misleading ``canonical_plan_hash`` is returned.
+    """
+    path = getattr(gw, "POLICY_PATH", "") or ""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        raise OrchestrationUnavailable(
+            f"cannot read policy file for canonical plan hashing ({path!r}): {exc}"
+        ) from exc
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _proposal_target_resources() -> list[str]:
+    """Files the code.apply proposal declares — deterministic at plan and execute."""
+    from opencode_sandbox import apply as act
+    from opencode_sandbox.worker import DEFAULT_PROPOSAL
+
+    return act.load_proposal(str(DEFAULT_PROPOSAL)).declared_files
+
+
+def _assemble_canonical_plan(gw, objective: str, proposal: dict):
+    """Build the CanonicalPlan for a proposed code.apply -> (plan, effective, ceiling)."""
+    executor = proposal["executor"]
+    requested = int(proposal["level"])
+    principal = gw.POLICY.find_principal(executor)
+    ceiling = gw.autonomy_ceiling_for(principal) if principal is not None else None
+    if ceiling is None:
+        ceiling = requested
+    effective = min(requested, ceiling)
+
+    plan = canonical.canonicalize(
+        canonicalization_version=canonical.CANONICALIZATION_VERSION,
+        plan_schema_version=1,
+        objective=objective,
+        principal_id=_PLAN_PRINCIPAL,
+        executor=executor,
+        skill=proposal["skill"],
+        task_class=_PLAN_TASK_CLASS,
+        requested_autonomy=requested,
+        effective_autonomy=effective,
+        policy_version=_POLICY_VERSION,
+        policy_hash=_policy_hash(gw),
+        resource_root_id=_RESOURCE_ROOT_ID,
+        target_resources=_proposal_target_resources(),
+        environment=_PLAN_ENVIRONMENT,
+        delegation=None,
+        constraints=dict(_PLAN_CONSTRAINTS),
+        data_sensitivity=None,
+    )
+    return plan, effective, ceiling
+
+
+def _register_plan_run(gw, run_id: str, objective: str, result: dict) -> None:
+    """Assemble the canonical plan, register the run, and expose the hash on the result.
+
+    Additive: sets ``canonical_plan_hash`` (and ``canonical_plan``) on ``result``. No-op if
+    the plan produced no proposal or no store is present. Enforcement is a later step.
+    """
+    proposal = result.get("proposal")
+    store = getattr(gw, "APPROVAL_STORE", None)
+    if not proposal or store is None:
+        return
+    plan, effective, ceiling = _assemble_canonical_plan(gw, objective, proposal)
+    digest = plan.digest
+    store.create_run(
+        run_id=run_id,
+        principal_id=_PLAN_PRINCIPAL,
+        canonical_plan_hash=digest,
+        effective_autonomy=effective,
+        policy_ceiling=ceiling,
+    )
+    result["canonical_plan_hash"] = digest
+    result["canonical_plan"] = plan.mapping
+
+
+# --- D2b: execute enforcement (approval-bound; no inline-approver authority) ----
+# Execution authority no longer comes from a request-body approver string. A real apply
+# requires a durable, owner-issued approval (see /v1/approvals) that binds to this run's
+# run_id AND to a canonical plan hash the server *recomputes* here from deterministic,
+# policy-derived inputs — never a model call, never a client-supplied hash. Validation and
+# single-use consumption both complete before any delegation/mutation. See
+# docs/run-id-approval-design.md and docs/canonical-plan-hashing.md.
+_REFUSAL_MESSAGES = {
+    approvals.REASON_APPROVAL_MISSING: "no valid approval was presented — authority was never granted",
+    approvals.REASON_RUN_NOT_FOUND: "no such run — plan first to register the run",
+    approvals.REASON_RUN_MISMATCH: "the approval belongs to a different run",
+    approvals.REASON_HASH_MISMATCH: "the plan changed since it was approved — canonical hash mismatch",
+    approvals.REASON_REPLAY: "this approval was already used (single-use)",
+    approvals.REASON_REJECTED: "the owner rejected this run",
+    approvals.REASON_EXPIRED: "the approval has expired",
+    approvals.REASON_INVALIDATED: "the run or approval was invalidated",
+    approvals.REASON_NOT_APPROVED: "the approval is not in an approved state",
+    approvals.REASON_AUTONOMY_EXCEEDED: "requested autonomy exceeds the policy ceiling",
+}
+
+
+def _execute_refusal(run_id: str, reason_code: str) -> dict:
+    """A governed execute refusal transcript (HTTP 200): nothing was applied.
+
+    Same shape the Governed Chat Console renders for any execute result, so a refusal is a
+    first-class governed outcome, not an error. ``refused``/``refusal_reason`` let the
+    handler audit-correlate it to the run without this module touching Flask state.
+    """
+    message = _REFUSAL_MESSAGES.get(reason_code, "execute refused by governance")
+    return {
+        "phase": "execute",
+        "run_id": run_id,
+        "steps": [
+            {
+                "actor": "owner",
+                "action": "the governed approval gate refuses the apply",
+                "detail": message,
+                "decision": "deny",
+                "code": reason_code,
+            }
+        ],
+        "chain": [],
+        "verdict": "REFUSED",
+        "applied": False,
+        "refused": True,
+        "refusal_reason": reason_code,
+    }
+
+
+def _recompute_execute_digest(gw, session, objective: str) -> str:
+    """Reconstruct the canonical plan deterministically at execute and return its digest.
+
+    Uses only deterministic, policy-derived inputs. The executor is *discovered* from the
+    enforced directory exactly as the apply step discovers it (``find_peer`` on the granted
+    skill/level) — never a model call, never a client-supplied value. Fails closed if no
+    capable executor exists, so a plan that cannot be faithfully reconstructed can never be
+    validated for execution.
+    """
+    from hermes.session import EXEC_LEVEL, EXEC_SKILL
+
+    card = session.hermes.find_peer(EXEC_SKILL, min_level=EXEC_LEVEL, exclude=("hermes",))
+    if card is None:
+        raise OrchestrationUnavailable(
+            "no peer offers code.apply; cannot reconstruct the plan for validation"
+        )
+    proposal = {
+        "executor": card["name"],
+        "skill": EXEC_SKILL,
+        "level": EXEC_LEVEL,
+        "objective": objective,
+    }
+    plan, _effective, _ceiling = _assemble_canonical_plan(gw, objective, proposal)
+    return plan.digest
+
+
+def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> dict:
+    """Authorize an apply strictly from a durable, hash-bound approval record.
+
+    The request body's approver/reason grant nothing. Real execution requires a run_id and
+    an approval_id that validate against the server-recomputed canonical hash; validation
+    and single-use consumption both complete *before* ``session.execute`` (and therefore
+    before any delegation/mutation). The approver handed to the apply comes from the stored
+    approval, never the request.
+    """
+    store = getattr(gw, "APPROVAL_STORE", None)
+    if store is None:
+        raise OrchestrationUnavailable("approval store is not available on this plane")
+
+    # A missing approval_id is the keystone refusal (also the old inline-approver body and
+    # the "show the refusal" demo path): refuse without an audited directory reconstruction.
+    if not approval_id:
+        return _execute_refusal(run_id, approvals.REASON_APPROVAL_MISSING)
+
+    # Authority-bearing: recompute the canonical hash from deterministic inputs only, before
+    # any mutation. Fails closed (OrchestrationUnavailable -> 503) if it cannot be rebuilt.
+    digest = _recompute_execute_digest(gw, session, objective)
+
+    validation = store.validate_for_execute(run_id, approval_id, digest)
+    if not validation.ok:
+        return _execute_refusal(run_id, validation.reason)
+
+    # Consume the single-use approval before any delegation/mutation can happen.
+    store.mark_used(approval_id)
+    # Authority comes from the stored approval, never the request body.
+    return session.execute(validation.record.approver, "")
+
 
 def run_phase(
-    gw, objective: str, phase: str, *, approver: str = "", reason: str = ""
+    gw, objective: str, phase: str, *, approver: str = "", reason: str = "",
+    run_id: str = "", approval_id: str = "",
 ) -> dict:
     """Run one governed-orchestration phase and return its structured transcript.
 
-    Raises :class:`OrchestrationUnavailable` (agents/demo-plane missing) or ``ValueError``
-    (unknown phase / empty objective).
+    ``run_id`` correlates the whole loop. The server mints a fresh one on ``plan`` and
+    never trusts a client-supplied value there; ``probe`` echoes a caller value for
+    correlation only. ``execute`` is now authority-gated: it applies only under a durable,
+    hash-bound approval (``run_id`` + ``approval_id``), and the request-body
+    ``approver``/``reason`` grant nothing (an old inline-approver body is a governed
+    refusal). See :func:`_run_execute`.
+
+    Raises :class:`OrchestrationUnavailable` (agents/demo-plane missing, or a plan that
+    cannot be deterministically reconstructed at execute) or ``ValueError`` (unknown phase
+    / empty objective).
     """
     if phase not in VALID_PHASES:
         raise ValueError(f"unknown phase {phase!r}; expected one of {VALID_PHASES}")
@@ -112,12 +330,18 @@ def run_phase(
     _ensure_agents_on_path()
     from hermes.session import GovernedSession
 
+    if phase == "plan":
+        run_id = "run-" + uuid.uuid4().hex  # always fresh; ignore any client-supplied id
+
     tokens = _demo_tokens(gw)
-    peers = _build_peers(gw, tokens)
-    session = GovernedSession(peers, objective)
+    peers = _build_peers(gw, tokens, run_id)
+
+    session = GovernedSession(peers, objective, run_id=run_id)
 
     if phase == "plan":
-        return session.plan()
+        result = session.plan()
+        _register_plan_run(gw, run_id, objective, result)
+        return result
     if phase == "execute":
-        return session.execute(approver, reason)
+        return _run_execute(gw, session, objective, run_id, approval_id)
     return session.probe()

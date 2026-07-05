@@ -22,6 +22,7 @@ import uuid
 from flask import Flask, Response, g, jsonify, request
 
 from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, siem, tools
+from private_ai_gateway.approvals import ApprovalError, ApprovalStore
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.ingress import IngressFirewall
@@ -99,6 +100,12 @@ SIEM = siem.from_policy(
     ),
 )
 DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=SIEM)
+
+# In-process approval store for the governed chat loop. Process-local by design — a
+# restart drops pending approvals (no persistence until the verifier-owned evidence sink
+# exists). D1 only *registers* a run + its canonical plan hash on plan; execute-time
+# validation and the approval decision endpoint arrive in a later step.
+APPROVAL_STORE = ApprovalStore()
 
 # Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
 # Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.
@@ -356,6 +363,10 @@ def _identify_principal(token: str) -> Principal | None:
 @app.before_request
 def authenticate_request():
     g.request_id = uuid.uuid4().hex
+    # Correlation id for a governed run, if the caller carries one. Orchestration
+    # sub-requests set it (see orchestration._build_peers); plain requests leave it empty,
+    # and only the explicitly tagged orchestration-path audit records emit it.
+    g.run_id = request.headers.get("X-Run-Id", "")
     g.principal = None
 
     # Allow health and the console *shell* without auth. The console HTML carries no
@@ -589,24 +600,27 @@ def chat_console():
 def v1_orchestrate():
     """Run one governed-orchestration phase for the Governed Chat Console.
 
-    Body: ``{"objective": str, "phase": "plan"|"execute"|"probe",
-    "approver": str, "reason": str}``. The caller is authenticated and rate-limited like
-    any request; the orchestration itself drives the demo principals back through this
-    same app, so every plan/delegate/apply/verify hop is enforced and audited. The
-    ``execute`` phase applies only when an ``approver`` is supplied — authority to change
-    anything stays with the human.
+    Body: ``{"objective": str, "phase": "plan"|"execute"|"probe", "run_id": str,
+    "approval_id": str}``. The caller is authenticated and rate-limited like any request;
+    the orchestration itself drives the demo principals back through this same app, so
+    every plan/delegate/apply/verify hop is enforced and audited. The ``execute`` phase
+    applies only under a durable, owner-issued approval (see ``/v1/approvals``): it needs
+    ``run_id`` + ``approval_id`` and a server-recomputed canonical hash. A request-body
+    ``approver`` grants nothing — an old inline-approver body is refused (governed 200)
+    with ``approval_missing``. Authority to change anything stays with the human.
     """
     from private_ai_gateway import orchestration
 
     body = request.get_json(silent=True) or {}
     objective = body.get("objective") or body.get("goal") or ""
     phase = (body.get("phase") or "plan").strip()
-    approver = body.get("approver") or ""
-    reason = body.get("reason") or ""
+    run_id = body.get("run_id") or ""
+    approval_id = body.get("approval_id") or ""
 
     try:
         result = orchestration.run_phase(
-            sys.modules[__name__], objective, phase, approver=approver, reason=reason
+            sys.modules[__name__], objective, phase,
+            run_id=run_id, approval_id=approval_id,
         )
     except orchestration.OrchestrationUnavailable as exc:
         return jsonify({"error": {"message": str(exc), "type": "unavailable",
@@ -617,11 +631,101 @@ def v1_orchestrate():
 
     METRICS.inc("gateway_orchestrate_total",
                 {"phase": phase, "principal": g.principal.name})
+    # An approval-gate refusal happens before any sub-request, so it would otherwise leave
+    # no audit trace. Record it (deny, with run_id) through the existing DecisionLog.
+    if phase == "execute" and result.get("refused"):
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny",
+            reason=f"execute_refused:{result.get('refusal_reason', '')}",
+            status=200, run_id=result.get("run_id", ""),
+        )
     logger.info(
         f"ORCHESTRATE | principal={log_safe(g.principal.name)} | phase={log_safe(phase)} "
-        f"| objective={log_safe(objective)[:80]}"
+        f"| run_id={log_safe(result.get('run_id', ''))} | objective={log_safe(objective)[:80]}"
     )
     return jsonify(result)
+
+
+@app.route("/v1/approvals", methods=["POST"])
+def v1_approvals():
+    """Owner-gated approval decision for a governed run (durable, hash-bound).
+
+    The approver is the authenticated **owner** identity — never a body field, never model
+    text. The decision binds to a run registered on ``plan`` and to that run's exact
+    ``canonical_plan_hash``; a mismatch is refused. Rejection is a governed *success*
+    (HTTP 200), not an error. This endpoint decides an approval; it does not execute
+    anything — execute-time validation arrives with D2b.
+    """
+    principal = getattr(g, "principal", None)
+    if principal is not OWNER_PRINCIPAL:
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""),
+            principal=(principal.name if principal else None),
+            method=request.method, path=request.path, model=None,
+            decision="deny", reason="owner_required", status=403,
+        )
+        return jsonify(
+            {"error": {"message": "Approval requires the owner identity",
+                       "type": "permission_error", "code": "owner_required"}}
+        ), 403
+
+    body = request.get_json(silent=True) or {}
+    run_id = str(body.get("run_id", "")).strip()
+    supplied_hash = str(body.get("canonical_plan_hash", "")).strip()
+    decision = str(body.get("decision", "")).strip()
+    reason = str(body.get("reason", ""))
+
+    if decision not in ("approve", "reject"):
+        return jsonify(
+            {"error": {"message": "decision must be 'approve' or 'reject'",
+                       "type": "invalid_request_error", "code": "invalid_decision"}}
+        ), 400
+
+    run = APPROVAL_STORE.get_run(run_id)
+    if run is None:
+        return jsonify(
+            {"error": {"message": f"Unknown run '{run_id}'",
+                       "type": "invalid_request_error", "code": "run_not_found"}}
+        ), 404
+    if supplied_hash != run.canonical_plan_hash:
+        return jsonify(
+            {"error": {"message": "canonical_plan_hash does not match the registered run",
+                       "type": "invalid_request_error", "code": "hash_mismatch"}}
+        ), 409
+
+    try:
+        pending = APPROVAL_STORE.create_pending_approval(run_id)
+        record = APPROVAL_STORE.decide_approval(
+            pending.approval_id, decision=decision,
+            approver=principal.name, reason=reason,
+        )
+    except ApprovalError as exc:
+        return jsonify(
+            {"error": {"message": str(exc), "type": "invalid_request_error",
+                       "code": "approval_error"}}
+        ), 409
+
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow" if decision == "approve" else "deny",
+        reason=f"approval_{record.approval_status.value}:{run_id}",
+        status=200, run_id=run_id,
+    )
+
+    resp = {
+        "approval_id": record.approval_id,
+        "run_id": record.run_id,
+        "approval_status": record.approval_status.value,
+        "canonical_plan_hash": record.canonical_plan_hash,
+        "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+        "single_use": record.single_use,
+    }
+    if record.approval_status.value == "rejected":
+        resp["rejection_reason"] = record.rejection_reason
+    return jsonify(resp), 200
 
 
 # -----------------------------
@@ -727,6 +831,7 @@ def _delegation_error(principal: Principal, exc: delegation.DelegationError, det
         request_id=getattr(g, "request_id", ""), principal=principal.name,
         method=request.method, path=request.path, model=None,
         decision="deny", reason=f"{exc.code}:{detail}", status=exc.status,
+        run_id=getattr(g, "run_id", ""),
     )
     return jsonify(
         {"error": {"message": exc.message, "type": "permission_error", "code": exc.code}}
@@ -782,7 +887,7 @@ def _delegate_task(principal: Principal, skill: str, req_data: dict):
         decision="allow",
         reason=f"delegate:{skill}->{delegatee_name}@L{record.granted_level}"
                f",depth={record.depth}",
-        status=202,
+        status=202, run_id=getattr(g, "run_id", ""),
     )
     return jsonify(_delegation_view(record)), 202
 
@@ -1295,6 +1400,7 @@ def chat_completions():
             decision="filter",
             reason=f"egress_{GUARDRAILS.action}:{','.join(guard.triggered)}",
             status=200,
+            run_id=getattr(g, "run_id", ""),
         )
         response_text = guard.text
 
@@ -1308,6 +1414,7 @@ def chat_completions():
         decision="allow",
         reason="completed",
         status=200,
+        run_id=getattr(g, "run_id", ""),
     )
 
     completion_tokens_rough = estimate_tokens_rough(response_text)

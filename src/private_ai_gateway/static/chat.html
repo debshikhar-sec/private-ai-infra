@@ -87,6 +87,10 @@ const thread = $("thread");
 const ICON = { hermes:"🧭", opencode:"🛠️", openclaw:"🔍", owner:"👤", you:"💬", system:"⚙️" };
 const LNAME = { 0:"observe",1:"suggest",2:"propose",3:"execute",5:"unbounded" };
 
+// The current governed run: captured from the plan response and frozen for approval +
+// execute, so editing the goal box after planning can never silently change the run.
+let currentRun = null;
+
 function token(){ return $("token").value.trim(); }
 function scroll(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }
 
@@ -118,14 +122,16 @@ function renderSteps(steps){
   }
 }
 
-async function api(phase, extra){
+async function api(phase, extra, objective){
   const t = token();
-  if (!t){ bubble({who:"system",name:"system",action:"Paste a bearer token above first.",decision:"deny"}); return null; }
+  if (!t){ bubble({who:"system",name:"system",action:"Paste the planner (Hermes) token above first.",decision:"deny"}); return null; }
+  const obj = objective!==undefined ? objective
+                                    : ($("goal").value.trim()||"Apply the reviewed fix and verify it");
   let r;
   try{
     r = await fetch("/v1/orchestrate", { method:"POST",
       headers:{ "Authorization":"Bearer "+t, "Content-Type":"application/json" },
-      body: JSON.stringify(Object.assign({ objective:$("goal").value.trim()||"Apply the reviewed fix and verify it", phase }, extra||{})) });
+      body: JSON.stringify(Object.assign({ objective:obj, phase }, extra||{})) });
   }catch(e){ bubble({who:"system",name:"system",action:"Network error",detail:String(e),decision:"deny"}); return null; }
   const j = await r.json().catch(()=>({}));
   if (!r.ok){
@@ -138,17 +144,18 @@ async function api(phase, extra){
 
 function proposalCard(p){
   const card = document.createElement("div"); card.className="card";
-  card.innerHTML = "<h4>Proposed delegation — awaiting your approval</h4>" +
-    "<div class='chain'><b>"+p.executor+"</b> would run <b>"+p.skill+"</b> at <b>L"+p.level+"</b> in a confined, sandboxed apply.</div>";
+  card.innerHTML = "<h4>Proposed delegation — awaiting owner approval</h4>" +
+    "<div class='chain'><b>"+p.executor+"</b> would run <b>"+p.skill+"</b> at <b>L"+p.level+"</b> in a confined, sandboxed apply.</div>" +
+    "<div class='detail'>Approval is owner-gated and bound to this plan's hash. Paste the <b>owner / break-glass</b> token — the planner token above cannot approve its own plan.</div>";
   const row = document.createElement("div"); row.className="row"; row.style.marginTop=".6rem";
-  const who = document.createElement("input"); who.className="txt"; who.placeholder="approver (e.g. owner)"; who.value="owner"; who.style.width="150px";
-  const why = document.createElement("input"); why.className="txt"; why.placeholder="reason (reviewed the diff…)"; why.style.flex="1"; why.style.minWidth="180px"; why.value="reviewed the proposal; approved for sandbox apply";
+  const owner = document.createElement("input"); owner.className="txt"; owner.type="password"; owner.placeholder="owner / break-glass token"; owner.style.flex="1"; owner.style.minWidth="200px"; owner.autocomplete="off";
+  const why = document.createElement("input"); why.className="txt"; why.placeholder="approval reason (optional)"; why.style.flex="1"; why.style.minWidth="160px"; why.value="reviewed the proposal; approved for sandbox apply";
   const ok = document.createElement("button"); ok.textContent="Approve & apply ▸";
   const no = document.createElement("button"); no.className="danger"; no.textContent="Deny (show refusal)";
-  row.appendChild(who); row.appendChild(why); row.appendChild(ok); row.appendChild(no);
+  row.appendChild(owner); row.appendChild(why); row.appendChild(ok); row.appendChild(no);
   card.appendChild(row); thread.appendChild(card); scroll();
-  ok.onclick = ()=>{ card.remove(); runExecute(who.value.trim(), why.value.trim()); };
-  no.onclick = ()=>{ card.remove(); runExecute("", ""); };
+  ok.onclick = ()=>{ card.remove(); approveAndExecute(owner.value.trim(), why.value.trim()); };
+  no.onclick = ()=>{ card.remove(); runExecuteNoApproval(); };
 }
 
 function resultCard(j){
@@ -168,21 +175,57 @@ function resultCard(j){
 }
 
 async function runPlan(){
-  const goal = $("goal").value.trim();
-  bubble({who:"you",name:"you",action:goal||"Apply the reviewed fix and verify it"});
+  const objective = $("goal").value.trim() || "Apply the reviewed fix and verify it";
+  bubble({who:"you",name:"you",action:objective});
   $("send").disabled=true;
-  const j = await api("plan");
+  currentRun = null;
+  const j = await api("plan", null, objective);
   $("send").disabled=false;
   if (!j) return;
   renderSteps(j.steps||[]);
-  if (j.needs_approval && j.proposal) proposalCard(j.proposal);
+  // Freeze the exact run identity used for approval + execute (never the live goal box).
+  if (j.needs_approval && j.proposal && j.run_id && j.canonical_plan_hash){
+    currentRun = { run_id:j.run_id, canonical_plan_hash:j.canonical_plan_hash, objective };
+    proposalCard(j.proposal);
+  }
 }
 
-async function runExecute(approver, reason){
-  const j = await api("execute", { approver, reason });
-  if (!j) return;
-  renderSteps(j.steps||[]);
-  resultCard(j);
+// Step 1: owner approval (/v1/approvals, owner token). Step 2: execute with approval_id
+// (/v1/orchestrate, planner token). Authority is the owner-issued, hash-bound approval —
+// not any field the browser sends to execute.
+async function approveAndExecute(ownerToken, reason){
+  if (!currentRun){ bubble({who:"system",name:"system",action:"No active run to approve — plan first.",decision:"deny"}); return; }
+  if (!ownerToken){ bubble({who:"system",name:"system",action:"Paste the owner / break-glass token to approve.",decision:"deny"}); return; }
+  let r, j;
+  try{
+    r = await fetch("/v1/approvals", { method:"POST",
+      headers:{ "Authorization":"Bearer "+ownerToken, "Content-Type":"application/json" },
+      body: JSON.stringify({ run_id:currentRun.run_id, canonical_plan_hash:currentRun.canonical_plan_hash,
+                             decision:"approve", reason:reason||"" }) });
+  }catch(e){ bubble({who:"system",name:"system",action:"Network error",detail:String(e),decision:"deny"}); return; }
+  j = await r.json().catch(()=>({}));
+  if (!r.ok){
+    const err = (j.error||{});
+    bubble({who:"system",name:"gateway",action:err.message||("HTTP "+r.status),detail:err.code||"",decision:"deny"});
+    return;
+  }
+  bubble({who:"owner",name:"owner",action:"approves the sandbox apply (owner-gated, hash-bound)",
+          detail:j.approval_id+" · "+j.approval_status});
+  // Execute under the planner token, carrying only the run_id + approval_id + frozen objective.
+  const ex = await api("execute", { run_id:currentRun.run_id, approval_id:j.approval_id }, currentRun.objective);
+  if (!ex) return;
+  renderSteps(ex.steps||[]);
+  resultCard(ex);
+}
+
+// The refusal demo: execute the frozen run with no approval_id — the server returns the
+// governed approval_missing refusal on the wire (nothing is applied).
+async function runExecuteNoApproval(){
+  if (!currentRun){ bubble({who:"system",name:"system",action:"No active run — plan first.",decision:"deny"}); return; }
+  const ex = await api("execute", { run_id:currentRun.run_id }, currentRun.objective);
+  if (!ex) return;
+  renderSteps(ex.steps||[]);
+  resultCard(ex);
 }
 
 async function runProbe(){

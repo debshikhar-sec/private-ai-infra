@@ -38,6 +38,7 @@ class DecisionLog:
         decision: str,
         reason: str,
         status: int,
+        run_id: str = "",
     ) -> None:
         event: dict[str, Any] = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -50,6 +51,11 @@ class DecisionLog:
             "reason": reason,
             "status": status,
         }
+        # Correlation id for a governed run. Included only when set, so plain gateway
+        # requests keep the exact historical schema (no run_id key). Passed by callers —
+        # this module never reads Flask state.
+        if run_id:
+            event["run_id"] = run_id
         try:
             with open(self._path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(event, separators=(",", ":")) + "\n")
