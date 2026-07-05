@@ -14,10 +14,13 @@ apply step refuses unless the caller supplies an approval.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import uuid
 from pathlib import Path
+
+from private_ai_gateway import canonical
 
 
 class OrchestrationUnavailable(RuntimeError):
@@ -102,6 +105,98 @@ def _build_peers(gw, tokens: dict[str, str], run_id: str = "") -> dict:
 
 VALID_PHASES = ("plan", "execute", "probe")
 
+# --- D1: canonical plan assembly (metadata only; no enforcement yet) ----------
+# Plan-time-deterministic, authority-bearing values. Never the random per-run sandbox
+# path, never a delegation id (which only exists at execute); system/policy constants
+# only, never model text. See docs/canonical-plan-hashing.md.
+_RESOURCE_ROOT_ID = "opencode/review_target"
+_PLAN_TASK_CLASS = "code_apply"
+_PLAN_ENVIRONMENT = "demo"
+_PLAN_CONSTRAINTS = {"no_commit": True, "sandbox_only": True}
+_POLICY_VERSION = "policy-file-sha256"
+_PLAN_PRINCIPAL = "hermes"
+
+
+def _policy_hash(gw) -> str:
+    """Deterministic hash of the active policy file (Policy exposes no version/hash).
+
+    ``policy_hash`` is authority-bearing, so if the active policy file cannot be read this
+    fails closed — no fallback/placeholder value is ever substituted. The caller aborts
+    plan-run registration, so no misleading ``canonical_plan_hash`` is returned.
+    """
+    path = getattr(gw, "POLICY_PATH", "") or ""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        raise OrchestrationUnavailable(
+            f"cannot read policy file for canonical plan hashing ({path!r}): {exc}"
+        ) from exc
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _proposal_target_resources() -> list[str]:
+    """Files the code.apply proposal declares — deterministic at plan and execute."""
+    from opencode_sandbox import apply as act
+    from opencode_sandbox.worker import DEFAULT_PROPOSAL
+
+    return act.load_proposal(str(DEFAULT_PROPOSAL)).declared_files
+
+
+def _assemble_canonical_plan(gw, objective: str, proposal: dict):
+    """Build the CanonicalPlan for a proposed code.apply -> (plan, effective, ceiling)."""
+    executor = proposal["executor"]
+    requested = int(proposal["level"])
+    principal = gw.POLICY.find_principal(executor)
+    ceiling = gw.autonomy_ceiling_for(principal) if principal is not None else None
+    if ceiling is None:
+        ceiling = requested
+    effective = min(requested, ceiling)
+
+    plan = canonical.canonicalize(
+        canonicalization_version=canonical.CANONICALIZATION_VERSION,
+        plan_schema_version=1,
+        objective=objective,
+        principal_id=_PLAN_PRINCIPAL,
+        executor=executor,
+        skill=proposal["skill"],
+        task_class=_PLAN_TASK_CLASS,
+        requested_autonomy=requested,
+        effective_autonomy=effective,
+        policy_version=_POLICY_VERSION,
+        policy_hash=_policy_hash(gw),
+        resource_root_id=_RESOURCE_ROOT_ID,
+        target_resources=_proposal_target_resources(),
+        environment=_PLAN_ENVIRONMENT,
+        delegation=None,
+        constraints=dict(_PLAN_CONSTRAINTS),
+        data_sensitivity=None,
+    )
+    return plan, effective, ceiling
+
+
+def _register_plan_run(gw, run_id: str, objective: str, result: dict) -> None:
+    """Assemble the canonical plan, register the run, and expose the hash on the result.
+
+    Additive: sets ``canonical_plan_hash`` (and ``canonical_plan``) on ``result``. No-op if
+    the plan produced no proposal or no store is present. Enforcement is a later step.
+    """
+    proposal = result.get("proposal")
+    store = getattr(gw, "APPROVAL_STORE", None)
+    if not proposal or store is None:
+        return
+    plan, effective, ceiling = _assemble_canonical_plan(gw, objective, proposal)
+    digest = plan.digest
+    store.create_run(
+        run_id=run_id,
+        principal_id=_PLAN_PRINCIPAL,
+        canonical_plan_hash=digest,
+        effective_autonomy=effective,
+        policy_ceiling=ceiling,
+    )
+    result["canonical_plan_hash"] = digest
+    result["canonical_plan"] = plan.mapping
+
 
 def run_phase(
     gw, objective: str, phase: str, *, approver: str = "", reason: str = "", run_id: str = ""
@@ -132,7 +227,9 @@ def run_phase(
     session = GovernedSession(peers, objective, run_id=run_id)
 
     if phase == "plan":
-        return session.plan()
+        result = session.plan()
+        _register_plan_run(gw, run_id, objective, result)
+        return result
     if phase == "execute":
         return session.execute(approver, reason)
     return session.probe()

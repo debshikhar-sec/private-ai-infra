@@ -22,6 +22,7 @@ import uuid
 from flask import Flask, Response, g, jsonify, request
 
 from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, siem, tools
+from private_ai_gateway.approvals import ApprovalStore
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.ingress import IngressFirewall
@@ -99,6 +100,12 @@ SIEM = siem.from_policy(
     ),
 )
 DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=SIEM)
+
+# In-process approval store for the governed chat loop. Process-local by design — a
+# restart drops pending approvals (no persistence until the verifier-owned evidence sink
+# exists). D1 only *registers* a run + its canonical plan hash on plan; execute-time
+# validation and the approval decision endpoint arrive in a later step.
+APPROVAL_STORE = ApprovalStore()
 
 # Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
 # Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.

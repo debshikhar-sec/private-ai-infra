@@ -215,3 +215,61 @@ def test_untagged_handler_ignores_x_run_id(client):
     recs = [e for e in gw.DECISION_LOG.tail(limit=50) if e.get("path") == "/v1/decisions"]
     assert recs
     assert all("run_id" not in e for e in recs)
+
+
+# ---- D1: canonical plan hash on plan (metadata only; no enforcement) ---------
+
+SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def test_plan_returns_run_id_and_canonical_plan_hash(client):
+    body = _post(client, objective=_OBJ, phase="plan")
+    assert RUN_ID_RE.match(body["run_id"])
+    assert SHA256_RE.match(body["canonical_plan_hash"])
+
+
+def test_plan_hash_is_stable_across_runs_with_same_inputs(client):
+    a = _post(client, objective=_OBJ, phase="plan")
+    b = _post(client, objective=_OBJ, phase="plan")
+    assert a["run_id"] != b["run_id"]                        # fresh run each time
+    assert a["canonical_plan_hash"] == b["canonical_plan_hash"]  # same authority-bearing plan
+
+
+def test_plan_registers_run_in_approval_store(client):
+    body = _post(client, objective=_OBJ, phase="plan")
+    run = gw.APPROVAL_STORE.get_run(body["run_id"])
+    assert run is not None
+    assert run.canonical_plan_hash == body["canonical_plan_hash"]
+    assert run.principal_id == "hermes"
+
+
+def test_no_approvals_endpoint_yet(client):
+    r = client.post(
+        "/v1/approvals", headers={"Authorization": HERMES},
+        json={"run_id": "run-x", "canonical_plan_hash": "sha256:" + "0" * 64,
+              "decision": "approve"},
+    )
+    assert r.status_code == 404  # endpoint deliberately not added in D1
+
+
+def test_execute_inline_approver_unchanged_after_d1(client):
+    # D1 is additive: execute still succeeds with an inline approver and no approval_id.
+    plan = _post(client, objective=_OBJ, phase="plan")
+    ex = _post(client, objective=_OBJ, phase="execute",
+               approver="owner", reason="reviewed", run_id=plan["run_id"])
+    assert ex["applied"] is True and ex["verdict"] == "PASS"
+
+
+def test_execute_without_approver_still_refuses_after_d1(client):
+    ex = _post(client, objective=_OBJ, phase="execute")
+    assert ex["applied"] is False and ex["verdict"] == "REFUSED"
+
+
+def test_plan_fails_closed_when_policy_unreadable(client, monkeypatch):
+    # policy_hash is authority-bearing: an unreadable policy file must fail closed, never
+    # hash a fallback and return a misleading canonical_plan_hash.
+    monkeypatch.setattr(gw, "POLICY_PATH", "/nonexistent/policy/does-not-exist.toml")
+    r = client.post("/v1/orchestrate", headers={"Authorization": HERMES},
+                    json={"objective": _OBJ, "phase": "plan"})
+    assert r.status_code == 503
+    assert r.get_json()["error"]["code"] == "orchestration_unavailable"
