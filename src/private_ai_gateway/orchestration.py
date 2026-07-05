@@ -73,17 +73,23 @@ def _demo_tokens(gw) -> dict[str, str]:
     return TOKENS
 
 
-def _build_peers(gw, tokens: dict[str, str]) -> dict:
-    """One in-process AgentPeer per principal, all hitting this same governed app."""
+def _build_peers(gw, tokens: dict[str, str], run_id: str = "") -> dict:
+    """One in-process AgentPeer per principal, all hitting this same governed app.
+
+    When ``run_id`` is set, every sub-request carries it as ``X-Run-Id`` so the governed
+    hop's audit record can be correlated to the run (see ``before_request``). Correlation
+    only — nothing here validates it.
+    """
     from interop import AgentPeer
 
     client = gw.app.test_client()
 
     def factory(token: str):
         def send(method: str, path: str, body: dict | None = None):
-            resp = getattr(client, method.lower())(
-                path, headers={"Authorization": f"Bearer {token}"}, json=body
-            )
+            headers = {"Authorization": f"Bearer {token}"}
+            if run_id:
+                headers["X-Run-Id"] = run_id
+            resp = getattr(client, method.lower())(path, headers=headers, json=body)
             payload = resp.get_json(silent=True)
             if payload is None:
                 payload = resp.get_data(as_text=True)
@@ -117,11 +123,11 @@ def run_phase(
     _ensure_agents_on_path()
     from hermes.session import GovernedSession
 
-    tokens = _demo_tokens(gw)
-    peers = _build_peers(gw, tokens)
-
     if phase == "plan":
         run_id = "run-" + uuid.uuid4().hex  # always fresh; ignore any client-supplied id
+
+    tokens = _demo_tokens(gw)
+    peers = _build_peers(gw, tokens, run_id)
 
     session = GovernedSession(peers, objective, run_id=run_id)
 

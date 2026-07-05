@@ -183,3 +183,35 @@ def test_plan_still_proposes_alongside_run_id(client):
     assert body["proposal"]["executor"] == "opencode"
     assert body["proposal"]["skill"] == "code.apply"
     assert "run_id" in body
+
+
+# ---- C2: run_id audit tagging (orchestration sub-requests only) --------------
+
+def test_orchestration_subrequest_audit_carries_run_id(client):
+    body = _post(client, objective=_OBJ, phase="plan")
+    run_id = body["run_id"]
+    assert RUN_ID_RE.match(run_id)
+    # At least one governed sub-request hop (e.g. the L1 plan model call) is tagged.
+    tagged = [e for e in gw.DECISION_LOG.tail(limit=200) if e.get("run_id") == run_id]
+    assert tagged, "expected an orchestration audit record tagged with the run_id"
+
+
+def test_plain_request_without_x_run_id_has_no_run_id_key(client):
+    # /v1/decisions is an untagged, recording handler (hermes lacks can_read_audit -> 403,
+    # which is itself audited). A plain request must keep the exact historical shape.
+    client.get("/v1/decisions", headers={"Authorization": HERMES})
+    recs = [e for e in gw.DECISION_LOG.tail(limit=50) if e.get("path") == "/v1/decisions"]
+    assert recs, "expected a /v1/decisions audit record"
+    assert all("run_id" not in e for e in recs)
+
+
+def test_untagged_handler_ignores_x_run_id(client):
+    # Option B proof: an untagged handler does NOT tag its record even if a client sets
+    # X-Run-Id — only the explicitly tagged orchestration-path handlers emit run_id.
+    client.get(
+        "/v1/decisions",
+        headers={"Authorization": HERMES, "X-Run-Id": "run-should-be-ignored"},
+    )
+    recs = [e for e in gw.DECISION_LOG.tail(limit=50) if e.get("path") == "/v1/decisions"]
+    assert recs
+    assert all("run_id" not in e for e in recs)

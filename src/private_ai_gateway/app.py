@@ -356,6 +356,10 @@ def _identify_principal(token: str) -> Principal | None:
 @app.before_request
 def authenticate_request():
     g.request_id = uuid.uuid4().hex
+    # Correlation id for a governed run, if the caller carries one. Orchestration
+    # sub-requests set it (see orchestration._build_peers); plain requests leave it empty,
+    # and only the explicitly tagged orchestration-path audit records emit it.
+    g.run_id = request.headers.get("X-Run-Id", "")
     g.principal = None
 
     # Allow health and the console *shell* without auth. The console HTML carries no
@@ -729,6 +733,7 @@ def _delegation_error(principal: Principal, exc: delegation.DelegationError, det
         request_id=getattr(g, "request_id", ""), principal=principal.name,
         method=request.method, path=request.path, model=None,
         decision="deny", reason=f"{exc.code}:{detail}", status=exc.status,
+        run_id=getattr(g, "run_id", ""),
     )
     return jsonify(
         {"error": {"message": exc.message, "type": "permission_error", "code": exc.code}}
@@ -784,7 +789,7 @@ def _delegate_task(principal: Principal, skill: str, req_data: dict):
         decision="allow",
         reason=f"delegate:{skill}->{delegatee_name}@L{record.granted_level}"
                f",depth={record.depth}",
-        status=202,
+        status=202, run_id=getattr(g, "run_id", ""),
     )
     return jsonify(_delegation_view(record)), 202
 
@@ -1297,6 +1302,7 @@ def chat_completions():
             decision="filter",
             reason=f"egress_{GUARDRAILS.action}:{','.join(guard.triggered)}",
             status=200,
+            run_id=getattr(g, "run_id", ""),
         )
         response_text = guard.text
 
@@ -1310,6 +1316,7 @@ def chat_completions():
         decision="allow",
         reason="completed",
         status=200,
+        run_id=getattr(g, "run_id", ""),
     )
 
     completion_tokens_rough = estimate_tokens_rough(response_text)
