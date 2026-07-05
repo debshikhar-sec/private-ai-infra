@@ -22,7 +22,7 @@ import uuid
 from flask import Flask, Response, g, jsonify, request
 
 from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, siem, tools
-from private_ai_gateway.approvals import ApprovalStore
+from private_ai_gateway.approvals import ApprovalError, ApprovalStore
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.ingress import IngressFirewall
@@ -635,6 +635,86 @@ def v1_orchestrate():
         f"| run_id={log_safe(result.get('run_id', ''))} | objective={log_safe(objective)[:80]}"
     )
     return jsonify(result)
+
+
+@app.route("/v1/approvals", methods=["POST"])
+def v1_approvals():
+    """Owner-gated approval decision for a governed run (durable, hash-bound).
+
+    The approver is the authenticated **owner** identity — never a body field, never model
+    text. The decision binds to a run registered on ``plan`` and to that run's exact
+    ``canonical_plan_hash``; a mismatch is refused. Rejection is a governed *success*
+    (HTTP 200), not an error. This endpoint decides an approval; it does not execute
+    anything — execute-time validation arrives with D2b.
+    """
+    principal = getattr(g, "principal", None)
+    if principal is not OWNER_PRINCIPAL:
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""),
+            principal=(principal.name if principal else None),
+            method=request.method, path=request.path, model=None,
+            decision="deny", reason="owner_required", status=403,
+        )
+        return jsonify(
+            {"error": {"message": "Approval requires the owner identity",
+                       "type": "permission_error", "code": "owner_required"}}
+        ), 403
+
+    body = request.get_json(silent=True) or {}
+    run_id = str(body.get("run_id", "")).strip()
+    supplied_hash = str(body.get("canonical_plan_hash", "")).strip()
+    decision = str(body.get("decision", "")).strip()
+    reason = str(body.get("reason", ""))
+
+    if decision not in ("approve", "reject"):
+        return jsonify(
+            {"error": {"message": "decision must be 'approve' or 'reject'",
+                       "type": "invalid_request_error", "code": "invalid_decision"}}
+        ), 400
+
+    run = APPROVAL_STORE.get_run(run_id)
+    if run is None:
+        return jsonify(
+            {"error": {"message": f"Unknown run '{run_id}'",
+                       "type": "invalid_request_error", "code": "run_not_found"}}
+        ), 404
+    if supplied_hash != run.canonical_plan_hash:
+        return jsonify(
+            {"error": {"message": "canonical_plan_hash does not match the registered run",
+                       "type": "invalid_request_error", "code": "hash_mismatch"}}
+        ), 409
+
+    try:
+        pending = APPROVAL_STORE.create_pending_approval(run_id)
+        record = APPROVAL_STORE.decide_approval(
+            pending.approval_id, decision=decision,
+            approver=principal.name, reason=reason,
+        )
+    except ApprovalError as exc:
+        return jsonify(
+            {"error": {"message": str(exc), "type": "invalid_request_error",
+                       "code": "approval_error"}}
+        ), 409
+
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow" if decision == "approve" else "deny",
+        reason=f"approval_{record.approval_status.value}:{run_id}",
+        status=200, run_id=run_id,
+    )
+
+    resp = {
+        "approval_id": record.approval_id,
+        "run_id": record.run_id,
+        "approval_status": record.approval_status.value,
+        "canonical_plan_hash": record.canonical_plan_hash,
+        "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+        "single_use": record.single_use,
+    }
+    if record.approval_status.value == "rejected":
+        resp["rejection_reason"] = record.rejection_reason
+    return jsonify(resp), 200
 
 
 # -----------------------------

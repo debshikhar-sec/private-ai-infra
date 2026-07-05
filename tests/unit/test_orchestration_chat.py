@@ -243,15 +243,6 @@ def test_plan_registers_run_in_approval_store(client):
     assert run.principal_id == "hermes"
 
 
-def test_no_approvals_endpoint_yet(client):
-    r = client.post(
-        "/v1/approvals", headers={"Authorization": HERMES},
-        json={"run_id": "run-x", "canonical_plan_hash": "sha256:" + "0" * 64,
-              "decision": "approve"},
-    )
-    assert r.status_code == 404  # endpoint deliberately not added in D1
-
-
 def test_execute_inline_approver_unchanged_after_d1(client):
     # D1 is additive: execute still succeeds with an inline approver and no approval_id.
     plan = _post(client, objective=_OBJ, phase="plan")
@@ -273,3 +264,113 @@ def test_plan_fails_closed_when_policy_unreadable(client, monkeypatch):
                     json={"objective": _OBJ, "phase": "plan"})
     assert r.status_code == 503
     assert r.get_json()["error"]["code"] == "orchestration_unavailable"
+
+
+# ---- D2a: owner-gated POST /v1/approvals (decision only; no execute enforcement) ----
+
+_OWNER_TOKEN = "test-owner-break-glass-token"
+
+
+@pytest.fixture
+def owner_token(monkeypatch):
+    # install_demo_plane does not configure AUTH_TOKEN; set a known owner (break-glass)
+    # token so the bearer resolves to OWNER_PRINCIPAL (via _identify_principal's fallback).
+    monkeypatch.setattr(gw, "AUTH_TOKEN", _OWNER_TOKEN)
+    return _OWNER_TOKEN
+
+
+def _owner_hdr():
+    return {"Authorization": f"Bearer {_OWNER_TOKEN}"}
+
+
+def _plan_and_hash(client):
+    body = _post(client, objective=_OBJ, phase="plan")
+    return body["run_id"], body["canonical_plan_hash"]
+
+
+def test_owner_can_approve_registered_run(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "approve", "reason": "reviewed the diff"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["approval_id"].startswith("appr-")
+    assert body["run_id"] == run_id
+    assert body["approval_status"] == "approved"
+    assert body["canonical_plan_hash"] == plan_hash
+    assert body["expires_at"] is not None
+    assert body["single_use"] is True
+
+
+def test_owner_can_reject_registered_run(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "reject", "reason": "scope too broad"})
+    assert r.status_code == 200                       # rejection is a governed success
+    body = r.get_json()
+    assert body["approval_status"] == "rejected"
+    assert body["rejection_reason"] == "scope too broad"
+
+
+def test_non_owner_cannot_approve(client):
+    run_id, plan_hash = _plan_and_hash(client)
+    r = client.post("/v1/approvals", headers={"Authorization": HERMES},
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "approve"})
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "owner_required"
+
+
+def test_approvals_requires_authentication(client):
+    r = client.post("/v1/approvals",
+                    json={"run_id": "x", "canonical_plan_hash": "y", "decision": "approve"})
+    assert r.status_code == 401
+
+
+def test_approve_unknown_run_refuses(client, owner_token):
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": "run-does-not-exist",
+                          "canonical_plan_hash": "sha256:" + "0" * 64, "decision": "approve"})
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "run_not_found"
+
+
+def test_approve_wrong_hash_refuses(client, owner_token):
+    run_id, _ = _plan_and_hash(client)
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": "sha256:" + "0" * 64,
+                          "decision": "approve"})
+    assert r.status_code == 409
+    assert r.get_json()["error"]["code"] == "hash_mismatch"
+
+
+def test_invalid_decision_refuses(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "delete-everything"})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "invalid_decision"
+
+
+def test_body_approver_field_is_ignored(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "approve", "approver": "attacker"})
+    assert r.status_code == 200
+    rec = gw.APPROVAL_STORE.get_approval(r.get_json()["approval_id"])
+    assert rec.approver == "owner"          # authenticated principal, not the body field
+
+
+def test_approvals_store_is_in_memory_only(client, owner_token):
+    # No persistence: the store exposes no path, and a fresh store (restart) forgets the run.
+    from private_ai_gateway.approvals import ApprovalStore
+
+    assert not hasattr(gw.APPROVAL_STORE, "_path")
+    run_id, plan_hash = _plan_and_hash(client)
+    client.post("/v1/approvals", headers=_owner_hdr(),
+                json={"run_id": run_id, "canonical_plan_hash": plan_hash, "decision": "approve"})
+    assert ApprovalStore().get_run(run_id) is None
