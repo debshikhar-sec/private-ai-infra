@@ -227,6 +227,33 @@ flowchart LR
     class R store;
 ```
 
+**Evidence integrity — merged, and honestly incomplete.** The loop above establishes
+*authority*; the current build is hardening the *evidence* of what was authorized and what
+then happened.
+
+- **The execute authority loop is enforced (D2).** Execute requires a durable, **single-use**,
+  **owner-approved** decision bound to the plan's **canonical hash** (`run_id` +
+  `approval_id`). An inline request-body approver grants nothing; the gateway recomputes the
+  canonical hash and consumes the approval **before** any mutation
+  ([`app.py`](../src/private_ai_gateway/app.py) `v1_approvals`,
+  [`approvals.py`](../src/private_ai_gateway/approvals.py),
+  [`orchestration.py`](../src/private_ai_gateway/orchestration.py)).
+- **A verifier-owned evidence sink core exists.** An append-only, per-emitter **HMAC-signed**,
+  **hash-chained** record store with from-scratch chain verification
+  ([`agents/openclaw/sink.py`](../agents/openclaw/sink.py)). It is **tamper-evident, not
+  non-repudiation** (symmetric-key MVP).
+- **OpenCode emits a signed `apply_result`** into that sink after a confined apply
+  ([`agents/opencode_sandbox/evidence_emit.py`](../agents/opencode_sandbox/evidence_emit.py)),
+  bound to the run and additive to the still-written `apply_report.json`.
+
+**Not done yet (the important half):** OpenClaw today still verifies from the gateway's own
+evidence and the handed apply report — it does **not yet consume or validate** the signed
+sink records, so executor output is not yet *independently* verified. **OpenClaw verifier
+consume is the next milestone.** Gateway authorization emit, `evidence_refs` population,
+fail-closed runtime enforcement, a trust ledger, and earned autonomy are all **future** and
+sequenced in [roadmap.md](roadmap.md) / [evidence-sink-design.md](evidence-sink-design.md).
+Autonomy stays fixed-ceiling by policy — there is no self-approval and no earned escalation.
+
 **Planned (next, behind the same boundary):**
 
 - **OpenClaw probes:** add model-driven offensive-security / code-review checks for the
