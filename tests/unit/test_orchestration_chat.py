@@ -97,19 +97,15 @@ def test_endpoint_plan_phase(client):
     assert body["proposal"]["executor"] == "opencode"
 
 
-def test_endpoint_execute_approved_vs_refused(client):
-    approved = client.post(
+def test_endpoint_execute_requires_approval(client):
+    # After D2b an inline-approver body no longer applies; execute needs an approval_id.
+    refused = client.post(
         "/v1/orchestrate", headers={"Authorization": HERMES},
         json={"objective": "Apply the reviewed fix and verify it", "phase": "execute",
               "approver": "owner", "reason": "reviewed"},
     ).get_json()
-    assert approved["applied"] is True and approved["verdict"] == "PASS"
-
-    refused = client.post(
-        "/v1/orchestrate", headers={"Authorization": HERMES},
-        json={"objective": "Apply the reviewed fix and verify it", "phase": "execute"},
-    ).get_json()
     assert refused["applied"] is False and refused["verdict"] == "REFUSED"
+    assert refused["refusal_reason"] == "approval_missing"
 
 
 def test_endpoint_rejects_unknown_phase_and_empty_objective(client):
@@ -152,13 +148,15 @@ def test_plan_ignores_client_supplied_run_id(client):
 
 
 def test_execute_echoes_supplied_run_id(client):
+    # An unregistered run + a stray approval_id is a governed refusal, but the run_id is
+    # still echoed for correlation (the transcript carries it even when nothing applies).
     body = _post(
         client, objective=_OBJ, phase="execute",
-        approver="owner", reason="reviewed", run_id="run-corr-execute",
+        run_id="run-corr-execute", approval_id="appr-none",
     )
     assert body["run_id"] == "run-corr-execute"
-    # existing execute behavior is unchanged (additive response)
-    assert body["applied"] is True and body["verdict"] == "PASS"
+    assert body["applied"] is False and body["verdict"] == "REFUSED"
+    assert body["refusal_reason"] == "run_not_found"
 
 
 def test_probe_echoes_supplied_run_id(client):
@@ -167,11 +165,14 @@ def test_probe_echoes_supplied_run_id(client):
     assert body["phase"] == "probe"
 
 
-def test_execute_and_probe_without_run_id_are_backward_compatible(client):
+def test_execute_without_approval_refuses_and_probe_is_backward_compatible(client):
+    # Execute with no run_id/approval_id is a governed refusal (echoed run_id stays empty).
     ex = _post(client, objective=_OBJ, phase="execute", approver="owner", reason="ok")
-    assert ex["applied"] is True and ex["verdict"] == "PASS"
+    assert ex["applied"] is False and ex["verdict"] == "REFUSED"
+    assert ex["refusal_reason"] == "approval_missing"
     assert ex.get("run_id", "") == ""  # echoed empty, never minted outside plan
 
+    # Probe is unchanged by D2b.
     pr = _post(client, objective=_OBJ, phase="probe")
     assert pr["phase"] == "probe"
     assert pr.get("run_id", "") == ""
@@ -243,17 +244,13 @@ def test_plan_registers_run_in_approval_store(client):
     assert run.principal_id == "hermes"
 
 
-def test_execute_inline_approver_unchanged_after_d1(client):
-    # D1 is additive: execute still succeeds with an inline approver and no approval_id.
+def test_execute_inline_approver_no_longer_authorizes(client):
+    # D2b closes the loop: a request-body approver grants nothing, even on a real run.
     plan = _post(client, objective=_OBJ, phase="plan")
     ex = _post(client, objective=_OBJ, phase="execute",
                approver="owner", reason="reviewed", run_id=plan["run_id"])
-    assert ex["applied"] is True and ex["verdict"] == "PASS"
-
-
-def test_execute_without_approver_still_refuses_after_d1(client):
-    ex = _post(client, objective=_OBJ, phase="execute")
     assert ex["applied"] is False and ex["verdict"] == "REFUSED"
+    assert ex["refusal_reason"] == "approval_missing"
 
 
 def test_plan_fails_closed_when_policy_unreadable(client, monkeypatch):
@@ -286,6 +283,22 @@ def _owner_hdr():
 def _plan_and_hash(client):
     body = _post(client, objective=_OBJ, phase="plan")
     return body["run_id"], body["canonical_plan_hash"]
+
+
+def _approve(client, run_id, plan_hash, reason="reviewed the diff"):
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "approve", "reason": reason})
+    assert r.status_code == 200
+    return r.get_json()["approval_id"]
+
+
+def _reject(client, run_id, plan_hash, reason="scope too broad"):
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "reject", "reason": reason})
+    assert r.status_code == 200
+    return r.get_json()["approval_id"]
 
 
 def test_owner_can_approve_registered_run(client, owner_token):
@@ -374,3 +387,100 @@ def test_approvals_store_is_in_memory_only(client, owner_token):
     client.post("/v1/approvals", headers=_owner_hdr(),
                 json={"run_id": run_id, "canonical_plan_hash": plan_hash, "decision": "approve"})
     assert ApprovalStore().get_run(run_id) is None
+
+
+# ---- D2b: execute enforcement (approval-bound; inline approver no longer authorizes) ----
+# The full loop on the wire: plan -> owner approve -> execute {run_id, approval_id}. Execute
+# recomputes the canonical hash server-side and applies only under a matching, unused,
+# non-expired approval. Every failure mode is a governed 200 refusal, not a 4xx/5xx.
+
+def _execute(client, run_id, approval_id, objective=_OBJ):
+    return _post(client, objective=objective, phase="execute",
+                 run_id=run_id, approval_id=approval_id)
+
+
+def test_plan_approve_execute_applies_and_verifies(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    approval_id = _approve(client, run_id, plan_hash)
+    ex = _execute(client, run_id, approval_id)
+    assert ex["applied"] is True and ex["verdict"] == "PASS"
+    assert ex["run_id"] == run_id
+    # The full attenuating chain still runs under the durable approval.
+    assert {d["depth"] for d in ex["chain"]} == {1, 2}
+
+
+def test_execute_missing_approval_id_refuses(client):
+    run_id, _ = _plan_and_hash(client)
+    ex = _execute(client, run_id, "")
+    assert ex["applied"] is False and ex["verdict"] == "REFUSED"
+    assert ex["refusal_reason"] == "approval_missing"
+
+
+def test_execute_unknown_approval_id_refuses(client):
+    run_id, _ = _plan_and_hash(client)
+    ex = _execute(client, run_id, "appr-does-not-exist")
+    assert ex["applied"] is False
+    assert ex["refusal_reason"] == "approval_missing"
+
+
+def test_execute_approval_from_a_different_run_refuses(client, owner_token):
+    run_a, hash_a = _plan_and_hash(client)
+    approval_a = _approve(client, run_a, hash_a)
+    run_b, _ = _plan_and_hash(client)          # a second, distinct run
+    ex = _execute(client, run_b, approval_a)   # b's run, a's approval
+    assert ex["applied"] is False
+    assert ex["refusal_reason"] == "run_mismatch"
+
+
+def test_execute_objective_drift_hash_mismatch_refuses(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    approval_id = _approve(client, run_id, plan_hash)
+    # The objective the browser sends at execute drifts from the approved plan -> the
+    # server-recomputed hash no longer matches the run/approval binding.
+    ex = _execute(client, run_id, approval_id, objective="a different objective entirely")
+    assert ex["applied"] is False
+    assert ex["refusal_reason"] == "hash_mismatch"
+
+
+def test_execute_replay_refuses_on_second_execute(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    approval_id = _approve(client, run_id, plan_hash)
+    first = _execute(client, run_id, approval_id)
+    assert first["applied"] is True                      # single-use is consumed here
+    second = _execute(client, run_id, approval_id)
+    assert second["applied"] is False
+    assert second["refusal_reason"] == "replay"
+
+
+def test_execute_after_rejection_refuses(client, owner_token):
+    run_id, plan_hash = _plan_and_hash(client)
+    approval_id = _reject(client, run_id, plan_hash)
+    ex = _execute(client, run_id, approval_id)
+    assert ex["applied"] is False
+    assert ex["refusal_reason"] == "rejected"
+
+
+def test_execute_expired_approval_refuses(client, owner_token):
+    # Expire the approval by rewinding its expiry on the stored record (no approvals.py
+    # change): validate_for_execute lazily transitions an approved-but-expired approval.
+    from datetime import datetime, timedelta, timezone
+
+    run_id, plan_hash = _plan_and_hash(client)
+    approval_id = _approve(client, run_id, plan_hash)
+    rec = gw.APPROVAL_STORE.get_approval(approval_id)
+    rec.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    ex = _execute(client, run_id, approval_id)
+    assert ex["applied"] is False
+    assert ex["refusal_reason"] == "expired"
+
+
+def test_execute_refusal_is_audited_with_run_id(client, owner_token):
+    # An approval-gate refusal happens before any sub-request; the handler still records it
+    # (deny) tagged with the run_id, through the existing DecisionLog.
+    run_id, plan_hash = _plan_and_hash(client)
+    approval_id = _reject(client, run_id, plan_hash)
+    _execute(client, run_id, approval_id)
+    recs = [e for e in gw.DECISION_LOG.tail(limit=200)
+            if e.get("run_id") == run_id and str(e.get("reason", "")).startswith("execute_refused:")]
+    assert recs, "expected an execute-refusal audit record tagged with the run_id"
+    assert recs[0]["reason"] == "execute_refused:rejected"

@@ -600,26 +600,27 @@ def chat_console():
 def v1_orchestrate():
     """Run one governed-orchestration phase for the Governed Chat Console.
 
-    Body: ``{"objective": str, "phase": "plan"|"execute"|"probe",
-    "approver": str, "reason": str}``. The caller is authenticated and rate-limited like
-    any request; the orchestration itself drives the demo principals back through this
-    same app, so every plan/delegate/apply/verify hop is enforced and audited. The
-    ``execute`` phase applies only when an ``approver`` is supplied — authority to change
-    anything stays with the human.
+    Body: ``{"objective": str, "phase": "plan"|"execute"|"probe", "run_id": str,
+    "approval_id": str}``. The caller is authenticated and rate-limited like any request;
+    the orchestration itself drives the demo principals back through this same app, so
+    every plan/delegate/apply/verify hop is enforced and audited. The ``execute`` phase
+    applies only under a durable, owner-issued approval (see ``/v1/approvals``): it needs
+    ``run_id`` + ``approval_id`` and a server-recomputed canonical hash. A request-body
+    ``approver`` grants nothing — an old inline-approver body is refused (governed 200)
+    with ``approval_missing``. Authority to change anything stays with the human.
     """
     from private_ai_gateway import orchestration
 
     body = request.get_json(silent=True) or {}
     objective = body.get("objective") or body.get("goal") or ""
     phase = (body.get("phase") or "plan").strip()
-    approver = body.get("approver") or ""
-    reason = body.get("reason") or ""
     run_id = body.get("run_id") or ""
+    approval_id = body.get("approval_id") or ""
 
     try:
         result = orchestration.run_phase(
             sys.modules[__name__], objective, phase,
-            approver=approver, reason=reason, run_id=run_id,
+            run_id=run_id, approval_id=approval_id,
         )
     except orchestration.OrchestrationUnavailable as exc:
         return jsonify({"error": {"message": str(exc), "type": "unavailable",
@@ -630,6 +631,16 @@ def v1_orchestrate():
 
     METRICS.inc("gateway_orchestrate_total",
                 {"phase": phase, "principal": g.principal.name})
+    # An approval-gate refusal happens before any sub-request, so it would otherwise leave
+    # no audit trace. Record it (deny, with run_id) through the existing DecisionLog.
+    if phase == "execute" and result.get("refused"):
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny",
+            reason=f"execute_refused:{result.get('refusal_reason', '')}",
+            status=200, run_id=result.get("run_id", ""),
+        )
     logger.info(
         f"ORCHESTRATE | principal={log_safe(g.principal.name)} | phase={log_safe(phase)} "
         f"| run_id={log_safe(result.get('run_id', ''))} | objective={log_safe(objective)[:80]}"
