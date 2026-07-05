@@ -23,6 +23,7 @@ from pathlib import Path
 from interop import AgentPeer, PeerError
 
 from opencode_sandbox import apply as act
+from opencode_sandbox.evidence_emit import emit_apply_result
 
 SKILL = "code.apply"
 VERIFY_SKILL = "assurance.verify"
@@ -45,12 +46,27 @@ class CodeActWorker:
         proposal_path: str | Path = DEFAULT_PROPOSAL,
         target: str | Path = DEFAULT_TARGET,
         runtime_dir: str | Path = DEFAULT_RUNTIME,
+        evidence_sink=None,
+        evidence_key: bytes | None = None,
+        emitter_key_id: str = "opencode-hmac-1",
+        sink_id: str = "",
+        run_id: str = "",
+        approval_id: str | None = None,
     ):
         self.peer = peer
         self.approval = approval
         self.proposal_path = Path(proposal_path)
         self.target = Path(target)
         self.runtime_dir = Path(runtime_dir)
+        # Evidence-sink emit (design step 3). All optional: when ``evidence_sink`` is None the
+        # worker behaves exactly as before (no record emitted). The sink is *verifier-owned* —
+        # it is injected here as a handle, never instantiated by the executor.
+        self.evidence_sink = evidence_sink
+        self.evidence_key = evidence_key
+        self.emitter_key_id = emitter_key_id
+        self.sink_id = sink_id
+        self.run_id = run_id
+        self.approval_id = approval_id
         self._name: str | None = None
         # my task id -> the verification sub-task id I'm waiting on
         self._awaiting: dict[str, str] = {}
@@ -96,6 +112,22 @@ class CodeActWorker:
                 result=f"apply {report.status}: "
                        f"{'; '.join(report.violations) or report.detail}"[:1900],
                 verdict=report.status.upper(),
+            )
+
+        # Evidence-sink emit (design step 3): after a successful apply, push a signed
+        # ``apply_result`` record into the verifier-owned sink so the verdict no longer rests
+        # on the self-attested ``apply_report.json``. Additive and best-effort-but-loud — an
+        # emit failure raises (never swallowed) and is not rolled back; when no sink is
+        # injected this is skipped and behavior is unchanged.
+        if self.evidence_sink is not None:
+            emit_apply_result(
+                self.evidence_sink,
+                self.evidence_key,
+                sink_id=self.sink_id,
+                run_id=self.run_id,
+                approval_id=self.approval_id,
+                emitter_key_id=self.emitter_key_id,
+                report=report,
             )
 
         verifier = self.peer.find_peer(
