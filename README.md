@@ -223,8 +223,9 @@ payments tool, A2A delegation, a live guardrail redaction — and prints the dem
 Then open **http://127.0.0.1:8080/console** and explore what just happened — or
 **http://127.0.0.1:8080/chat**, the **Governed Chat Console**: type a goal and watch
 Hermes plan → propose → (you approve) → OpenCode apply in a sandbox → OpenClaw verify,
-every hop enforced and audited. Withhold approval and the apply refuses — authority stays
-with you.
+every hop enforced and audited. The browser flow is **plan → owner approval → execute with
+an `approval_id`**: approval is owner-gated (a distinct break-glass token) and bound to the
+plan's canonical hash. Withhold approval and the apply refuses — authority stays with you.
 
 > The Console **UI** installs and serves from the package like the rest of the gateway. Its
 > **orchestration** uses the bundled repo `agents/` plane, so run `/chat` from the repo

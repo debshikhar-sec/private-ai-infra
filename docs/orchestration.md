@@ -114,18 +114,25 @@ phases so authority stays where it belongs:
    a governed **L1** model call, and **proposes** the delegation it would make (which peer,
    which skill, at what level — discovered from cards, never named up front). It executes
    nothing.
-2. **Approve** — the operator explicitly approves (or denies) the sandbox apply. This is
-   the keystone: *without a human approval the apply refuses* (`REFUSED`, no sandbox
-   mutation) — the model can propose, only the person can authorize a change.
-3. **Execute & verify** — on approval, `code.apply` delegates to the least-privileged
-   capable peer (OpenCode, L3), which applies in a confined sandbox and sub-delegates
+2. **Approve** — the owner issues an explicit approval through `POST /v1/approvals`, using
+   the **owner/break-glass** token (distinct from the planner/Hermes token that drives plan
+   and execute). The approval is durable and single-use, and is bound to both the run's
+   `run_id` and its `canonical_plan_hash`. This is the keystone: *without a valid approval
+   the apply refuses* (`REFUSED`, no sandbox mutation) — a request-body approver grants
+   nothing; only the owner can authorize a change.
+3. **Execute & verify** — execute carries the issued `approval_id`; the gateway recomputes
+   the canonical plan hash server-side and validates it against the approval before any
+   delegation. On a valid approval, `code.apply` delegates to the least-privileged capable
+   peer (OpenCode, L3), which applies in a confined sandbox and sub-delegates
    `assurance.verify` to OpenClaw (L2); the attenuating chain and PASS/FAIL verdict return.
 4. **Probe** — one click abuses the same wire (amplification, an unheld skill); each is
    refused with its exact audit code.
 
 Every phase runs through the *same* enforcement plane as any other request — authenticated,
 autonomy-capped, and audited. The page holds no authority of its own; it is a data-free
-shell under a strict CSP that carries the operator's token. This is the honest reading of
+shell under a strict CSP that carries two operator credentials — the planner/Hermes token
+for plan and execute, and the distinct owner/break-glass token for the approval step. This
+is the honest reading of
 "minimal human intervention": the human is removed from *typing every step*, not from
 *holding authority* — which is the whole thesis, `AI capability is not AI authority`, made
 interactive.
