@@ -1,4 +1,4 @@
-"""Verifier-owned evidence sink — record model, hashing, and per-emitter signing (1A + 1B).
+"""Verifier-owned evidence sink — record model, hashing, signing, and the append-only log (1A + 1B + 1C).
 
 The evidence sink is the verifier's answer to a specific weakness: OpenClaw reaches its
 verdict by reading artifacts *authored by the components it verifies*. The sink inverts
@@ -6,18 +6,21 @@ that — emitters push signed records, and the verifier (which owns this module'
 validates authorship and chains them into a tamper-evident, append-only log. See
 ``docs/evidence-sink-design.md``.
 
-**This file covers Steps 1A + 1B.**
+**This file covers Steps 1A + 1B + 1C.**
 
   * **1A** — the deterministic substrate: a dedicated canonical serializer, the
     payload/record digests, the pinned constants, and the typed record shapes.
   * **1B** — per-emitter HMAC signing of the *signing envelope*, envelope-signature
     verification, and an in-memory emitter-key registry.
+  * **1C** — the verifier-owned, append-only ``EvidenceSink``: a fail-closed ``append``
+    that validates then chains a record (sink-assigned ``seq``/``prev_hash``/``record_hash``
+    plus per-emitter nonce replay defence and a detached payload snapshot), and
+    ``verify_chain`` which re-derives the whole log from scratch.
 
-It deliberately still implements **none** of the remaining trust mechanics: no
-``EvidenceSink.append``, no ``verify_chain``, no replay detection, no persistence, and no
-wiring into the gateway/agents. Those arrive in later, separately-authorized increments
-(1C append + chain, then emit/consume wiring). Keys are passed in explicitly — there is no
-disk/env key loading here.
+It deliberately still implements **none** of the remaining wiring: no persistence (the log
+is in-memory only), no key loading from disk/env (keys are registered explicitly), and no
+emit/consume hooks into the gateway/executor/verifier. Those arrive in later,
+separately-authorized increments (executor emit, then verifier consume).
 
 Design notes pinned here (so later steps cannot drift):
 
@@ -122,6 +125,26 @@ def record_digest(record_fields: dict) -> str:
     return _sha256_prefixed(canonicalize(record_fields))
 
 
+def _hashable_core(
+    envelope: "SigningEnvelope", emitter_sig: str, seq: int, prev_hash: str
+) -> dict:
+    """The exact mapping ``record_hash`` covers: envelope + ``emitter_sig`` + assigned position.
+
+    The single source of truth for the record-hash field set, shared by ``append`` (which
+    computes ``record_hash`` before constructing the frozen record) and
+    ``AppendedRecord.hashable_fields`` (which re-derives it on verify) — so the append-time
+    and verify-time digests cannot drift. Covers the ten ``SigningEnvelope.to_mapping``
+    fields (including ``payload_hash``) plus ``emitter_sig``, ``seq``, and ``prev_hash``. It
+    does **not** include the raw ``payload`` (bound indirectly via ``payload_hash``), the
+    ``record_hash`` itself, or ``extra``.
+    """
+    core = envelope.to_mapping()
+    core["emitter_sig"] = emitter_sig
+    core["seq"] = seq
+    core["prev_hash"] = prev_hash
+    return core
+
+
 # --- typed record shapes ------------------------------------------------------------
 # These define the record *model* only. No signing, no hashing side effects, no append.
 @dataclass(frozen=True)
@@ -181,14 +204,10 @@ class AppendedRecord:
     def hashable_fields(self) -> dict:
         """The mapping ``record_hash`` covers (envelope + sig + assigned position).
 
-        Pure: builds and returns the mapping; it does **not** compute or check a hash. The
-        actual ``record_hash`` computation and verification live in Step 1C.
+        Pure: builds and returns the mapping (via the shared :func:`_hashable_core` builder);
+        it does **not** compute or check a hash.
         """
-        core = self.envelope.to_mapping()
-        core["emitter_sig"] = self.emitter_sig
-        core["seq"] = self.seq
-        core["prev_hash"] = self.prev_hash
-        return core
+        return _hashable_core(self.envelope, self.emitter_sig, self.seq, self.prev_hash)
 
 
 # --- per-emitter HMAC signing (Step 1B) ---------------------------------------------
@@ -294,3 +313,197 @@ def verify_with_registry(
     """
     key = registry.get(envelope.emitter, envelope.emitter_key_id)
     return verify_envelope_signature(envelope, signature, key)
+
+
+# --- detached snapshots -------------------------------------------------------------
+# The sink must never hold a reference to a caller's mutable payload (a later mutation of
+# the caller's object would silently change stored evidence). Round-tripping through the
+# canonical serializer yields a fresh, deeply-detached, JSON-only structure whose canonical
+# bytes are identical to the original's — so ``payload_digest`` of the snapshot still equals
+# the emitter's ``payload_hash``.
+def _detached_payload(payload: Any) -> Any:
+    """A deep, JSON-compatible copy of ``payload`` with no shared mutable references.
+
+    ``canonicalize`` has already succeeded (append validates the payload hash first), so the
+    round-trip cannot fail here; ``canonicalize(_detached_payload(p)) == canonicalize(p)``.
+    """
+    return json.loads(canonicalize(payload))
+
+
+def _detach_record(record: AppendedRecord) -> AppendedRecord:
+    """A record whose mutable members (``payload``, ``extra``) are detached copies.
+
+    The frozen scalar fields and the (immutable) ``SigningEnvelope`` are shared safely; only
+    the mutable containers are copied so a caller cannot reach back into the sink's stored
+    state through a handed-out record.
+    """
+    return AppendedRecord(
+        envelope=record.envelope,
+        payload=_detached_payload(record.payload),
+        emitter_sig=record.emitter_sig,
+        seq=record.seq,
+        prev_hash=record.prev_hash,
+        record_hash=record.record_hash,
+        extra=dict(record.extra),
+    )
+
+
+# --- the append-only evidence sink (Step 1C) ----------------------------------------
+class EvidenceSink:
+    """Verifier-owned, in-memory, append-only log of validated, chained evidence records.
+
+    The sink — not the emitter — decides what is accepted. ``append`` fully validates a
+    submitted record (schema, target sink, authorship, payload binding, replay) *before*
+    assigning it a position and chaining it; any failure raises :class:`EvidenceError` with a
+    ``REASON_*`` code and leaves the log untouched (no partial state). ``verify_chain``
+    re-derives the entire chain from scratch, trusting no stored derived value.
+
+    MVP scope: no persistence (in-memory only), no key loading (keys come from the injected
+    :class:`EmitterKeyRegistry`), and no wiring into the gateway/executor/verifier.
+    """
+
+    def __init__(self, sink_id: str, registry: EmitterKeyRegistry) -> None:
+        if not sink_id:
+            raise EvidenceError("sink_id is required")
+        if not isinstance(registry, EmitterKeyRegistry):
+            raise EvidenceError("registry must be an EmitterKeyRegistry")
+        self._sink_id = sink_id
+        self._registry = registry
+        self._records: list[AppendedRecord] = []
+        self._seen_nonces: set[tuple[str, str]] = set()
+
+    def __len__(self) -> int:
+        return len(self._records)
+
+    @property
+    def sink_id(self) -> str:
+        return self._sink_id
+
+    @property
+    def head_hash(self) -> str:
+        """``record_hash`` of the last appended record, or ``GENESIS_PREV_HASH`` when empty."""
+        if not self._records:
+            return GENESIS_PREV_HASH
+        return self._records[-1].record_hash
+
+    @property
+    def records(self) -> tuple:
+        """An immutable snapshot: a tuple of **detached** records (mutating them is inert).
+
+        Neither the returned tuple nor any record it holds is the sink's internal state — a
+        caller cannot mutate the log or a stored payload through this property.
+        """
+        return tuple(_detach_record(rec) for rec in self._records)
+
+    def append(
+        self, envelope: SigningEnvelope, payload: Any, emitter_sig: str
+    ) -> AppendedRecord:
+        """Validate, then chain, one evidence record. Fail-closed; returns a detached copy.
+
+        Validation runs to completion before any state change: structural shape → schema →
+        target sink → nonce present → emitter key resolvable → emitter signature → payload
+        binding → replay. Only if every check passes is the record snapshotted, positioned
+        (sink-assigned ``seq``/``prev_hash``/``record_hash``), appended, and its nonce
+        recorded — atomically. The returned record is a detached snapshot.
+        """
+        # 1. Structural shape.
+        if not isinstance(envelope, SigningEnvelope):
+            raise EvidenceError(f"{REASON_MALFORMED}: envelope must be a SigningEnvelope")
+        if not isinstance(emitter_sig, str):
+            raise EvidenceError(f"{REASON_MALFORMED}: emitter_sig must be a string")
+        # 2. Schema.
+        if envelope.schema_version != SCHEMA_VERSION:
+            raise EvidenceError(
+                f"{REASON_SCHEMA_UNSUPPORTED}: {envelope.schema_version!r}"
+            )
+        # 3. Target sink.
+        if envelope.sink_id != self._sink_id:
+            raise EvidenceError(
+                f"{REASON_SINK_MISMATCH}: {envelope.sink_id!r} != {self._sink_id!r}"
+            )
+        # 4. Nonce present (the anti-replay token cannot be empty/missing).
+        if not envelope.nonce:
+            raise EvidenceError(f"{REASON_MALFORMED}: nonce is required")
+        # 5. Emitter key resolvable (unknown emitter/key_id raises REASON_UNKNOWN_EMITTER).
+        key = self._registry.get(envelope.emitter, envelope.emitter_key_id)
+        # 6. Emitter signature authenticates the envelope.
+        if not verify_envelope_signature(envelope, emitter_sig, key):
+            raise EvidenceError(f"{REASON_SIG_INVALID}: emitter signature did not verify")
+        # 7. Payload binding: the raw payload must hash to the signed payload_hash.
+        if payload_digest(payload) != envelope.payload_hash:
+            raise EvidenceError(
+                f"{REASON_PAYLOAD_HASH_MISMATCH}: payload does not match payload_hash"
+            )
+        # 8. Replay: this (emitter, nonce) must not have been appended before.
+        replay_key = (envelope.emitter, envelope.nonce)
+        if replay_key in self._seen_nonces:
+            raise EvidenceError(f"{REASON_REPLAY}: duplicate (emitter, nonce) {replay_key!r}")
+
+        # 9. All checks passed — snapshot, position, chain, and commit atomically.
+        snapshot = _detached_payload(payload)
+        seq = len(self._records)
+        prev_hash = self.head_hash
+        record_hash = record_digest(_hashable_core(envelope, emitter_sig, seq, prev_hash))
+        record = AppendedRecord(
+            envelope=envelope,
+            payload=snapshot,
+            emitter_sig=emitter_sig,
+            seq=seq,
+            prev_hash=prev_hash,
+            record_hash=record_hash,
+            extra={},
+        )
+        self._records.append(record)
+        self._seen_nonces.add(replay_key)
+        # 10. Hand back a detached copy so the caller cannot reach internal state.
+        return _detach_record(record)
+
+    def verify_chain(self) -> None:
+        """Re-derive the whole log from scratch; raise on the first violation, else return None.
+
+        Trusts no stored derived value: it recomputes ``payload_hash`` from the stored
+        payload, re-verifies each emitter signature through the registry, recomputes every
+        ``record_hash``, re-walks the ``seq``/``prev_hash`` chain from genesis, and rebuilds
+        the seen-nonce set independently of the live ``_seen_nonces``.
+        """
+        seen: set[tuple[str, str]] = set()
+        for i, record in enumerate(self._records):
+            # Structural: a stored record must be well-formed.
+            if not isinstance(record, AppendedRecord) or not isinstance(
+                record.envelope, SigningEnvelope
+            ):
+                raise EvidenceError(f"{REASON_MALFORMED}: record at index {i} is malformed")
+            env = record.envelope
+            if env.schema_version != SCHEMA_VERSION:
+                raise EvidenceError(f"{REASON_SCHEMA_UNSUPPORTED}: index {i}")
+            if env.sink_id != self._sink_id:
+                raise EvidenceError(f"{REASON_SINK_MISMATCH}: index {i}")
+            if not env.nonce:
+                raise EvidenceError(f"{REASON_MALFORMED}: index {i} has no nonce")
+            # Position: seq must equal the index (catches gaps and reorders).
+            if record.seq != i:
+                raise EvidenceError(f"{REASON_SEQ_GAP}: index {i} has seq {record.seq!r}")
+            # Chain: genesis for the first record, else the prior record_hash.
+            expected_prev = (
+                GENESIS_PREV_HASH if i == 0 else self._records[i - 1].record_hash
+            )
+            if record.prev_hash != expected_prev:
+                raise EvidenceError(f"{REASON_CHAIN_BROKEN}: index {i}")
+            # Payload binding: recompute from the stored payload.
+            if payload_digest(record.payload) != env.payload_hash:
+                raise EvidenceError(f"{REASON_PAYLOAD_HASH_MISMATCH}: index {i}")
+            # Authorship: re-verify the emitter signature (unknown key -> REASON_UNKNOWN_EMITTER).
+            key = self._registry.get(env.emitter, env.emitter_key_id)
+            if not verify_envelope_signature(env, record.emitter_sig, key):
+                raise EvidenceError(f"{REASON_SIG_INVALID}: index {i}")
+            # Integrity: recompute the record hash over the shared core.
+            expected_hash = record_digest(
+                _hashable_core(env, record.emitter_sig, record.seq, record.prev_hash)
+            )
+            if expected_hash != record.record_hash:
+                raise EvidenceError(f"{REASON_RECORD_HASH_MISMATCH}: index {i}")
+            # Replay, from scratch: no (emitter, nonce) may recur.
+            replay_key = (env.emitter, env.nonce)
+            if replay_key in seen:
+                raise EvidenceError(f"{REASON_REPLAY}: index {i} duplicate {replay_key!r}")
+            seen.add(replay_key)
