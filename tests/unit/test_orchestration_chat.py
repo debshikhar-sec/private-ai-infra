@@ -511,3 +511,64 @@ def test_execute_refusal_is_audited_with_run_id(client, owner_token):
             if e.get("run_id") == run_id and str(e.get("reason", "")).startswith("execute_refused:")]
     assert recs, "expected an execute-refusal audit record tagged with the run_id"
     assert recs[0]["reason"] == "execute_refused:rejected"
+
+
+# ---- error-exposure hardening: internal exception text must not reach clients (CWE-209) ----
+# CodeQL py/stack-trace-exposure flagged the /v1/orchestrate and /v1/approvals error paths for
+# returning str(exc) to the client. These prove the message is now static (codes/status kept)
+# and the internal detail is not echoed. The detail still goes to the server log.
+
+_SECRET_DETAIL = "INTERNAL-DETAIL-/etc/secret/path-xyz-42"
+
+
+def test_orchestrate_unavailable_does_not_echo_exception_text(client, monkeypatch):
+    from private_ai_gateway import orchestration
+
+    def _boom(*args, **kwargs):
+        raise orchestration.OrchestrationUnavailable(_SECRET_DETAIL)
+
+    monkeypatch.setattr(orchestration, "run_phase", _boom)
+    r = client.post("/v1/orchestrate", headers={"Authorization": HERMES},
+                    json={"objective": "x", "phase": "plan"})
+    assert r.status_code == 503
+    body = r.get_json()
+    assert body["error"]["code"] == "orchestration_unavailable"           # code preserved
+    assert body["error"]["message"] == "Orchestration is temporarily unavailable"  # static
+    assert _SECRET_DETAIL not in r.get_data(as_text=True)                  # not echoed
+
+
+def test_orchestrate_valueerror_does_not_echo_exception_text(client, monkeypatch):
+    from private_ai_gateway import orchestration
+
+    def _boom(*args, **kwargs):
+        raise ValueError(_SECRET_DETAIL)
+
+    monkeypatch.setattr(orchestration, "run_phase", _boom)
+    r = client.post("/v1/orchestrate", headers={"Authorization": HERMES},
+                    json={"objective": "x", "phase": "plan"})
+    assert r.status_code == 400
+    body = r.get_json()
+    assert body["error"]["code"] == "invalid_request"                     # code preserved
+    assert body["error"]["message"] == "Invalid orchestration request"    # static
+    assert _SECRET_DETAIL not in r.get_data(as_text=True)                 # not echoed
+
+
+def test_approvals_error_does_not_echo_exception_text(client, owner_token, monkeypatch):
+    from private_ai_gateway.approvals import ApprovalError
+
+    run_id, plan_hash = _plan_and_hash(client)
+
+    def _boom(*args, **kwargs):
+        raise ApprovalError(_SECRET_DETAIL)
+
+    # Reach the ApprovalError handler through the real owner/run/hash checks, then fail the
+    # decision step with an internal detail that must not surface to the client.
+    monkeypatch.setattr(gw.APPROVAL_STORE, "decide_approval", _boom)
+    r = client.post("/v1/approvals", headers=_owner_hdr(),
+                    json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+                          "decision": "approve", "reason": "reviewed"})
+    assert r.status_code == 409
+    body = r.get_json()
+    assert body["error"]["code"] == "approval_error"                      # code preserved
+    assert body["error"]["message"] == "Approval could not be recorded"   # static
+    assert _SECRET_DETAIL not in r.get_data(as_text=True)                 # not echoed
