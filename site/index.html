@@ -65,7 +65,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">0</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">0</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="389">0</div><div class="lbl">tests · zero skips</div></div>
+        <div class="stat"><div class="num g" data-count="389">0</div><div class="lbl">tests</div></div>
         <div class="stat"><div class="num g" data-count="2">0</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="93" data-suffix="%">0</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -326,8 +326,11 @@
           sub-delegates verification to OpenClaw; the attenuating chain and verdict come back.
           <strong>Withhold approval and the apply refuses</strong> — the model proposes, only the
           person authorizes. It's the honest reading of "minimal human intervention": the human is
-          out of typing every step, never out of holding authority. Run it yourself with
-          <code>private-ai-gateway demo</code>, then open <code>/chat</code>.</p>
+          out of typing every step, never out of holding authority. Run it from the repo checkout with
+          <code>private-ai-gateway demo</code>, then open <code>/chat</code>. The UI serves from the
+          package, but orchestration uses the bundled repo <code>agents/</code> plane; outside the repo,
+          set <code>PRIVATE_AI_AGENTS_PATH</code> or orchestration returns
+          <code>503 orchestration_unavailable</code>.</p>
       </div>
     </section>
 

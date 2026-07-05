@@ -226,6 +226,12 @@ Hermes plan → propose → (you approve) → OpenCode apply in a sandbox → Op
 every hop enforced and audited. Withhold approval and the apply refuses — authority stays
 with you.
 
+> The Console **UI** installs and serves from the package like the rest of the gateway. Its
+> **orchestration** uses the bundled repo `agents/` plane, so run `/chat` from the repo
+> checkout/root or set `PRIVATE_AI_AGENTS_PATH` to that `agents/` directory. If launched
+> outside the repo without that path, `/chat` still loads but orchestration returns
+> `503 orchestration_unavailable`.
+
 **Point it at the model plane you already have (any OpenAI-compatible endpoint):**
 
 ```bash
