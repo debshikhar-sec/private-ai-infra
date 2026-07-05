@@ -1,4 +1,4 @@
-"""Verifier-owned evidence sink — record model, canonicalization, and digests (Step 1A).
+"""Verifier-owned evidence sink — record model, hashing, and per-emitter signing (1A + 1B).
 
 The evidence sink is the verifier's answer to a specific weakness: OpenClaw reaches its
 verdict by reading artifacts *authored by the components it verifies*. The sink inverts
@@ -6,30 +6,38 @@ that — emitters push signed records, and the verifier (which owns this module'
 validates authorship and chains them into a tamper-evident, append-only log. See
 ``docs/evidence-sink-design.md``.
 
-**This file is Step 1A only.** It provides the *deterministic substrate* the rest of the
-design builds on — a dedicated canonical serializer, the payload/record digests, the pinned
-constants, and the typed record shapes. It deliberately implements **none** of the trust
-mechanics yet: no HMAC signing, no emitter-key registry, no ``append``/``verify_chain``, no
-replay detection, no persistence, and no wiring into the gateway/agents. Those arrive in
-later, separately-authorized increments (1B signing, 1C append + chain).
+**This file covers Steps 1A + 1B.**
+
+  * **1A** — the deterministic substrate: a dedicated canonical serializer, the
+    payload/record digests, the pinned constants, and the typed record shapes.
+  * **1B** — per-emitter HMAC signing of the *signing envelope*, envelope-signature
+    verification, and an in-memory emitter-key registry.
+
+It deliberately still implements **none** of the remaining trust mechanics: no
+``EvidenceSink.append``, no ``verify_chain``, no replay detection, no persistence, and no
+wiring into the gateway/agents. Those arrive in later, separately-authorized increments
+(1C append + chain, then emit/consume wiring). Keys are passed in explicitly — there is no
+disk/env key loading here.
 
 Design notes pinned here (so later steps cannot drift):
 
   * **Canonical bytes** are ``json.dumps(sort_keys, compact, ensure_ascii=False)`` UTF-8 —
     the same doctrine as ``canonical.py`` but a *separate* implementation on purpose: that
     module is frozen for plan hashing and must not be coupled to evidence records.
-  * ``emitter_sig`` (Step 1B) will cover the **signing envelope** — the emitter-authored
-    fields including ``payload_hash`` — never the sink-assigned ``seq``/``prev_hash`` (which
-    the emitter cannot know at emit time).
+  * ``emitter_sig`` covers the **signing envelope** — the emitter-authored fields including
+    ``payload_hash`` — never the sink-assigned ``seq``/``prev_hash``/``record_hash`` (which
+    the emitter cannot know at emit time). MVP is symmetric HMAC: tamper-evident, not
+    non-repudiable (a holder of the key could forge that emitter's record).
   * ``record_hash`` (Step 1C) covers the **whole record**: envelope fields + ``emitter_sig``
     + the sink-assigned ``seq``/``prev_hash`` — binding authenticated content to position.
 
-Standard library only (``json``, ``hashlib``).
+Standard library only (``json``, ``hashlib``, ``hmac``).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -47,6 +55,10 @@ GENESIS_PREV_HASH = "sha256:" + "0" * 64
 EMITTER_GATEWAY = "gateway"
 EMITTER_OPENCODE = "opencode"
 EMITTER_OPENCLAW = "openclaw"
+
+# The only signature algorithm this build understands (Step 1B). MVP is symmetric HMAC —
+# tamper-evident, not non-repudiable; asymmetric signing is a later, production step.
+SIG_ALGO = "hmac-sha256"
 
 # --- deny/verify reason codes -------------------------------------------------------
 # Defined now so append/verify (later steps) draw from one vocabulary. Unused in 1A.
@@ -177,3 +189,108 @@ class AppendedRecord:
         core["seq"] = self.seq
         core["prev_hash"] = self.prev_hash
         return core
+
+
+# --- per-emitter HMAC signing (Step 1B) ---------------------------------------------
+# The emitter authenticates *its own authored content* — the signing envelope — with a
+# per-emitter HMAC key. It signs ``payload_hash`` (never the raw payload) and never the
+# sink-assigned ``seq``/``prev_hash``/``record_hash`` (which it cannot know at emit time).
+# MVP is symmetric HMAC: it proves the record was not altered/forged by a party without the
+# key (tamper-evidence), not non-repudiation against a holder of the key.
+def _require_key(key: Any) -> bytes:
+    """A signing/verification key must be non-empty bytes — structural misuse fails closed."""
+    if not isinstance(key, (bytes, bytearray)):
+        raise EvidenceError("key must be bytes")
+    if len(key) == 0:
+        raise EvidenceError("key must not be empty")
+    return bytes(key)
+
+
+def _envelope_mac(envelope: SigningEnvelope, key: bytes) -> str:
+    """Raw hex HMAC-SHA256 over the canonical signing-envelope bytes."""
+    return hmac.new(key, canonicalize(envelope.to_mapping()), hashlib.sha256).hexdigest()
+
+
+def sign_envelope(envelope: SigningEnvelope, key: bytes) -> str:
+    """Sign the emitter-authored envelope; returns ``hmac-sha256:<64 lowercase hex>``.
+
+    Signs ``canonicalize(envelope.to_mapping())`` — i.e. the emitter's fields including
+    ``payload_hash``, never the raw payload and never any sink-assigned field. Deterministic
+    for a given (envelope, key).
+    """
+    key = _require_key(key)
+    return f"{SIG_ALGO}:{_envelope_mac(envelope, key)}"
+
+
+def verify_envelope_signature(
+    envelope: SigningEnvelope, signature: str, key: bytes
+) -> bool:
+    """Constant-time check that ``signature`` is a valid HMAC of ``envelope`` under ``key``.
+
+    Returns ``True`` only for an exact match. Returns ``False`` (never raises) for any
+    verification miss: wrong key, any tampered envelope field, a tampered/malformed signature
+    string, an unsupported algorithm prefix, a wrong-length or non-hex digest body. Only
+    structural misuse of the *key* (non-bytes / empty) raises :class:`EvidenceError`.
+    """
+    key = _require_key(key)
+    if not isinstance(signature, str):
+        return False
+    algo, sep, digest = signature.partition(":")
+    if sep != ":" or algo != SIG_ALGO:
+        return False
+    # A well-formed hmac-sha256 digest is exactly 64 lowercase hex chars.
+    if len(digest) != 64:
+        return False
+    try:
+        bytes.fromhex(digest)
+    except ValueError:
+        return False
+    if digest != digest.lower():
+        return False
+    expected = _envelope_mac(envelope, key)
+    return hmac.compare_digest(digest, expected)
+
+
+class EmitterKeyRegistry:
+    """In-memory map of ``(emitter, key_id) -> key bytes`` — the verifier's key material.
+
+    MVP only: no disk/env loading, no rotation, no key derivation. Symmetric HMAC keys held
+    here let the sink verify an emitter's signature; a later production step replaces this
+    with asymmetric keys and real key separation.
+    """
+
+    def __init__(self) -> None:
+        self._keys: dict[tuple[str, str], bytes] = {}
+
+    def register(self, emitter: str, key_id: str, key: bytes) -> None:
+        """Register a non-empty ``bytes`` key for ``(emitter, key_id)``."""
+        if not emitter or not key_id:
+            raise EvidenceError("emitter and key_id are required")
+        self._keys[(emitter, key_id)] = _require_key(key)
+
+    def get(self, emitter: str, key_id: str) -> bytes:
+        """Return the key for ``(emitter, key_id)`` or fail closed if unknown."""
+        try:
+            return self._keys[(emitter, key_id)]
+        except KeyError as exc:
+            raise EvidenceError(
+                f"{REASON_UNKNOWN_EMITTER}: no key for ({emitter!r}, {key_id!r})"
+            ) from exc
+
+
+def sign_with_registry(envelope: SigningEnvelope, registry: EmitterKeyRegistry) -> str:
+    """Sign ``envelope`` with the key the registry holds for its emitter/key_id."""
+    key = registry.get(envelope.emitter, envelope.emitter_key_id)
+    return sign_envelope(envelope, key)
+
+
+def verify_with_registry(
+    envelope: SigningEnvelope, signature: str, registry: EmitterKeyRegistry
+) -> bool:
+    """Verify ``signature`` using the registry key for the envelope's emitter/key_id.
+
+    An unknown ``(emitter, key_id)`` is a structural failure (raises via ``registry.get``);
+    a key mismatch or tampered record is an ordinary verification miss (returns ``False``).
+    """
+    key = registry.get(envelope.emitter, envelope.emitter_key_id)
+    return verify_envelope_signature(envelope, signature, key)
