@@ -74,17 +74,21 @@ class GovernedSession:
     an executor by name; it discovers one from the enforced agent directory.
     """
 
-    def __init__(self, peers: dict[str, AgentPeer], objective: str):
+    def __init__(self, peers: dict[str, AgentPeer], objective: str, run_id: str = ""):
         if "hermes" not in peers:
             raise OrchestrationUnavailable("no 'hermes' principal available to plan")
         self.peers = peers
         self.objective = objective.strip()
         self.hermes = peers["hermes"]
+        # Correlation id for the whole goal->plan->approve->apply->verify loop. Minted by
+        # the caller (the server, on plan); echoed on every phase result. Not yet enforced.
+        self.run_id = run_id
 
     # -- phase 1: understand + plan + propose (no execution) ----------------------
 
     def plan(self) -> dict:
         r = _Result("plan")
+        r.extra["run_id"] = self.run_id
         directory = self.hermes.discover()
         cards = {c["name"]: c for c in directory.get("agents", [])}
         depth = directory.get("max_delegation_depth")
@@ -135,6 +139,7 @@ class GovernedSession:
         from opencode_sandbox.worker import CodeActWorker
 
         r = _Result("execute")
+        r.extra["run_id"] = self.run_id
         card = self.hermes.find_peer(EXEC_SKILL, min_level=EXEC_LEVEL, exclude=("hermes",))
         if card is None:
             raise OrchestrationUnavailable("no peer offers code.apply")
@@ -203,6 +208,7 @@ class GovernedSession:
 
     def probe(self) -> dict:
         r = _Result("probe")
+        r.extra["run_id"] = self.run_id
         card = self.hermes.find_peer(EXEC_SKILL, min_level=EXEC_LEVEL, exclude=("hermes",))
         executor = card["name"] if card else "opencode"
 

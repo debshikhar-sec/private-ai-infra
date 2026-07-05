@@ -6,6 +6,8 @@ not execute, the apply refuses unless a human approves, and the boundary probes 
 with their exact audit codes.
 """
 
+import re
+
 import pytest
 from hermes.session import GovernedSession
 from interop import AgentPeer
@@ -124,3 +126,60 @@ def test_endpoint_rejects_unknown_phase_and_empty_objective(client):
 def test_endpoint_requires_authentication(client):
     r = client.post("/v1/orchestrate", json={"objective": "x", "phase": "plan"})
     assert r.status_code == 401
+
+
+# ---- run_id lifecycle (Step C1: threading only, no enforcement) --------------
+
+RUN_ID_RE = re.compile(r"^run-[0-9a-f]+$")
+_OBJ = "Apply the reviewed fix and verify it"
+
+
+def _post(client, **body):
+    return client.post(
+        "/v1/orchestrate", headers={"Authorization": HERMES}, json=body
+    ).get_json()
+
+
+def test_plan_response_includes_minted_run_id(client):
+    body = _post(client, objective=_OBJ, phase="plan")
+    assert RUN_ID_RE.match(body["run_id"])
+
+
+def test_plan_ignores_client_supplied_run_id(client):
+    body = _post(client, objective=_OBJ, phase="plan", run_id="run-attacker-supplied")
+    assert body["run_id"] != "run-attacker-supplied"
+    assert RUN_ID_RE.match(body["run_id"])
+
+
+def test_execute_echoes_supplied_run_id(client):
+    body = _post(
+        client, objective=_OBJ, phase="execute",
+        approver="owner", reason="reviewed", run_id="run-corr-execute",
+    )
+    assert body["run_id"] == "run-corr-execute"
+    # existing execute behavior is unchanged (additive response)
+    assert body["applied"] is True and body["verdict"] == "PASS"
+
+
+def test_probe_echoes_supplied_run_id(client):
+    body = _post(client, objective=_OBJ, phase="probe", run_id="run-corr-probe")
+    assert body["run_id"] == "run-corr-probe"
+    assert body["phase"] == "probe"
+
+
+def test_execute_and_probe_without_run_id_are_backward_compatible(client):
+    ex = _post(client, objective=_OBJ, phase="execute", approver="owner", reason="ok")
+    assert ex["applied"] is True and ex["verdict"] == "PASS"
+    assert ex.get("run_id", "") == ""  # echoed empty, never minted outside plan
+
+    pr = _post(client, objective=_OBJ, phase="probe")
+    assert pr["phase"] == "probe"
+    assert pr.get("run_id", "") == ""
+
+
+def test_plan_still_proposes_alongside_run_id(client):
+    body = _post(client, objective=_OBJ, phase="plan")
+    assert body["needs_approval"] is True
+    assert body["proposal"]["executor"] == "opencode"
+    assert body["proposal"]["skill"] == "code.apply"
+    assert "run_id" in body

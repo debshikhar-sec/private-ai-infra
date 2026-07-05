@@ -603,10 +603,12 @@ def v1_orchestrate():
     phase = (body.get("phase") or "plan").strip()
     approver = body.get("approver") or ""
     reason = body.get("reason") or ""
+    run_id = body.get("run_id") or ""
 
     try:
         result = orchestration.run_phase(
-            sys.modules[__name__], objective, phase, approver=approver, reason=reason
+            sys.modules[__name__], objective, phase,
+            approver=approver, reason=reason, run_id=run_id,
         )
     except orchestration.OrchestrationUnavailable as exc:
         return jsonify({"error": {"message": str(exc), "type": "unavailable",
@@ -619,7 +621,7 @@ def v1_orchestrate():
                 {"phase": phase, "principal": g.principal.name})
     logger.info(
         f"ORCHESTRATE | principal={log_safe(g.principal.name)} | phase={log_safe(phase)} "
-        f"| objective={log_safe(objective)[:80]}"
+        f"| run_id={log_safe(result.get('run_id', ''))} | objective={log_safe(objective)[:80]}"
     )
     return jsonify(result)
 

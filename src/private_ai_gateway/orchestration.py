@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 from pathlib import Path
 
 
@@ -97,9 +98,13 @@ VALID_PHASES = ("plan", "execute", "probe")
 
 
 def run_phase(
-    gw, objective: str, phase: str, *, approver: str = "", reason: str = ""
+    gw, objective: str, phase: str, *, approver: str = "", reason: str = "", run_id: str = ""
 ) -> dict:
     """Run one governed-orchestration phase and return its structured transcript.
+
+    ``run_id`` correlates the whole loop. The server mints a fresh one on ``plan`` and
+    never trusts a client-supplied value there; ``execute``/``probe`` echo a caller value
+    for correlation only (no enforcement yet — Step C1). Every phase result carries it.
 
     Raises :class:`OrchestrationUnavailable` (agents/demo-plane missing) or ``ValueError``
     (unknown phase / empty objective).
@@ -114,7 +119,11 @@ def run_phase(
 
     tokens = _demo_tokens(gw)
     peers = _build_peers(gw, tokens)
-    session = GovernedSession(peers, objective)
+
+    if phase == "plan":
+        run_id = "run-" + uuid.uuid4().hex  # always fresh; ignore any client-supplied id
+
+    session = GovernedSession(peers, objective, run_id=run_id)
 
     if phase == "plan":
         return session.plan()
