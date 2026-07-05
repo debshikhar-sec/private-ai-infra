@@ -145,6 +145,43 @@ techniques are **not pertinent** to this project as built, and claiming them wou
 The common thread: this is an **authority/containment** plane, not a model-integrity or
 model-IP product, and the ATLAS mapping is scoped to match.
 
+## Evidence integrity (in progress)
+
+The controls above decide *authority*; a parallel, in-progress effort hardens the
+*evidence* of what was authorized and what then happened — because OpenClaw historically
+reaches its verdict by reading artifacts authored by the very components it verifies
+(the decision audit, the executor's apply report). Merged so far:
+
+- **Owner-gated execute authority loop (D2).** Execute requires a durable, **single-use**,
+  **owner-approved** decision bound to the plan's **canonical hash** (`run_id` +
+  `approval_id`); the gateway recomputes the hash and consumes the approval **before** any
+  mutation. An inline request-body approver grants nothing — authority is a separate input
+  from capability.
+- **Verifier-owned evidence sink core.** An append-only, per-emitter **HMAC-signed**,
+  **hash-chained** record store (`agents/openclaw/sink.py`): append validates schema,
+  target sink, emitter signature, payload binding, and replay before chaining; `verify_chain`
+  re-derives the whole log from scratch, so tampering, reordering, or replay is detectable.
+- **OpenCode signs its `apply_result`.** After a confined apply, the executor emits a signed
+  record into the sink, bound to the run, instead of relying only on a self-attested
+  `apply_report.json` at a path it chose.
+
+**Honest scope of this claim:**
+
+- The sink is **tamper-evident, not non-repudiation.** The MVP uses **symmetric HMAC**, so a
+  holder of an emitter's key could forge that emitter's record. It defends against an external
+  editor and honest-but-broken components — not against a party who holds the key. Asymmetric
+  keys / KMS / key separation (which would give non-repudiation) are **future**, not built.
+- **OpenClaw does not yet consume or validate the sink.** Today it still reconciles the
+  gateway's own evidence; independently validating executor output from the signed chain is
+  the **next milestone**, not a current property.
+- **No fail-closed runtime enforcement on evidence yet**, no `evidence_refs`, no trust ledger,
+  no earned autonomy. Autonomy remains fixed-ceiling by policy.
+- **Still no training/fine-tuning pipeline** (consistent with the ATLAS scoping above): the
+  local model is pre-trained and served, and Hermes captures no training traces today.
+
+Full design and sequencing: [evidence-sink-design.md](evidence-sink-design.md),
+[roadmap.md](roadmap.md).
+
 ## Limitations and non-goals (read this)
 
 Honesty about what is *not* yet hardened is part of the design:

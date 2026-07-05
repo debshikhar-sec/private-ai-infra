@@ -178,6 +178,32 @@ hermes -> opencode  code.apply@L3   [completed PASS]
   10/10 steps behaved exactly as policy demands.
 ```
 
+### Evidence integrity — making the record trustworthy (in progress)
+
+The loop above proves *authority*; the current build hardens the *evidence* of what was
+authorized and what then happened. Merged today:
+
+- **Owner-gated execute authority loop** — execute requires a durable, **single-use**,
+  **owner-approved** decision bound to the plan's **canonical hash** (`run_id` +
+  `approval_id`); an inline request-body approver grants nothing, and the approval is
+  consumed before any mutation. Authority is a separate input from capability.
+- **Verifier-owned evidence sink core** — an append-only, **HMAC-signed, hash-chained**
+  record store ([`agents/openclaw/sink.py`](agents/openclaw/sink.py)): each record is
+  authenticated per-emitter and linked to its predecessor, so tampering, reordering, or
+  replay breaks verification. It is **tamper-evident, not non-repudiation** (symmetric-key
+  MVP).
+- **OpenCode signs its `apply_result`** — after a confined apply, the executor emits a
+  signed record into that sink, bound to the run, instead of leaving only a self-attested
+  `apply_report.json` at a path it chose.
+
+**Deliberately not done yet** (and *not* claimed): OpenClaw **consuming and validating**
+those records is the **next milestone** — today it still reconciles the gateway's own
+evidence, so executor output is not yet independently verified. Also future: gateway-side
+signed authorization records, `evidence_refs` population, **fail-closed runtime
+enforcement** on missing/invalid evidence, and the **trust ledger** and **earned autonomy**
+that would sit on top. Autonomy stays fixed-ceiling by policy — no self-approval, no
+earned-trust escalation. Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).
+
 ## See it enforce (no GIF)
 
 With a policy active, the `hermes` token resolves to a principal capped at **L1 (suggest),
@@ -326,6 +352,11 @@ docs/                     # architecture, security & threat model, orchestration
 - The starter-kit tools are **simulated** (pure, deterministic) — they exist to make the
   *enforcement* demonstrable, and are labeled `"simulated": true` so nobody mistakes the
   demo for a payments system.
+- **Evidence integrity is in progress.** The signed, chained evidence sink is
+  **tamper-evident, not non-repudiation**; OpenClaw does **not yet** consume/validate it
+  (next milestone), and fail-closed runtime enforcement, `evidence_refs`, a trust ledger,
+  and earned autonomy are **future**. This is a governed, human-in-authority system —
+  **not** fully autonomous.
 
 ## License
 

@@ -69,6 +69,42 @@ capability second.
 - **Installable package** — `pip install .` registers the `private-ai-gateway` console command
   (`serve` / `version`), so the gateway runs without the Makefile or nginx.
 
+## Done — governed authority loop & evidence-integrity core
+
+- **Governed Chat Console (`/chat`)** — a conversational front-end to the real loop: type a
+  goal, Hermes plans and *proposes*, you approve, OpenCode applies in a sandbox, OpenClaw
+  verifies. Every hop is enforced and audited (`static/chat.html`, `POST /v1/orchestrate`).
+- **Owner-gated execute authority loop (D2)** — execute requires a durable, **single-use**,
+  **owner-approved** decision bound to the plan's **canonical hash** (`run_id` +
+  `approval_id`). An inline request-body approver grants nothing; the server recomputes the
+  canonical hash and consumes the approval **before** any mutation (`app.py` `v1_approvals`,
+  `approvals.py`, `orchestration.py`).
+- **Verifier-owned evidence sink core (1A/1B/1C)** — an append-only, per-emitter
+  **HMAC-signed**, **hash-chained** record store with from-scratch chain verification
+  (`agents/openclaw/sink.py`). Tamper-evident, not non-repudiation (symmetric-key MVP).
+- **OpenCode `apply_result` emit** — after a confined apply, the executor emits a signed
+  record into the sink, bound to the run (`agents/opencode_sandbox/evidence_emit.py`),
+  additive to the preserved `apply_report.json`.
+
+## Next — evidence integrity (verifier-owned), in sequence
+
+Design: [evidence-sink-design.md](evidence-sink-design.md). Each step is separately gated.
+
+- **OpenClaw verifier consume** — *the next milestone, not done.* OpenClaw validates the
+  chain + signatures and reads apply evidence **from the sink** rather than a handed,
+  self-attested `apply_report.json`; includes the self-attestation regression test.
+- **Gateway authorization emit** — *future.* Signed `approval_decided` / `execute_validated`
+  records into the sink.
+- **`evidence_refs` population** — *future.* Bind approvals to sink records (`approvals.py`
+  carries a placeholder today).
+- **Fail-closed runtime evidence enforcement** — *future.* A mutating action is not treated
+  as verified without valid, chained evidence; sink-unavailable fails closed.
+- **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
+- **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
+  autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.
+- **Hermes local training / eval-trace capture** — *future.* No training pipeline exists
+  today; Claude-to-Hermes local-model offload is future work.
+
 ## Next major scope — orchestration control plane (Phase 2)
 
 The control plane is designed in [orchestration.md](orchestration.md); the enforcement

@@ -334,6 +334,59 @@
       </div>
     </section>
 
+    <!-- ===================== EVIDENCE INTEGRITY / STATUS ===================== -->
+    <section id="evidence" class="wrap" aria-labelledby="ev-h">
+      <div class="reveal">
+        <span class="eyebrow">Current build</span>
+        <h2 class="section-title" id="ev-h">From authority to <span class="gradient-text">trustworthy evidence</span></h2>
+        <p class="section-sub">The loop proves <em>authority</em>; the current work hardens the <em>evidence</em> of what
+          was authorized and what then happened — so a verdict no longer rests on artifacts the verified
+          components wrote about themselves. Here is exactly where that stands, without overclaiming.</p>
+      </div>
+
+      <div class="grid cols-3 reveal" style="margin-top:1.5rem">
+        <article class="card">
+          <h3>✅ What works today</h3>
+          <ul>
+            <li><strong>Owner-gated execute loop</strong> — execute needs a durable, single-use, owner-approved
+              decision bound to the plan's canonical hash; an inline approver grants nothing.</li>
+            <li><strong>Evidence sink core</strong> — an append-only, per-emitter HMAC-signed, hash-chained record
+              store with from-scratch chain verification.</li>
+            <li><strong>Signed OpenCode <code>apply_result</code></strong> — the executor emits a run-bound signed
+              record into the sink, additive to the preserved apply report.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>🚧 In progress — next</h3>
+          <ul>
+            <li><strong>OpenClaw verifier consume</strong> — validate the chain + signatures and read apply
+              evidence <em>from the sink</em>, so executor output is no longer trusted as self-attested. This is
+              the next milestone and is <strong>not done yet</strong>.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>🗺️ Explicitly future</h3>
+          <ul>
+            <li>Gateway-side signed authorization records</li>
+            <li><code>evidence_refs</code> population</li>
+            <li>Fail-closed runtime evidence enforcement</li>
+            <li>Trust ledger &amp; earned autonomy</li>
+            <li>Hermes local training / Claude-to-Hermes offload</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="card reveal" style="margin-top:1.5rem">
+        <h3>Honest limitations</h3>
+        <p>The evidence chain is <strong>tamper-evident, not non-repudiation</strong> — a symmetric-HMAC MVP that
+          detects tampering, reordering, and replay, but not a party holding an emitter's key (asymmetric keys / KMS
+          are future). Autonomy is <strong>fixed-ceiling by policy</strong>: there is no self-approval and no
+          earned-trust escalation. This is a <strong>local-first, human-in-authority</strong> governance and evidence
+          plane — <strong>not</strong> a fully autonomous, production-deployed, or compliance-certified system, and it
+          has no users, revenue, or design partners. It is a working, tested, honestly-scoped engineering artifact.</p>
+      </div>
+    </section>
+
     <!-- ===================== THREAT MODEL / CTA ===================== -->
     <section class="wrap" aria-labelledby="tm-h">
       <div class="card reveal" style="text-align:center;padding:clamp(2rem,5vw,3.2rem)">
