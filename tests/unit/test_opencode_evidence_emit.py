@@ -13,10 +13,10 @@ after the (still-written) ``apply_report.json``.
 import json
 
 import pytest
+from openclaw import sink as sinkmod
 from opencode_sandbox import apply as act
 from opencode_sandbox import evidence_emit
 from opencode_sandbox.apply import APPLIED, ApplyReport
-from openclaw import sink as sinkmod
 
 # Ephemeral, in-test key material only — never loaded from disk/env, never committed.
 _KEY = b"opencode-emit-key-0123456789abcd"  # 32 bytes
