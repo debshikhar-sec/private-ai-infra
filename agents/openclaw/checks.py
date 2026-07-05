@@ -16,14 +16,17 @@ testable without a running gateway.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from openclaw.evidence import (
+    AppliedEvidenceView,
     ApplyReportView,
     AuditLog,
     EvalReportView,
     IsolationReport,
     MetricSet,
     PolicyView,
+    load_apply_result_from_sink,
 )
 
 PASS = "pass"  # nosec B105 — control-status enum value, not a credential
@@ -45,7 +48,14 @@ class Finding:
 
 @dataclass
 class Evidence:
-    """Everything a control set may draw on. Optional sources may be ``None``."""
+    """Everything a control set may draw on. Optional sources may be ``None``.
+
+    The final block wires the verifier-owned evidence sink (design step 4): ``evidence_sink``
+    is the injected, verifier-owned log; ``run_id``/``approval_id`` select the record that
+    concerns this run; ``require_signed_apply_evidence`` flips the apply verdict from
+    file-mode (self-attested ``apply_report.json``) to fail-closed *signed-evidence* mode.
+    All default so every existing ``Evidence(...)`` call site stays valid (additive only).
+    """
 
     audit: AuditLog
     metrics: MetricSet | None = None
@@ -53,6 +63,12 @@ class Evidence:
     isolation: IsolationReport | None = None
     eval_report: EvalReportView | None = None
     apply_report: ApplyReportView | None = None
+    # --- signed apply_result evidence (design step 4) ---
+    evidence_sink: Any = None
+    run_id: str | None = None
+    approval_id: str | None = None
+    require_signed_apply_evidence: bool = False
+    applied_evidence: AppliedEvidenceView | None = None
 
 
 # --------------------------------------------------------------------- AC-AUDIT-INTEGRITY
@@ -414,6 +430,158 @@ def check_security_evals(ev: Evidence) -> Finding:
     return Finding(cid, title, PASS, "info", detail + ".", evidence=[rep.source])
 
 
+# ------------------------------------------------------------ AC-APPLY-EVIDENCE-CHAIN
+def _apply_evidence_conflicts(
+    report: ApplyReportView, view: AppliedEvidenceView
+) -> list[str]:
+    """Fields where the self-attested file and the signed sink record materially disagree."""
+    out: list[str] = []
+    if (report.status or "").lower() != (view.status or "").lower():
+        out.append(f"status file={report.status!r} vs signed={view.status!r}")
+    if report.approver != view.approver:
+        out.append(f"approver file={report.approver!r} vs signed={view.approver!r}")
+    if report.committed != view.committed:
+        out.append(f"committed file={report.committed} vs signed={view.committed}")
+    if sorted(report.declared_files) != sorted(view.declared_files):
+        out.append("declared_files differ")
+    if sorted(report.changed_files) != sorted(view.changed_files):
+        out.append("changed_files differ")
+    return out
+
+
+def check_apply_evidence_chain(ev: Evidence) -> Finding:
+    """Judge the OpenCode apply from a *signed, chained* sink record rather than a raw file.
+
+    This closes the self-attestation gap (threat T1): where ``check_apply_integrity`` trusts an
+    unsigned ``apply_report.json`` at an executor-chosen path, this control trusts only a record
+    the verifier-owned sink validated and chained. It is additive: with no sink and
+    ``require_signed_apply_evidence`` off it is INCONCLUSIVE (never changing an old verdict);
+    with signed evidence *required*, an unsigned file alone can no longer reach PASS.
+    """
+    cid, title = "AC-APPLY-EVIDENCE-CHAIN", "OpenCode apply is backed by signed, chained sink evidence"
+    required = ev.require_signed_apply_evidence
+    view = ev.applied_evidence
+    if view is None:
+        view = load_apply_result_from_sink(
+            ev.evidence_sink, run_id=ev.run_id, approval_id=ev.approval_id
+        )
+
+    # No sink supplied.
+    if not view.configured:
+        if required:
+            return Finding(
+                cid, title, FAIL, "high",
+                "signed apply evidence is required but no evidence sink was supplied — an "
+                "unsigned apply_report.json alone cannot authorize a verified apply. Fail closed.",
+            )
+        return Finding(
+            cid, title, INCONCLUSIVE, "info",
+            "no evidence sink supplied — the signed-apply-result path was not exercised; "
+            "file-mode apply integrity (AC-APPLY-INTEGRITY) is judged separately.",
+        )
+
+    src = [view.record_hash] if view.record_hash else []
+
+    # Chain integrity: the whole log must re-derive before any record is trusted.
+    if view.chain_error:
+        return Finding(
+            cid, title, FAIL, "high",
+            f"the evidence sink's chain did not verify ({view.reason}) — the log's integrity "
+            "cannot be established, so no record it holds can be trusted.",
+            evidence=src,
+        )
+
+    # No matching signed record.
+    if view.missing:
+        if required:
+            return Finding(
+                cid, title, FAIL, "high",
+                "no signed apply_result record matches this run in the evidence sink, but signed "
+                "evidence is required — absence of the required record is fail-closed, not a pass.",
+            )
+        return Finding(
+            cid, title, INCONCLUSIVE, "info",
+            "the evidence sink holds no signed apply_result for this run — nothing to verify "
+            "here (signed evidence not required in this pass).",
+        )
+
+    # Malformed payload on an otherwise-valid chain.
+    if view.malformed:
+        return Finding(
+            cid, title, FAIL, "high",
+            "a signed apply_result record was found but its payload is malformed or missing its "
+            "status — an unreadable record of a write action is an integrity gap. Fail closed.",
+            evidence=src,
+        )
+
+    # Cross-check the self-attested file against the signed record when both are present.
+    if ev.apply_report is not None and not ev.apply_report.malformed:
+        conflicts = _apply_evidence_conflicts(ev.apply_report, view)
+        if conflicts:
+            return Finding(
+                cid, title, FAIL, "high",
+                "the self-attested apply_report.json disagrees with the signed sink record "
+                f"({'; '.join(conflicts)}). The signed record is authoritative; a conflict is a "
+                "tamper signal. Fail closed.",
+                evidence=src,
+            )
+
+    # Judge the validated, signed payload — same authority rules as file mode.
+    status = (view.status or "").lower()
+    if status == "failed":
+        return Finding(
+            cid, title, FAIL, "high",
+            "the signed apply_result records status=FAILED — the executor's own verification "
+            "found a change outside the declared files (a confinement breach).",
+            evidence=src,
+        )
+    if status == "applied":
+        if not view.approver:
+            return Finding(
+                cid, title, FAIL, "high",
+                "a signed apply_result reached APPLIED with no approver — a tree-mutating action "
+                "with no authorizing approval is an authority bypass.",
+                evidence=src,
+            )
+        undeclared = sorted(set(view.changed_files) - set(view.declared_files))
+        if undeclared:
+            return Finding(
+                cid, title, FAIL, "high",
+                f"a signed APPLIED record lists changed file(s) it never declared: {undeclared}. "
+                "Declared and changed sets must match — the record is inconsistent.",
+                evidence=src,
+            )
+        scope = "committed to the target" if view.committed else "verified in sandbox"
+        return Finding(
+            cid, title, PASS, "info",
+            f"the OpenCode apply is backed by a signed, chained apply_result record (seq {view.seq}): "
+            f"approved by {view.approver}, {scope}, and changed only its {len(view.declared_files)} "
+            "declared file(s).",
+            evidence=src,
+        )
+    if status in ("refused", "rejected"):
+        return Finding(
+            cid, title, PASS, "info",
+            f"a signed apply_result record shows the act step blocked a change ({status}) — the "
+            "approval/confinement gate held and nothing was written.",
+            evidence=src,
+        )
+
+    # Unrecognized status on an otherwise-valid signed record.
+    if required:
+        return Finding(
+            cid, title, FAIL, "high",
+            f"a signed apply_result has an unrecognized status {view.status!r}; signed evidence is "
+            "required and this cannot be affirmed as a gated apply. Fail closed.",
+            evidence=src,
+        )
+    return Finding(
+        cid, title, INCONCLUSIVE, "info",
+        f"a signed apply_result has an unrecognized status {view.status!r} — cannot judge it.",
+        evidence=src,
+    )
+
+
 ALL_CHECKS = [
     check_audit_integrity,
     check_autonomy_ceiling,
@@ -428,5 +596,15 @@ ALL_CHECKS = [
 
 
 def run_all(ev: Evidence) -> list[Finding]:
-    """Run every control against the evidence and return the findings."""
-    return [check(ev) for check in ALL_CHECKS]
+    """Run every control against the evidence and return the findings.
+
+    ``check_apply_evidence_chain`` is **not** in ``ALL_CHECKS``: it is gated so that a run with
+    no evidence sink configured (and not requiring signed evidence) produces exactly the
+    historical control set — byte-for-byte, no extra finding, no verdict drift. It participates
+    only once the signed-evidence path is engaged (a sink is injected, or signed evidence is
+    required), which is design step 4's whole surface.
+    """
+    findings = [check(ev) for check in ALL_CHECKS]
+    if ev.evidence_sink is not None or ev.require_signed_apply_evidence:
+        findings.append(check_apply_evidence_chain(ev))
+    return findings

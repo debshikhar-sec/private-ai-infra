@@ -28,9 +28,27 @@ _APPLY_REPORT_RE = re.compile(r"apply_report=(\S+)")
 class AssuranceWorker:
     """Polls the inbox, runs one assurance pass per task, reports the verdict."""
 
-    def __init__(self, peer: AgentPeer, *, audit_limit: int = 300):
+    def __init__(
+        self,
+        peer: AgentPeer,
+        *,
+        audit_limit: int = 300,
+        evidence_sink=None,
+        run_id: str | None = None,
+        approval_id: str | None = None,
+        require_signed_apply_evidence: bool = False,
+    ):
         self.peer = peer
         self.audit_limit = audit_limit
+        # Verifier-owned evidence-sink consume (design step 4). All optional and additive:
+        # with no sink injected the worker behaves exactly as before (file-mode apply
+        # integrity). An injected sink lets a new control judge the apply from a signed,
+        # chained ``apply_result`` record; ``require_signed_apply_evidence`` makes an unsigned
+        # file alone insufficient for PASS. No gateway run_id is parsed from task text here.
+        self.evidence_sink = evidence_sink
+        self.run_id = run_id
+        self.approval_id = approval_id
+        self.require_signed_apply_evidence = require_signed_apply_evidence
 
     def poll(self) -> list[dict]:
         """Handle every submitted ``assurance.verify`` task; return the reports."""
@@ -74,7 +92,15 @@ class AssuranceWorker:
         )
 
         findings = checks.run_all(
-            checks.Evidence(audit=audit, metrics=metrics, apply_report=apply_report)
+            checks.Evidence(
+                audit=audit,
+                metrics=metrics,
+                apply_report=apply_report,
+                evidence_sink=self.evidence_sink,
+                run_id=self.run_id,
+                approval_id=self.approval_id,
+                require_signed_apply_evidence=self.require_signed_apply_evidence,
+            )
         )
         report = build_report(findings)
         counts = report.counts()
