@@ -229,7 +229,7 @@
             <div class="tk">16 · Red is the system working</div>
             <h3>The enforcement ratio is the product.</h3>
             <p>Allowed work flowed; everything over-mandate was refused and recorded. Deny-by-default means the red
-              in this bar is the control plane doing its job — backed by 590 tests on two platforms and
+              in this bar is the control plane doing its job — backed by 612 tests on two platforms and
               23 adversarial evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -358,21 +358,29 @@
               apply evidence <em>from an injected sink</em> when signed evidence is required, so an unsigned apply
               report alone is insufficient. Component-level verification, unit-proven — not yet end-to-end
               gateway-issued <code>run_id</code> / <code>approval_id</code> wiring.</li>
+            <li><strong>Gateway <code>execute_validated</code> emit</strong> — the gateway emits a signed
+              <code>execute_validated</code> authorization record when execution authority is granted, after approval
+              validation and <code>mark_used</code>, before <code>session.execute</code>; the payload carries
+              <code>canonical_plan_hash</code> and <code>validated=true</code>, with <code>run_id</code> /
+              <code>approval_id</code> in the envelope. The no-sink default stays backward-compatible;
+              <code>REQUIRE_AUTHORIZATION_EVIDENCE</code> strict mode denies before mutation. Component-level
+              gateway authorization evidence emit — not full runtime fail-closed enforcement, and not yet linked to
+              the OpenCode record through <code>evidence_refs</code>.</li>
           </ul>
         </article>
         <article class="card">
           <h3>🚧 In progress — next</h3>
           <ul>
-            <li><strong>Gateway authorization emit</strong> — the gateway emits its own signed
-              <code>approval_decided</code> / <code>execute_validated</code> records into the sink, so the
-              authority side of the loop is signed evidence too. This is the next milestone.</li>
+            <li><strong><code>approval_decided</code> emit</strong> — the remaining gateway authorization record, so
+              the decision side of the loop is signed evidence too. The <code>execute_validated</code> emit already
+              ships; this is the next milestone.</li>
           </ul>
         </article>
         <article class="card">
           <h3>🗺️ Explicitly future</h3>
           <ul>
             <li>End-to-end gateway-issued <code>run_id</code> / <code>approval_id</code> wiring</li>
-            <li><code>evidence_refs</code> population</li>
+            <li><code>evidence_refs</code> population (linking the gateway and OpenCode records)</li>
             <li>Fail-closed runtime evidence enforcement</li>
             <li>Trust ledger &amp; earned autonomy</li>
             <li>Hermes local training / Claude-to-Hermes offload</li>

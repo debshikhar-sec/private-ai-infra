@@ -203,12 +203,21 @@ authorized and what then happened. Merged today:
   and it proves **component-level consume/verification, not full end-to-end runtime
   enforcement**: it is unit-proven against an injected sink, without the end-to-end
   gateway-issued `run_id` / `approval_id` wiring.
+- **Gateway emits signed `execute_validated` authorization evidence** — the gateway can now
+  emit a signed `execute_validated` record when execution authority is granted. The record
+  is emitted after approval validation and `mark_used`, before `session.execute`; the
+  payload contains `canonical_plan_hash` and `validated=true`, while `run_id` and
+  `approval_id` remain in the evidence envelope. The default no-sink behavior is
+  backward-compatible, and `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before
+  mutation if authorization evidence is unavailable. This is **component-level gateway
+  authorization evidence emit, not full runtime fail-closed enforcement**, and the gateway
+  and OpenCode records are **not yet linked through `evidence_refs`**.
 
-**Not done yet** (and *not* claimed): gateway authorization emit, `evidence_refs`
-population, and **runtime fail-closed integration** on missing/invalid evidence remain
-future milestones, as do the **trust ledger** and **earned autonomy** that would sit on
-top. Autonomy stays fixed-ceiling by policy — no self-approval, no earned-trust
-escalation. Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).
+**Not done yet** (and *not* claimed): `approval_decided`, `evidence_refs` population, and
+**runtime fail-closed integration** on missing/invalid evidence remain future milestones,
+as do the **trust ledger** and **earned autonomy** that would sit on top. Autonomy stays
+fixed-ceiling by policy — no self-approval, no earned-trust escalation.
+Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).
 
 ## See it enforce (no GIF)
 
@@ -360,10 +369,11 @@ docs/                     # architecture, security & threat model, orchestration
   demo for a payments system.
 - **Evidence integrity is maturing.** The signed, chained evidence sink is
   **tamper-evident, not non-repudiation**. OpenClaw now consumes and validates signed
-  `apply_result` evidence from an injected sink (component-level verification, unit-proven);
-  gateway authorization emit, `evidence_refs`, runtime fail-closed integration, a trust
-  ledger, and earned autonomy remain **future**. This is a governed, human-in-authority
-  system — **not** fully autonomous.
+  `apply_result` evidence from an injected sink, and the gateway now emits signed
+  `execute_validated` authorization evidence when execution authority is granted (both
+  component-level, unit-proven); `approval_decided`, `evidence_refs`, runtime fail-closed
+  integration, a trust ledger, and earned autonomy remain **future**. This is a governed,
+  human-in-authority system — **not** fully autonomous.
 
 ## License
 

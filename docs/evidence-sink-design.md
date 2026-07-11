@@ -1,13 +1,16 @@
 # Verifier-Owned Evidence Sink — Design (MVP)
 
 > **Status:** partially implemented. The sink **core** (`agents/openclaw/sink.py`), the
-> OpenCode **`apply_result` emit** (`agents/opencode_sandbox/evidence_emit.py`), and
+> OpenCode **`apply_result` emit** (`agents/opencode_sandbox/evidence_emit.py`),
 > **OpenClaw's consume/validation** of that signed evidence from an injected sink
-> (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`) are now built and unit-proven —
-> component-level verification, not yet end-to-end gateway-issued `run_id` / `approval_id`
-> wiring. The remaining steps in this spec — **gateway authorization emit**, **`evidence_refs`
-> population**, and **fail-closed runtime integration** — are still design-only and gated
-> behind later, separately-authorized increments.
+> (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`), and the gateway
+> **`execute_validated` authorization evidence emit** (`src/private_ai_gateway/orchestration.py`,
+> `app.py`) are now built and unit-proven — component-level verification and gateway
+> authorization evidence emit, not yet end-to-end gateway-issued `run_id` / `approval_id`
+> wiring, and the gateway and OpenCode records are not yet linked through `evidence_refs`.
+> The remaining steps in this spec — the **`approval_decided`** authorization record,
+> **`evidence_refs` population**, and **fail-closed runtime integration** — are still
+> design-only and gated behind later, separately-authorized increments.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
 > trust ledger, earned autonomy, or production key management. See §10 and §14.
@@ -151,14 +154,15 @@ One JSON object per record. Field order below is the canonical order for hashing
 | `event_type` | Emitter | Payload (indicative) | MVP status |
 |---|---|---|---|
 | `approval_decided` | `gateway` | `{decision: approve\|reject, approver, canonical_plan_hash}` | **Optional** in first implementation (authorization records can land in a later commit). |
-| `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true}` (emitted after `validate_for_execute` + `mark_used`, before mutation) | **Optional** in first implementation; **required** for full fail-closed pre-apply gating (§9b). |
+| `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true}` (emitted after `validate_for_execute` + `mark_used`, before mutation) | **Built** (component-level gateway authorization evidence emit; backward-compatible no-sink default; `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation). Not yet full fail-closed pre-apply gating (§9b). |
 | `apply_result` | `opencode` | `{status, declared_files, changed_files, violations, committed}` | **Required (MVP core).** This is the artifact that most directly replaces the self-attested `apply_report.json` and closes T1/T4. |
 | `assurance_verdict` | `openclaw` | `{verdict: PASS\|FAIL, counts, notes}` | **Optional** in first implementation; useful for a self-recorded, chained verdict. |
 
 **First-implementation minimum:** `apply_result` (executor→sink) + OpenClaw consuming it from
-the sink. `approval_decided`/`execute_validated`/`assurance_verdict` follow in the
-authorization-emit and fail-closed-integration commits (§13). Consuming controls must treat an
-absent-but-required record as **fail closed**, not INCONCLUSIVE (§9).
+the sink. `execute_validated` has since landed (gateway emit); `approval_decided` and
+`assurance_verdict` still follow in later authorization-emit and fail-closed-integration
+commits (§13). Consuming controls must treat an absent-but-required record as **fail closed**,
+not INCONCLUSIVE (§9).
 
 ---
 
@@ -301,7 +305,11 @@ Keys in all tests are **ephemeral**, generated under `tmp_path`; no key material
    `apply_report.json` for back-compat) + tests.
 4. **Verifier consume** — OpenClaw validates chain+sigs and uses sink records for the apply
    control; fail-closed on sig/chain break; **self-attestation regression test** (§11).
-5. **Gateway authorization emit** — `approval_decided` / `execute_validated` records + tests.
+5. **Gateway authorization emit** — the `execute_validated` record is **built** (emitted
+   after approval validation and `mark_used`, before `session.execute`; payload
+   `{canonical_plan_hash, validated: true}`; backward-compatible no-sink default;
+   `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation) + tests. `approval_decided`
+   remains **future**.
 6. **`evidence_refs` population** — link approvals to sink records in `approvals.py` + tests.
 7. **Fail-closed integration** — pre-apply authorization must record before mutation, else
    halt; end-to-end integration + sink-unavailable refusal tests.
