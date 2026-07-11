@@ -1,9 +1,13 @@
 # Verifier-Owned Evidence Sink — Design (MVP)
 
-> **Status:** design only. The sink described here **does not exist yet** — this document
-> is the implementation-granularity spec that a later, separately-authorized increment
-> would build against. Nothing in the codebase implements a verifier-owned evidence sink
-> today.
+> **Status:** partially implemented. The sink **core** (`agents/openclaw/sink.py`), the
+> OpenCode **`apply_result` emit** (`agents/opencode_sandbox/evidence_emit.py`), and
+> **OpenClaw's consume/validation** of that signed evidence from an injected sink
+> (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`) are now built and unit-proven —
+> component-level verification, not yet end-to-end gateway-issued `run_id` / `approval_id`
+> wiring. The remaining steps in this spec — **gateway authorization emit**, **`evidence_refs`
+> population**, and **fail-closed runtime integration** — are still design-only and gated
+> behind later, separately-authorized increments.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
 > trust ledger, earned autonomy, or production key management. See §10 and §14.

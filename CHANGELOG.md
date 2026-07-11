@@ -4,6 +4,32 @@ All notable changes to this project are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Verifier-owned evidence sink core** (`agents/openclaw/sink.py`) — an append-only,
+  per-emitter **HMAC-signed**, **hash-chained** record store with from-scratch chain
+  verification. **Tamper-evident, not non-repudiation** (symmetric-key MVP).
+- **Signed OpenCode `apply_result` emit** (`agents/opencode_sandbox/evidence_emit.py`) —
+  after a confined apply the executor emits a run-bound signed record into the sink,
+  additive to the preserved `apply_report.json`.
+- **OpenClaw verifier consume** (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`) —
+  OpenClaw can now validate signed OpenCode `apply_result` evidence from an injected
+  `EvidenceSink` when signed evidence is required: it verifies the chain + signatures, finds
+  the matching signed record (by emitter / record_type / `run_id` / `approval_id`), and
+  derives the apply verdict from it. **Unsigned `apply_report.json` alone is insufficient
+  when signed evidence is required.** With no sink injected, existing no-sink OpenClaw
+  behavior is preserved byte-for-byte. This proves **component-level consume/verification,
+  not full end-to-end runtime enforcement** — it is unit-proven against an injected sink,
+  without the end-to-end gateway-issued `run_id` / `approval_id` wiring. Gateway
+  authorization emit, `evidence_refs` population, and runtime fail-closed integration remain
+  future milestones.
+
+### Changed
+- Test suite now at **590** (the OpenClaw evidence-consume increment added 22 cases:
+  chain-verify, signature/key failure, broken chain, replay, emitter/record_type/`run_id`/
+  `approval_id` filtering, file-vs-signed conflict, and the self-attestation regression).
+
 ## [0.18.0] - 2026-07-04
 
 ### Added

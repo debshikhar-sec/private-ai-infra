@@ -85,14 +85,20 @@ capability second.
 - **OpenCode `apply_result` emit** — after a confined apply, the executor emits a signed
   record into the sink, bound to the run (`agents/opencode_sandbox/evidence_emit.py`),
   additive to the preserved `apply_report.json`.
+- **OpenClaw verifier consume** — OpenClaw can now validate signed OpenCode `apply_result`
+  evidence from an injected `EvidenceSink` when signed evidence is required: it verifies the
+  chain + signatures, finds the matching signed record, and derives the apply verdict from
+  it rather than from a handed, self-attested `apply_report.json`
+  (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`; includes the self-attestation
+  regression test). Unsigned `apply_report.json` alone is insufficient when signed evidence
+  is required. This proves **component-level consume/verification, not full end-to-end
+  runtime enforcement** — it is unit-proven against an injected sink, without the end-to-end
+  gateway-issued `run_id` / `approval_id` wiring.
 
 ## Next — evidence integrity (verifier-owned), in sequence
 
 Design: [evidence-sink-design.md](evidence-sink-design.md). Each step is separately gated.
 
-- **OpenClaw verifier consume** — *the next milestone, not done.* OpenClaw validates the
-  chain + signatures and reads apply evidence **from the sink** rather than a handed,
-  self-attested `apply_report.json`; includes the self-attestation regression test.
 - **Gateway authorization emit** — *future.* Signed `approval_decided` / `execute_validated`
   records into the sink.
 - **`evidence_refs` population** — *future.* Bind approvals to sink records (`approvals.py`
