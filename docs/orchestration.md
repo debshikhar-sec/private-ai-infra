@@ -252,12 +252,23 @@ then happened.
   it verifies the chain + signatures, finds the matching signed record, and derives the apply
   verdict from it. **Unsigned `apply_report.json` alone is insufficient when signed evidence
   is required.** This is **tamper-evident HMAC-signed evidence, not non-repudiation**.
+- **The gateway emits signed `execute_validated` authorization evidence.** When execution
+  authority is granted, the gateway can now emit a signed `execute_validated` record into an
+  injected `EvidenceSink`
+  ([`orchestration.py`](../src/private_ai_gateway/orchestration.py),
+  [`app.py`](../src/private_ai_gateway/app.py)). The record is emitted **after** approval
+  validation and `mark_used`, **before** `session.execute`; the payload contains
+  `canonical_plan_hash` and `validated=true`, while `run_id` and `approval_id` remain in the
+  evidence envelope. The default no-sink behavior stays backward-compatible, and
+  `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before mutation if authorization
+  evidence is unavailable.
 
-**Scope of that consume:** it is **component-level consume/verification, not full end-to-end
-runtime enforcement** — unit-proven against an injected sink, without the end-to-end
-gateway-issued `run_id` / `approval_id` wiring. **Gateway authorization emit**,
-**`evidence_refs` population**, and **runtime fail-closed integration** remain future
-milestones, as do a trust ledger and earned autonomy — all sequenced in
+**Scope of that emit/consume:** it is **component-level consume/verification and gateway
+authorization evidence emit, not full runtime fail-closed enforcement** — unit-proven against
+an injected sink, without the end-to-end gateway-issued `run_id` / `approval_id` wiring, and
+the gateway and OpenCode records are **not yet linked through `evidence_refs`**.
+**`approval_decided`**, **`evidence_refs` population**, and **runtime fail-closed integration**
+remain future milestones, as do a trust ledger and earned autonomy — all sequenced in
 [roadmap.md](roadmap.md) / [evidence-sink-design.md](evidence-sink-design.md). Autonomy stays
 fixed-ceiling by policy — there is no self-approval and no earned escalation.
 

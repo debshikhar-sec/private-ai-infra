@@ -21,14 +21,25 @@ All notable changes to this project are documented here. Format based on
   when signed evidence is required.** With no sink injected, existing no-sink OpenClaw
   behavior is preserved byte-for-byte. This proves **component-level consume/verification,
   not full end-to-end runtime enforcement** — it is unit-proven against an injected sink,
-  without the end-to-end gateway-issued `run_id` / `approval_id` wiring. Gateway
-  authorization emit, `evidence_refs` population, and runtime fail-closed integration remain
-  future milestones.
+  without the end-to-end gateway-issued `run_id` / `approval_id` wiring.
+- **Gateway `execute_validated` authorization evidence emit**
+  (`src/private_ai_gateway/orchestration.py`, `app.py`) — when execution authority is
+  granted, the gateway can now emit a signed `execute_validated` record into an injected
+  `EvidenceSink`. The record is emitted after approval validation and `mark_used`, before
+  `session.execute`; the payload contains `canonical_plan_hash` and `validated=true`, while
+  `run_id` and `approval_id` remain in the evidence envelope. The default no-sink behavior
+  is backward-compatible (byte-identical old path), and `REQUIRE_AUTHORIZATION_EVIDENCE`
+  strict mode denies before mutation if authorization evidence is unavailable. This is
+  **component-level gateway authorization evidence emit, not full runtime fail-closed
+  enforcement**; the gateway and OpenCode records are **not yet linked through
+  `evidence_refs`**. `approval_decided`, `evidence_refs` population, and runtime fail-closed
+  integration remain future milestones.
 
 ### Changed
-- Test suite now at **590** (the OpenClaw evidence-consume increment added 22 cases:
-  chain-verify, signature/key failure, broken chain, replay, emitter/record_type/`run_id`/
-  `approval_id` filtering, file-vs-signed conflict, and the self-attestation regression).
+- Test suite now at **612** (the gateway `execute_validated` emit increment added 22 cases
+  on top of the OpenClaw evidence-consume set: no-sink backward-compat, emit-before-mutation
+  ordering, envelope/payload contract, require-mode deny on no-sink/missing-key/append-or-sign
+  failure, and the not-yet-linked `evidence_refs` guard).
 
 ## [0.18.0] - 2026-07-04
 

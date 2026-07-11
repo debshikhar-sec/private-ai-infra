@@ -94,13 +94,23 @@ capability second.
   is required. This proves **component-level consume/verification, not full end-to-end
   runtime enforcement** — it is unit-proven against an injected sink, without the end-to-end
   gateway-issued `run_id` / `approval_id` wiring.
+- **Gateway `execute_validated` authorization evidence emit** — when execution authority is
+  granted, the gateway can now emit a signed `execute_validated` record into an injected
+  `EvidenceSink` (`src/private_ai_gateway/orchestration.py`, `app.py`). The record is
+  emitted after approval validation and `mark_used`, before `session.execute`; the payload
+  contains `canonical_plan_hash` and `validated=true`, while `run_id` and `approval_id`
+  remain in the evidence envelope. The default no-sink behavior is backward-compatible, and
+  `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before mutation if authorization
+  evidence is unavailable. This is **component-level gateway authorization evidence emit, not
+  full runtime fail-closed enforcement**, and the gateway and OpenCode records are **not yet
+  linked through `evidence_refs`**.
 
 ## Next — evidence integrity (verifier-owned), in sequence
 
 Design: [evidence-sink-design.md](evidence-sink-design.md). Each step is separately gated.
 
-- **Gateway authorization emit** — *future.* Signed `approval_decided` / `execute_validated`
-  records into the sink.
+- **`approval_decided` authorization emit** — *future.* The remaining gateway authorization
+  record (`approval_decided`); the `execute_validated` emit above already ships.
 - **`evidence_refs` population** — *future.* Bind approvals to sink records (`approvals.py`
   carries a placeholder today).
 - **Fail-closed runtime evidence enforcement** — *future.* A mutating action is not treated
