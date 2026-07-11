@@ -14,7 +14,14 @@ Every loader is tolerant of *absence* (a missing optional source yields ``None``
 dependent control reports INCONCLUSIVE) but strict about *malformation* (a corrupt audit
 line is recorded, not silently dropped — integrity is a control).
 
-Standard library only: ``json`` and ``tomllib`` (3.11+).
+One loader is different in kind: ``load_apply_result_from_sink`` does not read a file an
+emitter authored at a path it chose — it reduces a record the **verifier-owned evidence
+sink** has already validated and chained (see ``sink.py`` / ``docs/evidence-sink-design.md``).
+That record is authoritative precisely because its whole chain (author signatures + hash
+links) was re-verified before it was reduced.
+
+Standard library only (``json`` + ``tomllib``, 3.11+), plus the frozen ``openclaw.sink``
+record model — never a third-party dependency.
 """
 
 from __future__ import annotations
@@ -23,6 +30,8 @@ import json
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from openclaw.sink import EMITTER_OPENCODE, EvidenceError
 
 # Decision values the gateway is known to emit (audit.py / app.py).
 KNOWN_DECISIONS = {"allow", "deny", "filter"}
@@ -399,3 +408,129 @@ def load_apply_report(path: str | Path) -> ApplyReportView | None:
     except FileNotFoundError:
         return None
     return parse_apply_report(text, source=str(p))
+
+
+# ------------------------------------------------ signed apply_result (evidence sink)
+# The record type OpenCode's executor emits into the sink (mirrors
+# ``opencode_sandbox.evidence_emit.RECORD_TYPE_APPLY_RESULT``; duplicated as a bare string so
+# the verifier does not import the executor package).
+APPLY_RESULT_RECORD_TYPE = "apply_result"
+
+
+def _as_strlist(value) -> list[str]:
+    """Coerce a JSON value to ``list[str]`` (non-lists become empty — a malformed field)."""
+    return [str(x) for x in value] if isinstance(value, list) else []
+
+
+@dataclass
+class AppliedEvidenceView:
+    """A signed ``apply_result`` record pulled from the verifier-owned evidence sink.
+
+    Unlike :class:`ApplyReportView` (which parses an executor-authored file at an
+    executor-chosen path), this view is derived only from a record the sink has *validated and
+    chained*. The payload is authoritative because :func:`load_apply_result_from_sink`
+    re-verified the whole chain (author signatures + hash links) before reducing it. Every
+    condition short of a clean match is a **flag**, never an exception — the verifier fails
+    closed, it does not crash.
+    """
+
+    status: str | None = None
+    approver: str | None = None
+    committed: bool = False
+    declared_files: list[str] = field(default_factory=list)
+    changed_files: list[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
+    run_id: str | None = None
+    approval_id: str | None = None
+    seq: int | None = None
+    record_hash: str | None = None
+    configured: bool = False  # a sink was supplied
+    missing: bool = False  # no matching apply_result record on the (valid) chain
+    malformed: bool = False  # a matching record's payload is unusable
+    chain_error: bool = False  # verify_chain rejected the whole log
+    reason: str = ""  # human-readable detail for the finding
+
+    @property
+    def usable(self) -> bool:
+        """True only for a matching, well-formed signed record on a verified chain."""
+        return self.configured and not (self.missing or self.malformed or self.chain_error)
+
+
+def load_apply_result_from_sink(
+    evidence_sink,
+    *,
+    run_id: str | None = None,
+    approval_id: str | None = None,
+) -> AppliedEvidenceView:
+    """Verify the sink's chain, then reduce the matching signed ``apply_result`` to a view.
+
+    Fail-closed and total (never raises):
+
+      - ``evidence_sink is None`` -> ``configured=False`` ("no sink supplied").
+      - ``verify_chain`` raises -> ``chain_error=True`` (log integrity unestablished).
+      - no record matching emitter ``opencode`` + type ``apply_result`` + the supplied
+        ``run_id``/``approval_id`` -> ``missing=True``.
+      - the matching record's payload is not a usable mapping -> ``malformed=True``.
+
+    When several records match, the **highest ``seq``** wins (deterministic: seq is the
+    sink-assigned append position). The signed payload is authoritative over any file.
+    """
+    if evidence_sink is None:
+        return AppliedEvidenceView(configured=False, reason="no evidence sink supplied")
+
+    # The whole log must re-derive before any record it holds may be trusted (design §9c).
+    try:
+        evidence_sink.verify_chain()
+    except EvidenceError as exc:
+        return AppliedEvidenceView(
+            configured=True, chain_error=True, reason=f"sink chain did not verify: {exc}"
+        )
+
+    matches = []
+    for rec in getattr(evidence_sink, "records", ()):  # detached snapshots; safe to read
+        env = getattr(rec, "envelope", None)
+        if env is None:
+            continue
+        if getattr(env, "emitter", None) != EMITTER_OPENCODE:
+            continue
+        if getattr(env, "record_type", None) != APPLY_RESULT_RECORD_TYPE:
+            continue
+        if run_id is not None and getattr(env, "run_id", None) != run_id:
+            continue
+        if approval_id is not None and getattr(env, "approval_id", None) != approval_id:
+            continue
+        matches.append(rec)
+
+    if not matches:
+        return AppliedEvidenceView(
+            configured=True, missing=True, reason="no matching signed apply_result record"
+        )
+
+    rec = max(matches, key=lambda r: r.seq)
+    env = rec.envelope
+    payload = rec.payload
+    if not isinstance(payload, dict) or "status" not in payload:
+        return AppliedEvidenceView(
+            configured=True,
+            malformed=True,
+            run_id=getattr(env, "run_id", None),
+            approval_id=getattr(env, "approval_id", None),
+            seq=rec.seq,
+            record_hash=rec.record_hash,
+            reason="signed apply_result payload is malformed or missing its status",
+        )
+
+    approver = payload.get("approver")
+    return AppliedEvidenceView(
+        status=str(payload.get("status")),
+        approver=str(approver) if approver else None,
+        committed=bool(payload.get("committed", False)),
+        declared_files=_as_strlist(payload.get("declared_files")),
+        changed_files=_as_strlist(payload.get("changed_files")),
+        violations=_as_strlist(payload.get("violations")),
+        run_id=getattr(env, "run_id", None),
+        approval_id=getattr(env, "approval_id", None),
+        seq=rec.seq,
+        record_hash=rec.record_hash,
+        configured=True,
+    )
