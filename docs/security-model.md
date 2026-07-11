@@ -164,6 +164,11 @@ reaches its verdict by reading artifacts authored by the very components it veri
 - **OpenCode signs its `apply_result`.** After a confined apply, the executor emits a signed
   record into the sink, bound to the run, instead of relying only on a self-attested
   `apply_report.json` at a path it chose.
+- **OpenClaw consumes and validates the sink.** OpenClaw can now validate signed OpenCode
+  `apply_result` evidence from an injected `EvidenceSink` when signed evidence is required:
+  it verifies the chain + signatures, finds the matching signed record, and derives the apply
+  verdict from it. Unsigned `apply_report.json` alone is insufficient when signed evidence is
+  required (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`).
 
 **Honest scope of this claim:**
 
@@ -171,11 +176,13 @@ reaches its verdict by reading artifacts authored by the very components it veri
   holder of an emitter's key could forge that emitter's record. It defends against an external
   editor and honest-but-broken components — not against a party who holds the key. Asymmetric
   keys / KMS / key separation (which would give non-repudiation) are **future**, not built.
-- **OpenClaw does not yet consume or validate the sink.** Today it still reconciles the
-  gateway's own evidence; independently validating executor output from the signed chain is
-  the **next milestone**, not a current property.
-- **No fail-closed runtime enforcement on evidence yet**, no `evidence_refs`, no trust ledger,
-  no earned autonomy. Autonomy remains fixed-ceiling by policy.
+- **OpenClaw's consume/validation is component-level, not end-to-end.** It is unit-proven
+  against an injected sink; the end-to-end gateway-issued `run_id` / `approval_id` wiring is
+  **future**, so this proves component-level consume/verification, not full end-to-end runtime
+  enforcement.
+- **No gateway authorization emit, no fail-closed runtime enforcement on evidence yet**, no
+  `evidence_refs`, no trust ledger, no earned autonomy. Autonomy remains fixed-ceiling by
+  policy.
 - **Still no training/fine-tuning pipeline** (consistent with the ATLAS scoping above): the
   local model is pre-trained and served, and Hermes captures no training traces today.
 

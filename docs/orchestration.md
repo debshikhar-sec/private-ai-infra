@@ -245,14 +245,21 @@ then happened.
 - **OpenCode emits a signed `apply_result`** into that sink after a confined apply
   ([`agents/opencode_sandbox/evidence_emit.py`](../agents/opencode_sandbox/evidence_emit.py)),
   bound to the run and additive to the still-written `apply_report.json`.
+- **OpenClaw consumes and validates that signed evidence.** OpenClaw can now validate signed
+  OpenCode `apply_result` evidence from an injected `EvidenceSink` when signed evidence is
+  required ([`agents/openclaw/evidence.py`](../agents/openclaw/evidence.py),
+  [`checks.py`](../agents/openclaw/checks.py), [`worker.py`](../agents/openclaw/worker.py)):
+  it verifies the chain + signatures, finds the matching signed record, and derives the apply
+  verdict from it. **Unsigned `apply_report.json` alone is insufficient when signed evidence
+  is required.** This is **tamper-evident HMAC-signed evidence, not non-repudiation**.
 
-**Not done yet (the important half):** OpenClaw today still verifies from the gateway's own
-evidence and the handed apply report — it does **not yet consume or validate** the signed
-sink records, so executor output is not yet *independently* verified. **OpenClaw verifier
-consume is the next milestone.** Gateway authorization emit, `evidence_refs` population,
-fail-closed runtime enforcement, a trust ledger, and earned autonomy are all **future** and
-sequenced in [roadmap.md](roadmap.md) / [evidence-sink-design.md](evidence-sink-design.md).
-Autonomy stays fixed-ceiling by policy — there is no self-approval and no earned escalation.
+**Scope of that consume:** it is **component-level consume/verification, not full end-to-end
+runtime enforcement** — unit-proven against an injected sink, without the end-to-end
+gateway-issued `run_id` / `approval_id` wiring. **Gateway authorization emit**,
+**`evidence_refs` population**, and **runtime fail-closed integration** remain future
+milestones, as do a trust ledger and earned autonomy — all sequenced in
+[roadmap.md](roadmap.md) / [evidence-sink-design.md](evidence-sink-design.md). Autonomy stays
+fixed-ceiling by policy — there is no self-approval and no earned escalation.
 
 **Planned (next, behind the same boundary):**
 

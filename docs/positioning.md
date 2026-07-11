@@ -52,7 +52,7 @@ audit trail in which every deny carries a stable machine-readable code.
 ## What the moat is — and is not
 
 **Is:** the policy model itself (two-axis skill-vs-autonomy rule, attenuation-only
-chains), proven by a large automated test suite (560+ tests), an adversarial eval suite,
+chains), proven by a large automated test suite (590 tests), an adversarial eval suite,
 and a reproducible three-agent orchestration demo; a governed execute authority loop
 (owner-gated, single-use, canonical-hash-bound approvals) and a verifier-owned,
 tamper-evident evidence sink core now build on top; local-first architecture that
@@ -68,13 +68,16 @@ today.
 
 What exists: a working, tested, documented enforcement plane (past v0.18.0), a governed
 execute authority loop, a verifier-owned **tamper-evident** evidence sink core with
-signed OpenCode `apply_result` emission, a Governance Console (incl. a conversational
-`/chat`), an offline demo, CI with security gates, and this analysis. What is **in
-progress**: OpenClaw consuming/validating that evidence so executor output is no longer
-self-attested (the next milestone). What is **future, not built**: gateway-side signed
-authorization records, fail-closed runtime evidence enforcement, a trust ledger, earned
-autonomy, and any Hermes local training/offload — so this is **not** a fully autonomous,
-production, or compliance-certified system, and does not claim non-repudiation. What does
+signed OpenCode `apply_result` emission, OpenClaw consuming and validating that signed
+evidence from an injected sink (component-level verification — unit-proven, so unsigned
+`apply_result.json` alone is insufficient when signed evidence is required), a Governance
+Console (incl. a conversational `/chat`), an offline demo, CI with security gates, and
+this analysis. What is **future, not built**: end-to-end gateway-issued `run_id` /
+`approval_id` wiring, gateway-side signed authorization records, fail-closed runtime
+evidence enforcement, a trust ledger, earned autonomy, and any Hermes local
+training/offload — so this proves component-level consume/verification, not full
+end-to-end runtime enforcement, and this is **not** a fully autonomous, production, or
+compliance-certified system, and does not claim non-repudiation. What does
 **not** exist: users, revenue, design partners, a company, or a founding team. "YC-eligible" today
 means *a founder with a working product and a defensible thesis can credibly apply* —
 the application-strength evidence (Show HN reception, PyPI installs, 5–10 design-partner
