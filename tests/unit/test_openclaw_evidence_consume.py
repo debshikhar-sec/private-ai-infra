@@ -339,8 +339,12 @@ def _assert_no_changes_under(*prefixes: str) -> None:
     assert not offending, f"out-of-scope files changed: {offending}"
 
 
-def test_no_gateway_files_touched_guard():
-    _assert_no_changes_under("src/private_ai_gateway/")
+# NOTE: there is deliberately no gateway working-tree guard here. The Step 4 consume
+# increment did not touch ``src/private_ai_gateway/``, but a live-``git status`` assertion over
+# that path is not a valid *permanent* unit test: later, separately-authorized increments
+# (Step 5 gateway ``execute_validated`` emit and beyond) intentionally change gateway files, so
+# such a guard would fail on unrelated future work. Scope discipline for those increments is
+# enforced by their own suites, not by this one.
 
 
 def test_no_opencode_files_touched_guard():

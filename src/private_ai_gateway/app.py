@@ -107,6 +107,19 @@ DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=S
 # validation and the approval decision endpoint arrive in a later step.
 APPROVAL_STORE = ApprovalStore()
 
+# Step 5 — gateway authorization evidence emit: injection points ONLY (additive).
+# When execution authority is granted, the gateway can emit a signed `execute_validated`
+# record into a verifier-owned EvidenceSink (see orchestration._run_execute). Production
+# defaults to no sink, so behavior is byte-identical to before. No key material is ever
+# loaded from disk or env here — a caller (a test, or a later, separately-authorized wiring
+# step) sets these. With REQUIRE_AUTHORIZATION_EVIDENCE True a configured-but-failing emit
+# denies execution *before* any mutation; with it False (default) emit is best-effort and
+# never changes the governed outcome.
+EVIDENCE_SINK = None
+EVIDENCE_KEY = None
+EVIDENCE_KEY_ID = ""
+REQUIRE_AUTHORIZATION_EVIDENCE = False
+
 # Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
 # Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.
 DELEGATIONS = delegation.DelegationLedger()
