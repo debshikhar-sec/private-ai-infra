@@ -15,12 +15,17 @@ apply step refuses unless the caller supplies an approval.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from private_ai_gateway import approvals, canonical
+from private_ai_gateway.logutil import log_safe
+
+logger = logging.getLogger("AuditTrail")
 
 
 class OrchestrationUnavailable(RuntimeError):
@@ -216,7 +221,102 @@ _REFUSAL_MESSAGES = {
     approvals.REASON_INVALIDATED: "the run or approval was invalidated",
     approvals.REASON_NOT_APPROVED: "the approval is not in an approved state",
     approvals.REASON_AUTONOMY_EXCEEDED: "requested autonomy exceeds the policy ceiling",
+    # Step 5: raised only when REQUIRE_AUTHORIZATION_EVIDENCE is set and the signed
+    # authorization record could not be recorded — a fail-closed refusal before any mutation.
+    "authorization_evidence_unavailable": (
+        "the authorization evidence record could not be recorded — execution denied"
+    ),
 }
+
+# Step 5 — gateway authorization evidence emit ------------------------------------------
+# When execution authority is granted (approval validated + single-use consumed) and BEFORE
+# any mutation, the gateway emits ONE signed `execute_validated` record into an injected,
+# verifier-owned EvidenceSink. Additive by design: with no sink configured the gateway
+# behaves exactly as before. Deliberately narrow — no evidence_refs, no OpenClaw consume, no
+# runtime fail-closed integration; those are later, separately-authorized increments.
+REASON_EVIDENCE_UNAVAILABLE = "authorization_evidence_unavailable"
+_EXECUTE_VALIDATED_RECORD_TYPE = "execute_validated"
+
+
+def _emit_execute_validated(
+    gw, *, run_id: str, approval_id: str, canonical_plan_hash: str
+) -> bool:
+    """Emit one signed ``execute_validated`` record; return True iff execution may proceed.
+
+    Reads the sink/key/key_id/require-flag injection points off ``gw`` (the app module). The
+    ``REQUIRE_AUTHORIZATION_EVIDENCE`` flag decides every failure uniformly — when False, any
+    unavailability is best-effort (log + proceed, True); when True, any unavailability is
+    fail-closed (False, so the caller refuses before any mutation):
+
+      * no sink configured -> require False: proceed silently (byte-identical old behavior);
+        require True: deny (the authorization record cannot be recorded).
+      * sink configured but key/key_id missing -> best-effort / fail-closed per the flag.
+      * signing/append fails -> best-effort / fail-closed per the flag.
+
+    Never raises to the caller: an unexpected error is contained and mapped onto the same
+    require-flag policy, and the internal detail stays in the server log (never the client).
+    The record binds ``run_id``/``approval_id`` in the *signing envelope* (sink convention);
+    the payload carries only the apply-authorization fact — no secrets, tokens, or plan text.
+    """
+    sink = getattr(gw, "EVIDENCE_SINK", None)
+    require = bool(getattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", False))
+
+    if sink is None:
+        if require:
+            # Fail closed: authorization evidence is required but no sink is configured.
+            logger.warning(
+                f"EXECUTE_VALIDATED_EMIT_UNAVAILABLE | run_id={log_safe(run_id)} "
+                "| detail=authorization evidence required but no sink is configured"
+            )
+            return False
+        return True  # default path: no evidence plane -> byte-identical old behavior, quiet
+
+    def _fail(detail: str) -> bool:
+        """Apply the require-flag policy to any evidence failure, in one place."""
+        logger.warning(
+            f"EXECUTE_VALIDATED_EMIT_FAILED | run_id={log_safe(run_id)} "
+            f"| detail={log_safe(detail)}"
+        )
+        return not require  # proceed when best-effort; deny when evidence is required
+
+    key = getattr(gw, "EVIDENCE_KEY", None)
+    key_id = getattr(gw, "EVIDENCE_KEY_ID", "") or ""
+    if not key or not key_id:
+        return _fail("evidence sink configured but signing key/key_id is missing")
+
+    try:
+        from openclaw.sink import (
+            EMITTER_GATEWAY,
+            SCHEMA_VERSION,
+            EvidenceError,
+            SigningEnvelope,
+            payload_digest,
+            sign_envelope,
+        )
+    except ImportError as exc:  # pragma: no cover - agents path is ensured before execute
+        return _fail(f"evidence sink module unavailable: {exc}")
+
+    try:
+        payload = {"canonical_plan_hash": canonical_plan_hash, "validated": True}
+        envelope = SigningEnvelope(
+            schema_version=SCHEMA_VERSION,
+            sink_id=sink.sink_id,
+            run_id=run_id,
+            approval_id=approval_id,
+            emitter=EMITTER_GATEWAY,
+            emitter_key_id=key_id,
+            record_type=_EXECUTE_VALIDATED_RECORD_TYPE,
+            payload_hash=payload_digest(payload),
+            ts=datetime.now(timezone.utc).isoformat(),
+            nonce=uuid.uuid4().hex,
+        )
+        sig = sign_envelope(envelope, bytes(key))
+        sink.append(envelope, payload, sig)
+    except EvidenceError as exc:
+        return _fail(f"evidence emit rejected: {exc}")
+    except Exception as exc:  # defensive: an emit bug must never crash a governed execute
+        return _fail(f"unexpected evidence emit error: {exc}")
+    return True
 
 
 def _execute_refusal(run_id: str, reason_code: str) -> dict:
@@ -301,6 +401,14 @@ def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> 
 
     # Consume the single-use approval before any delegation/mutation can happen.
     store.mark_used(approval_id)
+    # Step 5: now that authority is granted and consumed, emit the signed gateway
+    # `execute_validated` record — BEFORE any mutation. Additive/best-effort by default; it
+    # only denies here when REQUIRE_AUTHORIZATION_EVIDENCE is set and the emit fails (the
+    # approval is already spent in that case — an accepted fail-closed cost for this step).
+    if not _emit_execute_validated(
+        gw, run_id=run_id, approval_id=approval_id, canonical_plan_hash=digest
+    ):
+        return _execute_refusal(run_id, REASON_EVIDENCE_UNAVAILABLE)
     # Authority comes from the stored approval, never the request body.
     return session.execute(validation.record.approver, "")
 
