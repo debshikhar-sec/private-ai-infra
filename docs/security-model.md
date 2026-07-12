@@ -184,12 +184,15 @@ reaches its verdict by reading artifacts authored by the very components it veri
   holder of an emitter's key could forge that emitter's record. It defends against an external
   editor and honest-but-broken components — not against a party who holds the key. Asymmetric
   keys / KMS / key separation (which would give non-repudiation) are **future**, not built.
-- **OpenClaw's consume/validation and the gateway's `execute_validated` emit are
-  component-level, not end-to-end.** Both are unit-proven against an injected sink; the
-  end-to-end gateway-issued `run_id` / `approval_id` wiring is **future**, so this proves
-  component-level consume/verification and gateway authorization evidence emit, not full
-  runtime fail-closed enforcement.
-- **No `approval_decided` record, no fail-closed runtime enforcement on evidence yet**, no
+- **OpenClaw's consume/validation and the gateway's `execute_validated` and
+  `approval_decided` emits are component-level, not end-to-end.** All are unit-proven against
+  an injected sink; the end-to-end gateway-issued `run_id` / `approval_id` wiring is
+  **future**, so this proves component-level consume/verification and gateway authorization
+  evidence emit (both the `execute_validated` authority-consumed record and the
+  `approval_decided` decision record), not full runtime fail-closed enforcement. Under
+  `REQUIRE_AUTHORIZATION_EVIDENCE`, a decision-time emit failure invalidates the run and its
+  active approvals and denies with HTTP 503 `authorization_evidence_unavailable`.
+- **No fail-closed runtime enforcement on evidence yet**, no
   `evidence_refs` linking the gateway and OpenCode records, no trust ledger, no earned
   autonomy. Autonomy remains fixed-ceiling by policy.
 - **Still no training/fine-tuning pipeline** (consistent with the ATLAS scoping above): the

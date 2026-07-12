@@ -262,12 +262,26 @@ then happened.
   evidence envelope. The default no-sink behavior stays backward-compatible, and
   `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before mutation if authorization
   evidence is unavailable.
+- **The gateway emits signed `approval_decided` decision evidence.** When an owner approves
+  or rejects at `POST /v1/approvals`, the gateway can now emit a signed `approval_decided`
+  record into an injected `EvidenceSink`
+  ([`app.py`](../src/private_ai_gateway/app.py),
+  [`orchestration.py`](../src/private_ai_gateway/orchestration.py)) — **after** the decision
+  is stored and **before** the success response. The payload contains exactly `decision`,
+  `approver`, and `canonical_plan_hash`; `run_id` and `approval_id` remain envelope fields,
+  and the free-text rejection reason is excluded. The default no-sink behavior stays
+  backward-compatible; under `REQUIRE_AUTHORIZATION_EVIDENCE`, a failed emit **invalidates the
+  run and its active approvals** and denies with HTTP 503 `authorization_evidence_unavailable`
+  (no sink/key internals exposed). The distinct record meanings: `approval_decided` = an
+  authority decision (approve/reject) was made; `execute_validated` = approved authority was
+  validated and consumed for execution; `apply_result` (OpenCode) = the bounded executor
+  mutation outcome.
 
 **Scope of that emit/consume:** it is **component-level consume/verification and gateway
 authorization evidence emit, not full runtime fail-closed enforcement** — unit-proven against
 an injected sink, without the end-to-end gateway-issued `run_id` / `approval_id` wiring, and
 the gateway and OpenCode records are **not yet linked through `evidence_refs`**.
-**`approval_decided`**, **`evidence_refs` population**, and **runtime fail-closed integration**
+**`evidence_refs` population** and **runtime fail-closed integration**
 remain future milestones, as do a trust ledger and earned autonomy — all sequenced in
 [roadmap.md](roadmap.md) / [evidence-sink-design.md](evidence-sink-design.md). Autonomy stays
 fixed-ceiling by policy — there is no self-approval and no earned escalation.

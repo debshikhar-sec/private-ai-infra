@@ -104,13 +104,20 @@ capability second.
   evidence is unavailable. This is **component-level gateway authorization evidence emit, not
   full runtime fail-closed enforcement**, and the gateway and OpenCode records are **not yet
   linked through `evidence_refs`**.
+- **Gateway `approval_decided` decision evidence emit** — at `POST /v1/approvals`, after the
+  owner's approve/reject decision is stored and before the success response, the gateway can
+  now emit a signed `approval_decided` record (`src/private_ai_gateway/app.py`,
+  `orchestration.py`). The payload is exactly `{decision, approver, canonical_plan_hash}`;
+  `run_id`/`approval_id` stay in the evidence envelope; the free-text rejection reason is
+  excluded. The default no-sink behavior is backward-compatible, and under
+  `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit **invalidates the run and its active
+  approvals** and denies with HTTP 503 `authorization_evidence_unavailable`. Component-level
+  decision evidence emit, **not yet linked through `evidence_refs`**.
 
 ## Next — evidence integrity (verifier-owned), in sequence
 
 Design: [evidence-sink-design.md](evidence-sink-design.md). Each step is separately gated.
 
-- **`approval_decided` authorization emit** — *future.* The remaining gateway authorization
-  record (`approval_decided`); the `execute_validated` emit above already ships.
 - **`evidence_refs` population** — *future.* Bind approvals to sink records (`approvals.py`
   carries a placeholder today).
 - **Fail-closed runtime evidence enforcement** — *future.* A mutating action is not treated
