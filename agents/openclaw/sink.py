@@ -84,6 +84,12 @@ REASON_RECORD_HASH_MISMATCH = "record_hash_mismatch"
 REASON_CHAIN_BROKEN = "chain_broken"
 REASON_SEQ_GAP = "seq_gap"
 REASON_MALFORMED = "malformed"
+# Step 6B — evidence-reference resolution (walking one edge of the signed graph).
+REASON_REF_UNRESOLVED = "ref_unresolved"
+REASON_REF_AMBIGUOUS = "ref_ambiguous"
+REASON_REF_TYPE_MISMATCH = "ref_type_mismatch"
+REASON_REF_SINK_MISMATCH = "ref_sink_mismatch"
+REASON_REF_DIGEST_MISMATCH = "ref_digest_mismatch"
 
 
 class EvidenceError(Exception):
@@ -318,6 +324,87 @@ class AppendedRecord:
         it depends only on the signed attestation, never on ``seq``/``prev_hash``/``record_hash``.
         """
         return evidence_ref_for(self.envelope, self.emitter_sig)
+
+
+# --- signed-graph reference resolution (Step 6B) ------------------------------------
+# Pure functions that walk one edge of the signed evidence graph: given a portable
+# :class:`EvidenceRef` (or a (emitter, record_type, run, approval) context), find the *unique*
+# record it names among an already-obtained records sequence. Identity is ``evidence_id`` +
+# recomputed ``evidence_digest`` — never ``seq`` or ``record_hash`` (chain-local, not portable).
+# The caller is responsible for having verified the chain first (``verify_chain``); these do not
+# re-verify, so one verification can back many edge resolutions. Fail-closed: any miss raises
+# :class:`EvidenceError` with a ``REASON_REF_*`` code — a resolver that guessed would defeat the
+# point of a signed reference.
+def resolve_evidence_ref(records, ref: EvidenceRef, *, sink_id: str) -> AppendedRecord:
+    """Resolve ``ref`` to the one record it names in ``records``; fail closed on any miss.
+
+    Requires exactly one record whose envelope ``evidence_id`` equals ``ref.evidence_id``
+    (zero -> ``REASON_REF_UNRESOLVED``, many -> ``REASON_REF_AMBIGUOUS``), then binds the
+    reference to it: ``ref.sink_id`` must equal ``sink_id`` (the current single sink),
+    ``record_type`` must match, and the record's **recomputed** ``evidence_digest`` must equal
+    ``ref.evidence_digest``. Never resolves by ``seq`` or ``record_hash``.
+    """
+    if not isinstance(ref, EvidenceRef):
+        raise EvidenceError(f"{REASON_MALFORMED}: ref must be an EvidenceRef")
+    matches = [
+        r for r in records
+        if getattr(getattr(r, "envelope", None), "evidence_id", None) == ref.evidence_id
+    ]
+    if not matches:
+        raise EvidenceError(f"{REASON_REF_UNRESOLVED}: no record for {ref.evidence_id!r}")
+    if len(matches) > 1:
+        raise EvidenceError(
+            f"{REASON_REF_AMBIGUOUS}: {len(matches)} records share {ref.evidence_id!r}"
+        )
+    rec = matches[0]
+    if ref.sink_id != sink_id:
+        raise EvidenceError(f"{REASON_REF_SINK_MISMATCH}: {ref.sink_id!r} != {sink_id!r}")
+    if rec.envelope.record_type != ref.record_type:
+        raise EvidenceError(
+            f"{REASON_REF_TYPE_MISMATCH}: {rec.envelope.record_type!r} != {ref.record_type!r}"
+        )
+    if evidence_digest(rec.envelope, rec.emitter_sig) != ref.evidence_digest:
+        raise EvidenceError(f"{REASON_REF_DIGEST_MISMATCH}: {ref.evidence_id!r}")
+    return rec
+
+
+def find_unique_record(
+    records,
+    *,
+    emitter: str,
+    record_type: str,
+    run_id: str | None = None,
+    approval_id: str | None = None,
+) -> AppendedRecord:
+    """The unique record matching ``emitter``/``record_type`` (and run/approval when given).
+
+    A contextual locator for authority records: zero matches -> ``REASON_REF_UNRESOLVED``,
+    more than one -> ``REASON_REF_AMBIGUOUS`` (deliberately **not** "latest wins" — an
+    ambiguous authority record is a failure, not a tie to be broken).
+    """
+    matches = []
+    for r in records:
+        env = getattr(r, "envelope", None)
+        if env is None:
+            continue
+        if env.emitter != emitter or env.record_type != record_type:
+            continue
+        if run_id is not None and env.run_id != run_id:
+            continue
+        if approval_id is not None and env.approval_id != approval_id:
+            continue
+        matches.append(r)
+    if not matches:
+        raise EvidenceError(
+            f"{REASON_REF_UNRESOLVED}: no {emitter}/{record_type} "
+            f"for run={run_id!r} approval={approval_id!r}"
+        )
+    if len(matches) > 1:
+        raise EvidenceError(
+            f"{REASON_REF_AMBIGUOUS}: {len(matches)} {emitter}/{record_type} "
+            f"for run={run_id!r} approval={approval_id!r}"
+        )
+    return matches[0]
 
 
 # --- per-emitter HMAC signing (Step 1B) ---------------------------------------------

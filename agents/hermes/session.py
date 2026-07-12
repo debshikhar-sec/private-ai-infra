@@ -133,7 +133,7 @@ class GovernedSession:
 
     # -- phase 2: execute, but only under a human approval ------------------------
 
-    def execute(self, approver: str = "", reason: str = "") -> dict:
+    def execute(self, approver: str = "", reason: str = "", *, execute_ref=None) -> dict:
         from openclaw.worker import AssuranceWorker
         from opencode_sandbox import apply as act
         from opencode_sandbox.worker import CodeActWorker
@@ -168,7 +168,12 @@ class GovernedSession:
                        "the apply must refuse — authority was never granted",
                        decision="deny", code="apply_not_approved"))
 
-        code_worker = CodeActWorker(self.peers[executor], approval=approval)
+        # Step 6B: the gateway-minted execute_validated reference (or None on the best-effort
+        # path) is threaded to the executor so a signed apply_result can bind back to it. It
+        # is never a client-supplied field — it originates from the gateway's own emit.
+        code_worker = CodeActWorker(
+            self.peers[executor], approval=approval, execute_ref=execute_ref
+        )
         verify_workers = [
             AssuranceWorker(self.peers[n])
             for n, c in self._cards().items()

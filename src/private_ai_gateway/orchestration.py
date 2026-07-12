@@ -19,6 +19,7 @@ import logging
 import os
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -241,18 +242,34 @@ _REFUSAL_MESSAGES = {
 REASON_EVIDENCE_UNAVAILABLE = "authorization_evidence_unavailable"
 _EXECUTE_VALIDATED_RECORD_TYPE = "execute_validated"
 _APPROVAL_DECIDED_RECORD_TYPE = "approval_decided"
+_APPROVE_DECISION = "approve"
+
+
+@dataclass(frozen=True)
+class _GatewayEmit:
+    """Outcome of one gateway evidence emit: may the caller proceed, and the record's ref.
+
+    ``proceed`` is the same allow/deny signal the emit has always returned. ``evidence_ref``
+    is the appended record's portable :class:`openclaw.sink.EvidenceRef`, present only when a
+    record was actually appended — the gateway threads it (for ``execute_validated``) into the
+    downstream apply so ``apply_result`` can point back to it (Step 6B). It is ``None`` on
+    every best-effort / no-sink / failure path, so those paths emit no fabricated linkage.
+    """
+
+    proceed: bool
+    evidence_ref: object | None = None
 
 
 def _emit_gateway_evidence(
     gw, *, run_id: str, approval_id: str, record_type: str, payload: dict, log_label: str
-) -> bool:
-    """Emit one signed gateway evidence record; return True iff the caller may proceed.
+) -> _GatewayEmit:
+    """Emit one signed gateway evidence record; return whether to proceed and its ref.
 
     Shared core for every gateway authorization record (``execute_validated``,
     ``approval_decided``). Reads the sink/key/key_id/require-flag injection points off ``gw``
     (the app module). The ``REQUIRE_AUTHORIZATION_EVIDENCE`` flag decides every failure
-    uniformly — when False, any unavailability is best-effort (log + proceed, True); when
-    True, any unavailability is fail-closed (False, so the caller refuses before the outcome
+    uniformly — when False, any unavailability is best-effort (log + proceed, no ref); when
+    True, any unavailability is fail-closed (deny, so the caller refuses before the outcome
     it guards):
 
       * no sink configured -> require False: proceed silently (byte-identical old behavior);
@@ -276,16 +293,16 @@ def _emit_gateway_evidence(
                 f"{log_label}_EMIT_UNAVAILABLE | run_id={log_safe(run_id)} "
                 "| detail=authorization evidence required but no sink is configured"
             )
-            return False
-        return True  # default path: no evidence plane -> byte-identical old behavior, quiet
+            return _GatewayEmit(False)
+        return _GatewayEmit(True)  # default path: no evidence plane -> old behavior, quiet
 
-    def _fail(detail: str) -> bool:
+    def _fail(detail: str) -> _GatewayEmit:
         """Apply the require-flag policy to any evidence failure, in one place."""
         logger.warning(
             f"{log_label}_EMIT_FAILED | run_id={log_safe(run_id)} "
             f"| detail={log_safe(detail)}"
         )
-        return not require  # proceed when best-effort; deny when evidence is required
+        return _GatewayEmit(not require)  # proceed when best-effort; deny when required
 
     key = getattr(gw, "EVIDENCE_KEY", None)
     key_id = getattr(gw, "EVIDENCE_KEY_ID", "") or ""
@@ -320,28 +337,101 @@ def _emit_gateway_evidence(
             nonce=uuid.uuid4().hex,
         )
         sig = sign_envelope(envelope, bytes(key))
-        sink.append(envelope, payload, sig)
+        appended = sink.append(envelope, payload, sig)
     except EvidenceError as exc:
         return _fail(f"evidence emit rejected: {exc}")
     except Exception as exc:  # defensive: an emit bug must never crash a governed decision
         return _fail(f"unexpected evidence emit error: {exc}")
-    return True
+    return _GatewayEmit(True, appended.evidence_ref())
+
+
+def _resolve_approval_ref(sink, *, run_id: str, approval_id: str, canonical_plan_hash: str):
+    """The :class:`EvidenceRef` of the unique signed ``approval_decided`` this run may execute.
+
+    Locates the one gateway-emitted ``approval_decided`` for ``(run_id, approval_id)`` on a
+    freshly re-verified chain, confirms it was an **approve** for this exact canonical plan
+    hash, and returns its portable reference (Step 6B). Fail-closed and total: a broken chain,
+    a missing/ambiguous decision record, a reject, or a plan-hash mismatch all return ``None``
+    (the caller decides best-effort-skip vs. fail-closed refuse — never a fabricated ref).
+    """
+    try:
+        from openclaw.sink import (
+            EMITTER_GATEWAY,
+            EvidenceError,
+            find_unique_record,
+        )
+    except ImportError as exc:  # pragma: no cover - agents path is ensured before emit
+        logger.warning(f"APPROVAL_REF_UNAVAILABLE | detail={log_safe(f'sink import: {exc}')}")
+        return None
+    try:
+        # The whole log must re-derive before any record it holds may be referenced.
+        sink.verify_chain()
+        record = find_unique_record(
+            sink.records,
+            emitter=EMITTER_GATEWAY,
+            record_type=_APPROVAL_DECIDED_RECORD_TYPE,
+            run_id=run_id,
+            approval_id=approval_id,
+        )
+        payload = record.payload
+        if not isinstance(payload, dict):
+            raise EvidenceError("approval_decided payload is not a mapping")
+        if payload.get("decision") != _APPROVE_DECISION:
+            raise EvidenceError(f"decision is {payload.get('decision')!r}, not approve")
+        if payload.get("canonical_plan_hash") != canonical_plan_hash:
+            raise EvidenceError("approval_decided canonical_plan_hash does not match")
+        return record.evidence_ref()
+    except EvidenceError as exc:
+        logger.warning(
+            f"APPROVAL_REF_UNRESOLVED | run_id={log_safe(run_id)} "
+            f"| detail={log_safe(str(exc))}"
+        )
+        return None
+    except Exception as exc:  # defensive: a resolver bug must never crash a governed decision
+        logger.warning(
+            f"APPROVAL_REF_ERROR | run_id={log_safe(run_id)} | detail={log_safe(str(exc))}"
+        )
+        return None
 
 
 def _emit_execute_validated(
     gw, *, run_id: str, approval_id: str, canonical_plan_hash: str
-) -> bool:
-    """Emit one signed ``execute_validated`` record; return True iff execution may proceed.
+) -> _GatewayEmit:
+    """Emit one signed ``execute_validated`` record; carry whether execution may proceed.
 
     Thin wrapper over :func:`_emit_gateway_evidence`. The payload carries only the
-    apply-authorization fact — no secrets, tokens, or plan text.
+    apply-authorization fact — no secrets, tokens, or plan text. When a sink is configured it
+    first resolves the signed ``approval_decided`` this run rests on and embeds its portable
+    reference (``approval_ref``) so the authorization edge is signed into the record:
+
+      * ref resolved -> payload is ``{canonical_plan_hash, validated, approval_ref}``.
+      * ref unresolvable and evidence required -> fail closed (deny; refuse before the apply).
+      * ref unresolvable and best-effort -> proceed on the old ``{canonical_plan_hash,
+        validated}`` payload rather than fabricate a reference.
     """
+    sink = getattr(gw, "EVIDENCE_SINK", None)
+    require = bool(getattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", False))
+    payload = {"canonical_plan_hash": canonical_plan_hash, "validated": True}
+    if sink is not None:
+        approval_ref = _resolve_approval_ref(
+            sink, run_id=run_id, approval_id=approval_id, canonical_plan_hash=canonical_plan_hash
+        )
+        if approval_ref is None:
+            if require:
+                logger.warning(
+                    f"EXECUTE_VALIDATED_LINK_UNAVAILABLE | run_id={log_safe(run_id)} "
+                    "| detail=no signed approval_decided reference could be resolved"
+                )
+                return _GatewayEmit(False)
+            # best-effort: proceed without a fabricated link (old 2-key payload).
+        else:
+            payload["approval_ref"] = approval_ref.to_mapping()
     return _emit_gateway_evidence(
         gw,
         run_id=run_id,
         approval_id=approval_id,
         record_type=_EXECUTE_VALIDATED_RECORD_TYPE,
-        payload={"canonical_plan_hash": canonical_plan_hash, "validated": True},
+        payload=payload,
         log_label="EXECUTE_VALIDATED",
     )
 
@@ -353,7 +443,8 @@ def _emit_approval_decided(
 
     Thin wrapper over :func:`_emit_gateway_evidence`, for both approve and reject. The
     payload carries only the decision fact ``{decision, approver, canonical_plan_hash}`` —
-    the free-text rejection reason is deliberately excluded from the signed record.
+    the free-text rejection reason is deliberately excluded from the signed record. This is
+    the *root* of the signed graph (Step 6B): it never references another record.
     """
     return _emit_gateway_evidence(
         gw,
@@ -366,7 +457,7 @@ def _emit_approval_decided(
             "canonical_plan_hash": canonical_plan_hash,
         },
         log_label="APPROVAL_DECIDED",
-    )
+    ).proceed
 
 
 def _execute_refusal(run_id: str, reason_code: str) -> dict:
@@ -455,12 +546,16 @@ def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> 
     # `execute_validated` record — BEFORE any mutation. Additive/best-effort by default; it
     # only denies here when REQUIRE_AUTHORIZATION_EVIDENCE is set and the emit fails (the
     # approval is already spent in that case — an accepted fail-closed cost for this step).
-    if not _emit_execute_validated(
+    emit = _emit_execute_validated(
         gw, run_id=run_id, approval_id=approval_id, canonical_plan_hash=digest
-    ):
+    )
+    if not emit.proceed:
         return _execute_refusal(run_id, REASON_EVIDENCE_UNAVAILABLE)
+    # Step 6B: thread the signed execute_validated reference through the internal execution
+    # boundary so the downstream apply can bind ``apply_result`` back to it. It is minted
+    # server-side (never a client-supplied field) and is ``None`` on the best-effort path.
     # Authority comes from the stored approval, never the request body.
-    return session.execute(validation.record.approver, "")
+    return session.execute(validation.record.approver, "", execute_ref=emit.evidence_ref)
 
 
 def run_phase(

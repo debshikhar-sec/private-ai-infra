@@ -121,8 +121,12 @@ def test_run_all_appends_signed_control_only_when_sink_engaged():
     with_sink = checks.run_all(Evidence(audit=evidence.AuditLog(), evidence_sink=sink, run_id=_RUN))
     without = checks.run_all(Evidence(audit=evidence.AuditLog()))
     assert len(without) == len(checks.ALL_CHECKS)
-    assert len(with_sink) == len(checks.ALL_CHECKS) + 1
-    assert any(f.control_id == "AC-APPLY-EVIDENCE-CHAIN" for f in with_sink)
+    assert {f.control_id for f in without} & {"AC-APPLY-EVIDENCE-CHAIN", "AC-EVIDENCE-GRAPH"} == set()
+    # Engaging a sink appends exactly the two gated signed-evidence controls (design step 4
+    # apply-chain + design step 6B graph linkage).
+    assert len(with_sink) == len(checks.ALL_CHECKS) + 2
+    gated = {f.control_id for f in with_sink} - {f.control_id for f in without}
+    assert gated == {"AC-APPLY-EVIDENCE-CHAIN", "AC-EVIDENCE-GRAPH"}
 
 
 def test_clean_sink_apply_result_passes_when_required():

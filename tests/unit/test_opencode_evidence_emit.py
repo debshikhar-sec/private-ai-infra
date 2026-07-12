@@ -343,3 +343,43 @@ def test_two_emits_have_distinct_evidence_ids():
     r1 = _emit(s, run_id="run-1", approval_id="appr-1")
     r2 = _emit(s, run_id="run-2", approval_id="appr-2")
     assert r1.envelope.evidence_id != r2.envelope.evidence_id
+
+
+# --- Step 6B: apply_result binds an optional execute_ref, and only that ---
+def _execute_ref():
+    """A plausible gateway execute_validated EvidenceRef (shape only; not resolved here)."""
+    return sinkmod.EvidenceRef(
+        evidence_id=sinkmod.new_evidence_id(),
+        evidence_digest="sha256:" + "a" * 64,
+        record_type="execute_validated",
+        sink_id=_SINK_ID,
+    )
+
+
+def test_emit_without_execute_ref_is_payload_identical():
+    # Default/no-linkage compatibility: with no execute_ref the payload is exactly the report.
+    s = _sink()
+    rec = _emit(s)
+    assert rec.payload == _report().to_record()
+    assert "execute_ref" not in rec.payload
+
+
+def test_emit_with_execute_ref_adds_only_that_field():
+    s = _sink()
+    ref = _execute_ref()
+    rec = _emit(s, execute_ref=ref)
+    base = _report().to_record()
+    # The signed payload retains every existing key and adds exactly one: execute_ref.
+    assert set(rec.payload.keys()) == set(base.keys()) | {"execute_ref"}
+    assert rec.payload["execute_ref"] == ref.to_mapping()
+    for k, v in base.items():
+        assert rec.payload[k] == v
+    assert sinkmod.payload_digest(rec.payload) == rec.envelope.payload_hash  # ref is signed
+
+
+def test_emit_with_malformed_execute_ref_fails_closed():
+    # A non-EvidenceRef execute_ref must not produce a (falsely) linked apply_result.
+    s = _sink()
+    with pytest.raises(sinkmod.EvidenceError):
+        _emit(s, execute_ref={"evidence_id": "ev-" + "0" * 32})
+    assert len(s) == 0
