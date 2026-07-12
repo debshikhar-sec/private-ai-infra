@@ -52,6 +52,7 @@ class CodeActWorker:
         sink_id: str = "",
         run_id: str = "",
         approval_id: str | None = None,
+        execute_ref=None,
     ):
         self.peer = peer
         self.approval = approval
@@ -67,6 +68,10 @@ class CodeActWorker:
         self.sink_id = sink_id
         self.run_id = run_id
         self.approval_id = approval_id
+        # Step 6B: the gateway-produced ``execute_validated`` EvidenceRef this apply executes
+        # under. Threaded in from the internal session boundary — never an external request
+        # field — and, when present, bound into the signed ``apply_result`` as ``execute_ref``.
+        self.execute_ref = execute_ref
         self._name: str | None = None
         # my task id -> the verification sub-task id I'm waiting on
         self._awaiting: dict[str, str] = {}
@@ -128,6 +133,7 @@ class CodeActWorker:
                 approval_id=self.approval_id,
                 emitter_key_id=self.emitter_key_id,
                 report=report,
+                execute_ref=self.execute_ref,
             )
 
         verifier = self.peer.find_peer(

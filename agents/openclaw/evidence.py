@@ -31,7 +31,14 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from openclaw.sink import EMITTER_OPENCODE, EvidenceError
+from openclaw.sink import (
+    EMITTER_GATEWAY,
+    EMITTER_OPENCODE,
+    EvidenceError,
+    EvidenceRef,
+    find_unique_record,
+    resolve_evidence_ref,
+)
 
 # Decision values the gateway is known to emit (audit.py / app.py).
 KNOWN_DECISIONS = {"allow", "deny", "filter"}
@@ -533,4 +540,170 @@ def load_apply_result_from_sink(
         seq=rec.seq,
         record_hash=rec.record_hash,
         configured=True,
+    )
+
+
+# ---------------------------------------------- signed evidence graph (Step 6B linkage)
+# The two gateway-emitted record types the apply_result chains back to. Duplicated as bare
+# strings (like ``APPLY_RESULT_RECORD_TYPE``) so the verifier never imports the gateway.
+EXECUTE_VALIDATED_RECORD_TYPE = "execute_validated"
+APPROVAL_DECIDED_RECORD_TYPE = "approval_decided"
+_APPROVE_DECISION = "approve"
+
+
+@dataclass
+class LinkedEvidenceView:
+    """The result of walking the signed evidence graph ``apply_result → execute_validated →
+    approval_decided`` for one run, reduced to a verdict-ready view.
+
+    Every condition short of a fully-resolved graph is a **flag**, never an exception — the
+    verifier fails closed, it does not crash. ``linkage_present`` records whether the
+    ``apply_result`` even carries an ``execute_ref`` (so a legacy unsigned apply_result can
+    still fall back to INCONCLUSIVE when linkage is not required); ``broken`` means a link was
+    present but an edge or cross-record invariant did not hold (an integrity signal that fails
+    regardless of the required flag).
+    """
+
+    configured: bool = False       # a sink was supplied
+    chain_error: bool = False      # verify_chain rejected the whole log
+    apply_missing: bool = False    # no unique apply_result for this run/approval
+    linkage_present: bool = False  # the apply_result carries an execute_ref
+    linked: bool = False           # both edges resolved and all invariants held
+    broken: bool = False           # a present link failed to resolve/validate
+    decision: str | None = None
+    canonical_plan_hash: str | None = None
+    run_id: str | None = None
+    approval_id: str | None = None
+    apply_seq: int | None = None
+    execute_seq: int | None = None
+    approval_seq: int | None = None
+    reason: str = ""
+
+    @property
+    def usable(self) -> bool:
+        """True only for a fully-resolved signed graph on a verified chain."""
+        return self.configured and self.linked
+
+
+def _need(cond: bool, msg: str) -> None:
+    """Fail one graph edge/invariant closed with an :class:`EvidenceError`."""
+    if not cond:
+        raise EvidenceError(msg)
+
+
+def load_evidence_graph_from_sink(
+    evidence_sink,
+    *,
+    run_id: str | None = None,
+    approval_id: str | None = None,
+) -> LinkedEvidenceView:
+    """Verify the chain, then walk ``apply_result → execute_validated → approval_decided``.
+
+    Fail-closed and total (never raises). After the whole log re-derives, the unique signed
+    ``apply_result`` for this run is located; if it carries an ``execute_ref`` both edges are
+    resolved by :func:`openclaw.sink.resolve_evidence_ref` (unique ``evidence_id`` + recomputed
+    ``evidence_digest`` + ``record_type`` + ``sink_id`` — never ``seq``/``record_hash``) and
+    every cross-record invariant is checked (emitter is gateway, run/approval match, the
+    referenced decision is ``approve``, the canonical plan hash agrees, and each authority
+    record is unique for the approval). Any failure sets ``broken`` with a reason.
+    """
+    if evidence_sink is None:
+        return LinkedEvidenceView(configured=False, reason="no evidence sink supplied")
+
+    # The whole log must re-derive before any record it holds may be trusted (design §9c).
+    try:
+        evidence_sink.verify_chain()
+    except EvidenceError as exc:
+        return LinkedEvidenceView(
+            configured=True, chain_error=True, reason=f"sink chain did not verify: {exc}"
+        )
+
+    sink_id = getattr(evidence_sink, "sink_id", "")
+    records = tuple(getattr(evidence_sink, "records", ()))
+
+    # Anchor: the unique opencode apply_result for this run/approval.
+    try:
+        apply_rec = find_unique_record(
+            records,
+            emitter=EMITTER_OPENCODE,
+            record_type=APPLY_RESULT_RECORD_TYPE,
+            run_id=run_id,
+            approval_id=approval_id,
+        )
+    except EvidenceError as exc:
+        return LinkedEvidenceView(
+            configured=True, apply_missing=True, run_id=run_id, approval_id=approval_id,
+            reason=f"no unique signed apply_result: {exc}",
+        )
+
+    apply_env = apply_rec.envelope
+    apply_payload = apply_rec.payload if isinstance(apply_rec.payload, dict) else {}
+    base = dict(
+        configured=True,
+        run_id=getattr(apply_env, "run_id", None),
+        approval_id=getattr(apply_env, "approval_id", None),
+        apply_seq=apply_rec.seq,
+    )
+
+    # Legacy/unsigned apply_result: no execution edge present at all.
+    if "execute_ref" not in apply_payload:
+        return LinkedEvidenceView(
+            **base, linkage_present=False,
+            reason="apply_result carries no execute_ref (unsigned/legacy apply)",
+        )
+
+    try:
+        # --- edge: apply_result -> execute_validated ---
+        execute_ref = EvidenceRef.from_mapping(apply_payload["execute_ref"])
+        _need(execute_ref.record_type == EXECUTE_VALIDATED_RECORD_TYPE,
+              f"execute_ref record_type is {execute_ref.record_type!r}, not execute_validated")
+        exec_rec = resolve_evidence_ref(records, execute_ref, sink_id=sink_id)
+        exec_env = exec_rec.envelope
+        _need(exec_env.emitter == EMITTER_GATEWAY, "execute_validated emitter is not gateway")
+        _need(exec_env.run_id == apply_env.run_id, "execute_validated run_id mismatch")
+        _need(exec_env.approval_id == apply_env.approval_id,
+              "execute_validated approval_id mismatch")
+        # At most one execute_validated may be consumed for this approval.
+        uniq_exec = find_unique_record(
+            records, emitter=EMITTER_GATEWAY, record_type=EXECUTE_VALIDATED_RECORD_TYPE,
+            run_id=exec_env.run_id, approval_id=exec_env.approval_id,
+        )
+        _need(uniq_exec.envelope.evidence_id == exec_env.evidence_id,
+              "ambiguous execute_validated for this approval")
+        exec_payload = exec_rec.payload if isinstance(exec_rec.payload, dict) else {}
+
+        # --- edge: execute_validated -> approval_decided ---
+        _need("approval_ref" in exec_payload, "execute_validated carries no approval_ref")
+        approval_ref = EvidenceRef.from_mapping(exec_payload["approval_ref"])
+        _need(approval_ref.record_type == APPROVAL_DECIDED_RECORD_TYPE,
+              f"approval_ref record_type is {approval_ref.record_type!r}, not approval_decided")
+        appr_rec = resolve_evidence_ref(records, approval_ref, sink_id=sink_id)
+        appr_env = appr_rec.envelope
+        _need(appr_env.emitter == EMITTER_GATEWAY, "approval_decided emitter is not gateway")
+        _need(appr_env.run_id == exec_env.run_id, "approval_decided run_id mismatch")
+        _need(appr_env.approval_id == exec_env.approval_id,
+              "approval_decided approval_id mismatch")
+        uniq_appr = find_unique_record(
+            records, emitter=EMITTER_GATEWAY, record_type=APPROVAL_DECIDED_RECORD_TYPE,
+            run_id=appr_env.run_id, approval_id=appr_env.approval_id,
+        )
+        _need(uniq_appr.envelope.evidence_id == appr_env.evidence_id,
+              "ambiguous approval_decided for this approval")
+        appr_payload = appr_rec.payload if isinstance(appr_rec.payload, dict) else {}
+
+        # --- cross-record invariants ---
+        _need(appr_payload.get("decision") == _APPROVE_DECISION,
+              f"referenced approval decision is {appr_payload.get('decision')!r}, not approve")
+        _need(appr_payload.get("canonical_plan_hash") == exec_payload.get("canonical_plan_hash"),
+              "canonical_plan_hash differs between approval_decided and execute_validated")
+    except EvidenceError as exc:
+        return LinkedEvidenceView(**base, linkage_present=True, broken=True, reason=str(exc))
+
+    return LinkedEvidenceView(
+        **base, linkage_present=True, linked=True,
+        decision=_APPROVE_DECISION,
+        canonical_plan_hash=exec_payload.get("canonical_plan_hash"),
+        execute_seq=exec_rec.seq,
+        approval_seq=appr_rec.seq,
+        reason="signed evidence graph resolved: apply_result -> execute_validated -> approval_decided",
     )

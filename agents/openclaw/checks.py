@@ -24,9 +24,11 @@ from openclaw.evidence import (
     AuditLog,
     EvalReportView,
     IsolationReport,
+    LinkedEvidenceView,
     MetricSet,
     PolicyView,
     load_apply_result_from_sink,
+    load_evidence_graph_from_sink,
 )
 
 PASS = "pass"  # nosec B105 — control-status enum value, not a credential
@@ -69,6 +71,12 @@ class Evidence:
     approval_id: str | None = None
     require_signed_apply_evidence: bool = False
     applied_evidence: AppliedEvidenceView | None = None
+    # --- signed evidence-graph linkage (design step 6B) ---
+    # When set, the apply_result must resolve up the signed graph to an approved
+    # approval_decided; a missing/broken edge is then fail-closed rather than an unsigned
+    # fallback. Additive: defaults False so every existing ``Evidence(...)`` call is unchanged.
+    require_signed_linkage: bool = False
+    linked_evidence: LinkedEvidenceView | None = None
 
 
 # --------------------------------------------------------------------- AC-AUDIT-INTEGRITY
@@ -582,6 +590,108 @@ def check_apply_evidence_chain(ev: Evidence) -> Finding:
     )
 
 
+# ------------------------------------------------------------ AC-EVIDENCE-GRAPH
+def check_evidence_graph_linkage(ev: Evidence) -> Finding:
+    """Verify the signed evidence graph ``apply_result → execute_validated → approval_decided``.
+
+    Where ``check_apply_evidence_chain`` judges a single signed ``apply_result``, this control
+    asks whether that apply is *cryptographically linked* back to the approval that authorized
+    it: each edge is a Step 6A :class:`~openclaw.sink.EvidenceRef` (``evidence_id`` +
+    ``evidence_digest`` + ``record_type`` + ``sink_id``), resolved on a re-verified chain. It
+    is additive and preserves unsigned fallback: with no sink and linkage not required it is
+    INCONCLUSIVE, and a legacy apply_result carrying no ``execute_ref`` is INCONCLUSIVE unless
+    linkage is required. A link that is *present but broken* is an integrity signal and fails
+    closed regardless of the flag — an unsigned report can never substitute for a broken graph.
+    """
+    cid, title = "AC-EVIDENCE-GRAPH", "Signed evidence graph links apply to its approval"
+    required = ev.require_signed_linkage
+    view = ev.linked_evidence
+    if view is None:
+        view = load_evidence_graph_from_sink(
+            ev.evidence_sink, run_id=ev.run_id, approval_id=ev.approval_id
+        )
+
+    if not view.configured:
+        if required:
+            return Finding(
+                cid, title, FAIL, "high",
+                "signed evidence linkage is required but no evidence sink was supplied — an "
+                "unsigned apply_report.json cannot stand in for a signed graph. Fail closed.",
+            )
+        return Finding(
+            cid, title, INCONCLUSIVE, "info",
+            "no evidence sink supplied — the signed-linkage graph was not exercised.",
+        )
+
+    src = []
+    for seq in (view.apply_seq, view.execute_seq, view.approval_seq):
+        if seq is not None:
+            src.append(f"seq {seq}")
+
+    if view.chain_error:
+        return Finding(
+            cid, title, FAIL, "high",
+            f"the evidence sink's chain did not verify ({view.reason}) — no record it holds, "
+            "and no link between records, can be trusted.",
+            evidence=src,
+        )
+
+    if view.apply_missing:
+        if required:
+            return Finding(
+                cid, title, FAIL, "high",
+                "no unique signed apply_result matches this run, but signed linkage is "
+                "required — absence of the anchor record is fail-closed, not a pass.",
+                evidence=src,
+            )
+        return Finding(
+            cid, title, INCONCLUSIVE, "info",
+            "the evidence sink holds no unique apply_result for this run — nothing to link.",
+            evidence=src,
+        )
+
+    if not view.linkage_present:
+        if required:
+            return Finding(
+                cid, title, FAIL, "high",
+                "the signed apply_result carries no execute_ref but signed linkage is required "
+                "— an unlinked apply cannot be affirmed as authorized. Fail closed.",
+                evidence=src,
+            )
+        return Finding(
+            cid, title, INCONCLUSIVE, "info",
+            "the signed apply_result carries no execute_ref (legacy/unsigned-linkage apply) — "
+            "linkage not required, so file-mode judgement stands.",
+            evidence=src,
+        )
+
+    if view.broken:
+        return Finding(
+            cid, title, FAIL, "high",
+            f"the signed evidence graph is present but did not resolve ({view.reason}). A "
+            "broken or forged link between authorization and execution is a tamper signal — "
+            "and an unsigned report cannot rescue it. Fail closed.",
+            evidence=src,
+        )
+
+    if view.linked:
+        return Finding(
+            cid, title, PASS, "info",
+            "the apply is bound by a signed graph to the approval that authorized it: "
+            f"apply_result (seq {view.apply_seq}) → execute_validated (seq {view.execute_seq}) "
+            f"→ approval_decided (seq {view.approval_seq}, decision=approve), one canonical "
+            "plan hash throughout.",
+            evidence=src,
+        )
+
+    # Defensive: an unclassified view is never a pass.
+    return Finding(
+        cid, title, INCONCLUSIVE, "info",
+        f"signed evidence graph could not be classified ({view.reason}).",
+        evidence=src,
+    )
+
+
 ALL_CHECKS = [
     check_audit_integrity,
     check_autonomy_ceiling,
@@ -607,4 +717,12 @@ def run_all(ev: Evidence) -> list[Finding]:
     findings = [check(ev) for check in ALL_CHECKS]
     if ev.evidence_sink is not None or ev.require_signed_apply_evidence:
         findings.append(check_apply_evidence_chain(ev))
+    # The signed-linkage graph (design step 6B) is gated the same way — plus its own
+    # required flag — so a no-sink, non-required run stays byte-identical to the historical set.
+    if (
+        ev.evidence_sink is not None
+        or ev.require_signed_apply_evidence
+        or ev.require_signed_linkage
+    ):
+        findings.append(check_evidence_graph_linkage(ev))
     return findings

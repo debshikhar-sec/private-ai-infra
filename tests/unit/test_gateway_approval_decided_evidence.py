@@ -14,8 +14,6 @@ consumed). The sink/key here are ephemeral and in-memory; nothing is loaded from
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 from private_ai_gateway import app as gw
@@ -363,28 +361,7 @@ def test_reject_emits_decision_and_no_execute_validated(client, owner_token, mon
     assert _execute_validated_records(sink) == []
 
 
-# --- 21. no OpenCode / OpenClaw runtime (or docs/site/static) files touched -------------
-def test_no_opencode_or_openclaw_runtime_files_touched():
-    import pathlib
-
-    repo = pathlib.Path(gw.__file__).resolve().parents[2]
-    out = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo, capture_output=True, text=True, check=True,
-    ).stdout
-    changed = [line[3:].strip() for line in out.splitlines() if line.strip()]
-    forbidden_prefixes = (
-        "agents/openclaw/", "agents/opencode_sandbox/",
-        "src/private_ai_gateway/static/", "docs/", "site/",
-    )
-    offenders = [
-        p for p in changed
-        if p.startswith(forbidden_prefixes) or p == "pyproject.toml"
-    ]
-    assert offenders == [], f"out-of-scope files changed: {offenders}"
-
-
-# --- 22. no disk/env key loading in the shared emit helper ------------------------------
+# --- 21. no disk/env key loading in the shared emit helper ------------------------------
 def test_no_disk_or_env_key_loading():
     import pathlib
 

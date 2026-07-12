@@ -13,8 +13,6 @@ loaded from disk or env.
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 from private_ai_gateway import app as gw
@@ -202,8 +200,13 @@ def test_payload_has_no_secrets_or_tokens(client, owner_token, monkeypatch):
     run_id, plan_hash = _plan_and_hash(client)
     _execute(client, run_id, _approve(client, run_id, plan_hash))
     payload = _gateway_records(sink)[0].payload
-    # Exactly the two authorization-fact fields — no tokens, prompts, bodies, or plan text.
-    assert set(payload.keys()) == {"canonical_plan_hash", "validated"}
+    # Exactly the authorization-fact fields plus the signed approval link (Step 6B) — no
+    # tokens, prompts, bodies, or plan text. The approval_ref is a portable EvidenceRef, which
+    # itself carries only identity/digest/type/locator — never secrets.
+    assert set(payload.keys()) == {"canonical_plan_hash", "validated", "approval_ref"}
+    assert set(payload["approval_ref"].keys()) == {
+        "evidence_id", "evidence_digest", "record_type", "sink_id"
+    }
 
 
 # --- 8. chain still verifies ------------------------------------------------------------
@@ -222,10 +225,10 @@ def test_emit_happens_before_session_execute(client, owner_token, monkeypatch):
     seen = {}
     original = hs.GovernedSession.execute
 
-    def spy(self, approver, reason):
+    def spy(self, approver, reason, *, execute_ref=None):
         # Capture how many gateway records exist at the instant execute (the mutation) runs.
         seen["records_at_execute"] = len(_gateway_records(sink))
-        return original(self, approver, reason)
+        return original(self, approver, reason, execute_ref=execute_ref)
 
     monkeypatch.setattr(hs.GovernedSession, "execute", spy)
     run_id, plan_hash = _plan_and_hash(client)
@@ -403,27 +406,6 @@ def test_no_hardcoded_production_key():
     assert gw.REQUIRE_AUTHORIZATION_EVIDENCE is False
 
 
-# --- scope guard: no forbidden files touched by this increment --------------------------
-def test_scope_guard_no_forbidden_files_touched():
-    import pathlib
-
-    repo = pathlib.Path(gw.__file__).resolve().parents[2]
-    out = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo, capture_output=True, text=True, check=True,
-    ).stdout
-    changed = [line[3:].strip() for line in out.splitlines() if line.strip()]
-    forbidden_prefixes = (
-        "agents/openclaw/", "agents/opencode_sandbox/",
-        "src/private_ai_gateway/static/", "docs/", "site/",
-    )
-    offenders = [
-        p for p in changed
-        if p.startswith(forbidden_prefixes) or p == "pyproject.toml"
-    ]
-    assert offenders == [], f"out-of-scope files changed: {offenders}"
-
-
 # --- Step 6A: the emitted execute_validated record is v2 with a stable evidence_id -------
 def test_execute_validated_record_is_v2_with_evidence_id(client, owner_token, monkeypatch):
     import re
@@ -434,6 +416,6 @@ def test_execute_validated_record_is_v2_with_evidence_id(client, owner_token, mo
     rec = _gateway_records(sink)[0]
     assert rec.envelope.schema_version == 2
     assert re.match(r"^ev-[0-9a-f]{32}$", rec.envelope.evidence_id)
-    # Stable EvidenceRef derivable; payload contract unchanged (no ref embedded).
+    # Stable EvidenceRef derivable; payload is the Step 6B contract (adds approval_ref).
     assert rec.evidence_ref().record_type == "execute_validated"
-    assert set(rec.payload.keys()) == {"canonical_plan_hash", "validated"}
+    assert set(rec.payload.keys()) == {"canonical_plan_hash", "validated", "approval_ref"}

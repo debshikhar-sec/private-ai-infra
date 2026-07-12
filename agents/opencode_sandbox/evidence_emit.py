@@ -31,6 +31,7 @@ from openclaw.sink import (
     SCHEMA_VERSION,
     AppendedRecord,
     EvidenceError,
+    EvidenceRef,
     SigningEnvelope,
     new_evidence_id,
     payload_digest,
@@ -40,14 +41,24 @@ from openclaw.sink import (
 RECORD_TYPE_APPLY_RESULT = "apply_result"
 
 
-def build_apply_result_payload(report: Any) -> dict:
+def build_apply_result_payload(report: Any, execute_ref: Any = None) -> dict:
     """The ``apply_result`` payload for ``report`` — its compact, JSON-only record.
 
     Delegates to ``report.to_record()`` (the executor's existing secret-free hand-off), so the
     sink payload mirrors what the apply already produces. Pure: it does not mutate ``report``
     and adds **no** ``run_id``/``approval_id`` — those bind at the envelope layer, not here.
+
+    Step 6B: when ``execute_ref`` is supplied it must be an :class:`EvidenceRef` (the gateway's
+    signed ``execute_validated`` reference, threaded in through the internal session boundary);
+    its mapping is added as the single new ``execute_ref`` field so the execution edge is bound
+    through ``payload_hash``. A malformed ref fails closed rather than emit an unlinked record.
     """
-    return report.to_record()
+    payload = report.to_record()
+    if execute_ref is not None:
+        if not isinstance(execute_ref, EvidenceRef):
+            raise EvidenceError(f"{REASON_MALFORMED}: execute_ref must be an EvidenceRef")
+        payload["execute_ref"] = execute_ref.to_mapping()
+    return payload
 
 
 def emit_apply_result(
@@ -61,6 +72,7 @@ def emit_apply_result(
     report: Any,
     nonce: str | None = None,
     ts: str | None = None,
+    execute_ref: Any = None,
 ) -> AppendedRecord:
     """Build, sign, and submit a signed ``apply_result`` record; return the appended record.
 
@@ -68,6 +80,10 @@ def emit_apply_result(
     (``REASON_MALFORMED``) before any work, and the sink's own validation (unknown key,
     sink-id mismatch, bad signature, replay) raises through unchanged. Deterministic given a
     fixed ``nonce``/``ts``; otherwise a fresh ``nonce`` and the report's timestamp are used.
+
+    Step 6B: an optional ``execute_ref`` (the gateway's signed ``execute_validated``
+    :class:`EvidenceRef`) is bound into the payload as the single new ``execute_ref`` field.
+    When ``None`` the record is byte-identical to before (default/no-linkage compatibility).
     """
     if evidence_sink is None:
         raise EvidenceError(f"{REASON_MALFORMED}: evidence_sink is required to emit")
@@ -80,7 +96,7 @@ def emit_apply_result(
     if not emitter_key_id:
         raise EvidenceError(f"{REASON_MALFORMED}: emitter_key_id is required")
 
-    payload = build_apply_result_payload(report)
+    payload = build_apply_result_payload(report, execute_ref)
     payload_hash = payload_digest(payload)
     envelope = SigningEnvelope(
         schema_version=SCHEMA_VERSION,

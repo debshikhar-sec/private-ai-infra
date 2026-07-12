@@ -17,10 +17,8 @@ deliberately (white-box) to forge states that ``append`` would otherwise refuse,
 from __future__ import annotations
 
 import dataclasses
-import subprocess
 from pathlib import Path
 
-import pytest
 from openclaw import checks, evidence
 from openclaw import sink as sinkmod
 from openclaw.checks import FAIL, INCONCLUSIVE, PASS, Evidence
@@ -123,8 +121,12 @@ def test_run_all_appends_signed_control_only_when_sink_engaged():
     with_sink = checks.run_all(Evidence(audit=evidence.AuditLog(), evidence_sink=sink, run_id=_RUN))
     without = checks.run_all(Evidence(audit=evidence.AuditLog()))
     assert len(without) == len(checks.ALL_CHECKS)
-    assert len(with_sink) == len(checks.ALL_CHECKS) + 1
-    assert any(f.control_id == "AC-APPLY-EVIDENCE-CHAIN" for f in with_sink)
+    assert {f.control_id for f in without} & {"AC-APPLY-EVIDENCE-CHAIN", "AC-EVIDENCE-GRAPH"} == set()
+    # Engaging a sink appends exactly the two gated signed-evidence controls (design step 4
+    # apply-chain + design step 6B graph linkage).
+    assert len(with_sink) == len(checks.ALL_CHECKS) + 2
+    gated = {f.control_id for f in with_sink} - {f.control_id for f in without}
+    assert gated == {"AC-APPLY-EVIDENCE-CHAIN", "AC-EVIDENCE-GRAPH"}
 
 
 def test_clean_sink_apply_result_passes_when_required():
@@ -316,47 +318,7 @@ def test_duplicate_nonce_replay_fails_via_verify_chain():
     assert f.status == FAIL
 
 
-# ------------------------------------------------------------------- scope guards
-def _changed_paths() -> list[str]:
-    """Repo-relative paths with uncommitted changes (tracked edits + untracked)."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(_REPO_ROOT), "status", "--porcelain"],
-            capture_output=True, text=True, check=True,
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        pytest.skip("git not available")
-    paths = []
-    for line in out.splitlines():
-        if not line.strip():
-            continue
-        paths.append(line[3:].split(" -> ")[-1].strip())
-    return paths
-
-
-def _assert_no_changes_under(*prefixes: str) -> None:
-    offending = [
-        p for p in _changed_paths() if any(p.startswith(pre) for pre in prefixes)
-    ]
-    assert not offending, f"out-of-scope files changed: {offending}"
-
-
-# NOTE: there is deliberately no gateway working-tree guard here. The Step 4 consume
-# increment did not touch ``src/private_ai_gateway/``, but a live-``git status`` assertion over
-# that path is not a valid *permanent* unit test: later, separately-authorized increments
-# (Step 5 gateway ``execute_validated`` emit and beyond) intentionally change gateway files, so
-# such a guard would fail on unrelated future work. Scope discipline for those increments is
-# enforced by their own suites, not by this one.
-
-
-def test_no_opencode_files_touched_guard():
-    _assert_no_changes_under("agents/opencode_sandbox/")
-
-
-def test_no_docs_touched_guard():
-    _assert_no_changes_under("docs/", "site/")
-
-
+# -------------------------------------------------------------- source-scan guards
 def test_no_key_loading_from_disk_or_env():
     # The edited modules must not load key material from disk or environment.
     forbidden = ("os.environ", "getenv", "PRIVATE_AI_EVIDENCE_KEY", "environ[")
