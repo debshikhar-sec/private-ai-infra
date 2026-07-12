@@ -120,9 +120,19 @@ def _install_failing_sink(monkeypatch, *, require):
 
 
 def _gateway_records(sink):
+    """Gateway `execute_validated` records only.
+
+    Since Step 5b, the gateway also emits `approval_decided` records into the same sink, so
+    filtering on emitter alone is no longer specific to this suite. These Step 5 assertions
+    count the execute-authorization record precisely by also matching its record_type.
+    """
     from openclaw.sink import EMITTER_GATEWAY
 
-    return [r for r in sink.records if r.envelope.emitter == EMITTER_GATEWAY]
+    return [
+        r for r in sink.records
+        if r.envelope.emitter == EMITTER_GATEWAY
+        and r.envelope.record_type == "execute_validated"
+    ]
 
 
 # --- 1. no-sink compatibility -----------------------------------------------------------
@@ -262,9 +272,13 @@ def test_no_emit_on_already_used_approval(client, owner_token, monkeypatch):
 def test_require_authorization_evidence_denies_execute_when_emit_fails(
     client, owner_token, monkeypatch
 ):
-    _install_failing_sink(monkeypatch, require=True)
+    # Since Step 5b the require flag also gates the approval decision, so obtain the approval
+    # first (best-effort), then make the *execute* emit fail under require to isolate this gate.
+    _install_sink(monkeypatch, require=False)
     run_id, plan_hash = _plan_and_hash(client)
     approval_id = _approve(client, run_id, plan_hash)
+    monkeypatch.setattr(gw, "EVIDENCE_SINK", _FailingSink())
+    monkeypatch.setattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", True)
     ex = _execute(client, run_id, approval_id)
     assert ex["applied"] is False and ex["verdict"] == "REFUSED"
     assert ex["refusal_reason"] == "authorization_evidence_unavailable"
@@ -285,11 +299,12 @@ def test_require_false_preserves_execute_when_emit_fails(client, owner_token, mo
 def test_require_authorization_evidence_denies_execute_when_no_sink(
     client, owner_token, monkeypatch
 ):
-    # Required, but no evidence plane is configured: fail closed before any mutation.
-    monkeypatch.setattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", True)
+    # Required, but no evidence plane is configured: fail closed before any mutation. Obtain
+    # the approval first (no sink, not required), then require evidence for the execute.
     assert gw.EVIDENCE_SINK is None
     run_id, plan_hash = _plan_and_hash(client)
     approval_id = _approve(client, run_id, plan_hash)
+    monkeypatch.setattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", True)
     ex = _execute(client, run_id, approval_id)
     assert ex["applied"] is False and ex["verdict"] == "REFUSED"
     assert ex["refusal_reason"] == "authorization_evidence_unavailable"
@@ -304,10 +319,12 @@ def test_require_authorization_evidence_denies_execute_when_key_missing(
     client, owner_token, monkeypatch
 ):
     # A sink is present but the gateway signing key is absent: fail closed under require.
-    _install_sink(monkeypatch, require=True)
-    monkeypatch.setattr(gw, "EVIDENCE_KEY", None)
+    # Approve first (not required), then drop the key and require evidence for the execute.
+    _install_sink(monkeypatch, require=False)
     run_id, plan_hash = _plan_and_hash(client)
     approval_id = _approve(client, run_id, plan_hash)
+    monkeypatch.setattr(gw, "EVIDENCE_KEY", None)
+    monkeypatch.setattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", True)
     ex = _execute(client, run_id, approval_id)
     assert ex["applied"] is False and ex["verdict"] == "REFUSED"
     assert ex["refusal_reason"] == "authorization_evidence_unavailable"
@@ -332,14 +349,18 @@ def test_no_evidence_refs_populated_yet(client, owner_token, monkeypatch):
     assert gw.APPROVAL_STORE.get_approval(approval_id).evidence_refs == ()
 
 
-# --- 17. only execute_validated is emitted ----------------------------------------------
-def test_no_approval_decided_record_emitted(client, owner_token, monkeypatch):
+# --- 17. execute still emits exactly one execute_validated (approval_decided co-exists) ---
+def test_execute_emits_single_execute_validated_alongside_approval_decided(
+    client, owner_token, monkeypatch
+):
+    # Since Step 5b the approve also emits an `approval_decided` record into the same sink.
+    # The Step 5 guarantee is unchanged: the execute step emits exactly one `execute_validated`.
     sink = _install_sink(monkeypatch)
     run_id, plan_hash = _plan_and_hash(client)
     _execute(client, run_id, _approve(client, run_id, plan_hash))
     types = {r.envelope.record_type for r in sink.records}
-    assert "approval_decided" not in types
-    assert types == {"execute_validated"}
+    assert types == {"approval_decided", "execute_validated"}
+    assert len(_gateway_records(sink)) == 1  # exactly one execute_validated
 
 
 # --- 18. OpenClaw apply_result consume ignores the gateway record -----------------------
@@ -366,8 +387,9 @@ def test_no_disk_or_env_key_loading():
     orch_src = (root / "orchestration.py").read_text(encoding="utf-8")
     # The emit helper resolves its key only from the injected gateway attributes — never from
     # the environment or a file. Guard against a regression that reads a key from disk/env.
-    emit_region = orch_src[orch_src.index("_emit_execute_validated"):]
-    emit_region = emit_region[: emit_region.index("def run_phase")]
+    # Cover the whole shared emit core + both thin wrappers (Step 5b generalized the helper).
+    emit_region = orch_src[orch_src.index("def _emit_gateway_evidence"):]
+    emit_region = emit_region[: emit_region.index("def _execute_refusal")]
     for forbidden in ("os.environ", "os.getenv", "getenv(", "open("):
         assert forbidden not in emit_region, f"emit helper must not use {forbidden!r}"
 
