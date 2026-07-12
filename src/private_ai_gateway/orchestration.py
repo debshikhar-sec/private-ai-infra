@@ -228,25 +228,32 @@ _REFUSAL_MESSAGES = {
     ),
 }
 
-# Step 5 — gateway authorization evidence emit ------------------------------------------
-# When execution authority is granted (approval validated + single-use consumed) and BEFORE
-# any mutation, the gateway emits ONE signed `execute_validated` record into an injected,
-# verifier-owned EvidenceSink. Additive by design: with no sink configured the gateway
-# behaves exactly as before. Deliberately narrow — no evidence_refs, no OpenClaw consume, no
-# runtime fail-closed integration; those are later, separately-authorized increments.
+# Step 5 / 5b — gateway authorization evidence emit -------------------------------------
+# The gateway emits ONE signed authorization record into an injected, verifier-owned
+# EvidenceSink at two authority points, sharing a single emit core:
+#   * Step 5  — `execute_validated`: when execution authority is granted (approval validated
+#     + single-use consumed) and BEFORE any mutation (orchestration._run_execute).
+#   * Step 5b — `approval_decided`: when an approval decision (approve OR reject) is recorded
+#     at /v1/approvals, BEFORE the approval response is returned (app.v1_approvals).
+# Additive by design: with no sink configured the gateway behaves exactly as before.
+# Deliberately narrow — no evidence_refs, no OpenClaw consume, no runtime fail-closed
+# integration; those are later, separately-authorized increments.
 REASON_EVIDENCE_UNAVAILABLE = "authorization_evidence_unavailable"
 _EXECUTE_VALIDATED_RECORD_TYPE = "execute_validated"
+_APPROVAL_DECIDED_RECORD_TYPE = "approval_decided"
 
 
-def _emit_execute_validated(
-    gw, *, run_id: str, approval_id: str, canonical_plan_hash: str
+def _emit_gateway_evidence(
+    gw, *, run_id: str, approval_id: str, record_type: str, payload: dict, log_label: str
 ) -> bool:
-    """Emit one signed ``execute_validated`` record; return True iff execution may proceed.
+    """Emit one signed gateway evidence record; return True iff the caller may proceed.
 
-    Reads the sink/key/key_id/require-flag injection points off ``gw`` (the app module). The
-    ``REQUIRE_AUTHORIZATION_EVIDENCE`` flag decides every failure uniformly — when False, any
-    unavailability is best-effort (log + proceed, True); when True, any unavailability is
-    fail-closed (False, so the caller refuses before any mutation):
+    Shared core for every gateway authorization record (``execute_validated``,
+    ``approval_decided``). Reads the sink/key/key_id/require-flag injection points off ``gw``
+    (the app module). The ``REQUIRE_AUTHORIZATION_EVIDENCE`` flag decides every failure
+    uniformly — when False, any unavailability is best-effort (log + proceed, True); when
+    True, any unavailability is fail-closed (False, so the caller refuses before the outcome
+    it guards):
 
       * no sink configured -> require False: proceed silently (byte-identical old behavior);
         require True: deny (the authorization record cannot be recorded).
@@ -256,7 +263,8 @@ def _emit_execute_validated(
     Never raises to the caller: an unexpected error is contained and mapped onto the same
     require-flag policy, and the internal detail stays in the server log (never the client).
     The record binds ``run_id``/``approval_id`` in the *signing envelope* (sink convention);
-    the payload carries only the apply-authorization fact — no secrets, tokens, or plan text.
+    the caller-supplied ``payload`` carries only the authorization fact — the caller is
+    responsible for excluding secrets, tokens, prompts, and free text.
     """
     sink = getattr(gw, "EVIDENCE_SINK", None)
     require = bool(getattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", False))
@@ -265,7 +273,7 @@ def _emit_execute_validated(
         if require:
             # Fail closed: authorization evidence is required but no sink is configured.
             logger.warning(
-                f"EXECUTE_VALIDATED_EMIT_UNAVAILABLE | run_id={log_safe(run_id)} "
+                f"{log_label}_EMIT_UNAVAILABLE | run_id={log_safe(run_id)} "
                 "| detail=authorization evidence required but no sink is configured"
             )
             return False
@@ -274,7 +282,7 @@ def _emit_execute_validated(
     def _fail(detail: str) -> bool:
         """Apply the require-flag policy to any evidence failure, in one place."""
         logger.warning(
-            f"EXECUTE_VALIDATED_EMIT_FAILED | run_id={log_safe(run_id)} "
+            f"{log_label}_EMIT_FAILED | run_id={log_safe(run_id)} "
             f"| detail={log_safe(detail)}"
         )
         return not require  # proceed when best-effort; deny when evidence is required
@@ -293,11 +301,10 @@ def _emit_execute_validated(
             payload_digest,
             sign_envelope,
         )
-    except ImportError as exc:  # pragma: no cover - agents path is ensured before execute
+    except ImportError as exc:  # pragma: no cover - agents path is ensured before emit
         return _fail(f"evidence sink module unavailable: {exc}")
 
     try:
-        payload = {"canonical_plan_hash": canonical_plan_hash, "validated": True}
         envelope = SigningEnvelope(
             schema_version=SCHEMA_VERSION,
             sink_id=sink.sink_id,
@@ -305,7 +312,7 @@ def _emit_execute_validated(
             approval_id=approval_id,
             emitter=EMITTER_GATEWAY,
             emitter_key_id=key_id,
-            record_type=_EXECUTE_VALIDATED_RECORD_TYPE,
+            record_type=record_type,
             payload_hash=payload_digest(payload),
             ts=datetime.now(timezone.utc).isoformat(),
             nonce=uuid.uuid4().hex,
@@ -314,9 +321,50 @@ def _emit_execute_validated(
         sink.append(envelope, payload, sig)
     except EvidenceError as exc:
         return _fail(f"evidence emit rejected: {exc}")
-    except Exception as exc:  # defensive: an emit bug must never crash a governed execute
+    except Exception as exc:  # defensive: an emit bug must never crash a governed decision
         return _fail(f"unexpected evidence emit error: {exc}")
     return True
+
+
+def _emit_execute_validated(
+    gw, *, run_id: str, approval_id: str, canonical_plan_hash: str
+) -> bool:
+    """Emit one signed ``execute_validated`` record; return True iff execution may proceed.
+
+    Thin wrapper over :func:`_emit_gateway_evidence`. The payload carries only the
+    apply-authorization fact — no secrets, tokens, or plan text.
+    """
+    return _emit_gateway_evidence(
+        gw,
+        run_id=run_id,
+        approval_id=approval_id,
+        record_type=_EXECUTE_VALIDATED_RECORD_TYPE,
+        payload={"canonical_plan_hash": canonical_plan_hash, "validated": True},
+        log_label="EXECUTE_VALIDATED",
+    )
+
+
+def _emit_approval_decided(
+    gw, *, run_id: str, approval_id: str, decision: str, approver: str, canonical_plan_hash: str
+) -> bool:
+    """Emit one signed ``approval_decided`` record; return True iff the decision may stand.
+
+    Thin wrapper over :func:`_emit_gateway_evidence`, for both approve and reject. The
+    payload carries only the decision fact ``{decision, approver, canonical_plan_hash}`` —
+    the free-text rejection reason is deliberately excluded from the signed record.
+    """
+    return _emit_gateway_evidence(
+        gw,
+        run_id=run_id,
+        approval_id=approval_id,
+        record_type=_APPROVAL_DECIDED_RECORD_TYPE,
+        payload={
+            "decision": decision,
+            "approver": approver,
+            "canonical_plan_hash": canonical_plan_hash,
+        },
+        log_label="APPROVAL_DECIDED",
+    )
 
 
 def _execute_refusal(run_id: str, reason_code: str) -> dict:

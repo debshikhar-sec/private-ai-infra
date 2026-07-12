@@ -107,14 +107,15 @@ DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=S
 # validation and the approval decision endpoint arrive in a later step.
 APPROVAL_STORE = ApprovalStore()
 
-# Step 5 — gateway authorization evidence emit: injection points ONLY (additive).
-# When execution authority is granted, the gateway can emit a signed `execute_validated`
-# record into a verifier-owned EvidenceSink (see orchestration._run_execute). Production
-# defaults to no sink, so behavior is byte-identical to before. No key material is ever
-# loaded from disk or env here — a caller (a test, or a later, separately-authorized wiring
-# step) sets these. With REQUIRE_AUTHORIZATION_EVIDENCE True a configured-but-failing emit
-# denies execution *before* any mutation; with it False (default) emit is best-effort and
-# never changes the governed outcome.
+# Step 5 / 5b — gateway authorization evidence emit: injection points ONLY (additive).
+# The gateway can emit signed authorization records into a verifier-owned EvidenceSink at two
+# points: `execute_validated` when execution authority is granted (orchestration._run_execute)
+# and `approval_decided` when an approval decision is recorded (v1_approvals). Production
+# defaults to no sink, so behavior is byte-identical to before. No key material is ever loaded
+# from disk or env here — a caller (a test, or a later, separately-authorized wiring step) sets
+# these. With REQUIRE_AUTHORIZATION_EVIDENCE True a configured-but-failing emit fails closed
+# *before* the outcome it guards (execution refused / approval denied + run invalidated); with
+# it False (default) emit is best-effort and never changes the governed outcome.
 EVIDENCE_SINK = None
 EVIDENCE_KEY = None
 EVIDENCE_KEY_ID = ""
@@ -727,6 +728,39 @@ def v1_approvals():
                        "type": "invalid_request_error",
                        "code": "approval_error"}}
         ), 409
+
+    # Step 5b — gateway authorization evidence emit. With a verifier-owned EvidenceSink
+    # injected, emit ONE signed `approval_decided` record (approve or reject) before returning
+    # the decision. Default (no sink) is byte-identical to before. Under
+    # REQUIRE_AUTHORIZATION_EVIDENCE the record MUST land: if it cannot, fail closed —
+    # invalidate the run (so the just-recorded approval can never be used at execute) and
+    # return a static, client-safe refusal rather than a normal approval body.
+    from private_ai_gateway import orchestration
+
+    if not orchestration._emit_approval_decided(
+        sys.modules[__name__],
+        run_id=run_id,
+        approval_id=record.approval_id,
+        decision=decision,
+        approver=principal.name,
+        canonical_plan_hash=record.canonical_plan_hash,
+    ):
+        APPROVAL_STORE.invalidate_run(run_id)
+        # Audit the governed refusal (a decision that required evidence but could not record
+        # it must not be a silent gap); the internal emit detail stays in the server log only.
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny",
+            reason=f"authorization_evidence_unavailable:{run_id}",
+            status=503, run_id=run_id,
+        )
+        return jsonify(
+            {"error": {"message": "The approval evidence record could not be recorded — "
+                                  "approval denied",
+                       "type": "server_error",
+                       "code": "authorization_evidence_unavailable"}}
+        ), 503
 
     DECISION_LOG.record(
         request_id=getattr(g, "request_id", ""), principal=principal.name,
