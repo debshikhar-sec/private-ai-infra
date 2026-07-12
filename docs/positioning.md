@@ -52,7 +52,7 @@ audit trail in which every deny carries a stable machine-readable code.
 ## What the moat is — and is not
 
 **Is:** the policy model itself (two-axis skill-vs-autonomy rule, attenuation-only
-chains), proven by a large automated test suite (612 tests), an adversarial eval suite,
+chains), proven by a large automated test suite (636 tests), an adversarial eval suite,
 and a reproducible three-agent orchestration demo; a governed execute authority loop
 (owner-gated, single-use, canonical-hash-bound approvals) and a verifier-owned,
 tamper-evident evidence sink core now build on top; local-first architecture that
@@ -74,10 +74,15 @@ evidence from an injected sink (component-level verification — unit-proven, so
 emitting a signed `execute_validated` authorization record when execution authority is
 granted (component-level gateway authorization evidence emit — after approval validation
 and `mark_used`, before `session.execute`, with a backward-compatible no-sink default and a
-`REQUIRE_AUTHORIZATION_EVIDENCE` strict mode that denies before mutation), a Governance
+`REQUIRE_AUTHORIZATION_EVIDENCE` strict mode that denies before mutation), the gateway
+emitting a signed `approval_decided` decision record when an owner approves or rejects
+(component-level decision evidence emit — after the decision is stored and before the success
+response, payload exactly `{decision, approver, canonical_plan_hash}`, with the same
+backward-compatible no-sink default and `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode that
+invalidates the run and denies HTTP 503 `authorization_evidence_unavailable`), a Governance
 Console (incl. a conversational `/chat`), an offline demo, CI with security gates, and
 this analysis. What is **future, not built**: end-to-end gateway-issued `run_id` /
-`approval_id` wiring, the `approval_decided` authorization record, linking the gateway and
+`approval_id` wiring, linking the gateway and
 OpenCode records through `evidence_refs`, fail-closed runtime evidence enforcement, a trust
 ledger, earned autonomy, and any Hermes local training/offload — so this proves
 component-level consume/verification and gateway authorization evidence emit, not full

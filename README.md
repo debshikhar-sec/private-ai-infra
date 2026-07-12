@@ -212,8 +212,18 @@ authorized and what then happened. Merged today:
   mutation if authorization evidence is unavailable. This is **component-level gateway
   authorization evidence emit, not full runtime fail-closed enforcement**, and the gateway
   and OpenCode records are **not yet linked through `evidence_refs`**.
+- **Gateway emits signed `approval_decided` decision evidence** — when an owner approves or
+  rejects at `POST /v1/approvals`, the gateway can now emit a signed `approval_decided`
+  record after the decision is stored and **before** the success response. The payload
+  contains exactly `decision`, `approver`, and `canonical_plan_hash`; `run_id` and
+  `approval_id` stay in the evidence envelope, and the free-text rejection reason is
+  excluded. The default no-sink behavior is backward-compatible, and under
+  `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit **invalidates the run and its active
+  approvals** and denies with HTTP 503 `authorization_evidence_unavailable` (no sink/key
+  internals exposed). This is **component-level decision evidence emit**, not linked through
+  `evidence_refs` and not runtime fail-closed enforcement.
 
-**Not done yet** (and *not* claimed): `approval_decided`, `evidence_refs` population, and
+**Not done yet** (and *not* claimed): `evidence_refs` population and
 **runtime fail-closed integration** on missing/invalid evidence remain future milestones,
 as do the **trust ledger** and **earned autonomy** that would sit on top. Autonomy stays
 fixed-ceiling by policy — no self-approval, no earned-trust escalation.
@@ -370,8 +380,9 @@ docs/                     # architecture, security & threat model, orchestration
 - **Evidence integrity is maturing.** The signed, chained evidence sink is
   **tamper-evident, not non-repudiation**. OpenClaw now consumes and validates signed
   `apply_result` evidence from an injected sink, and the gateway now emits signed
-  `execute_validated` authorization evidence when execution authority is granted (both
-  component-level, unit-proven); `approval_decided`, `evidence_refs`, runtime fail-closed
+  `execute_validated` authorization evidence when execution authority is granted, and emits
+  signed `approval_decided` decision evidence when an owner approves or rejects (all
+  component-level, unit-proven); `evidence_refs`, runtime fail-closed
   integration, a trust ledger, and earned autonomy remain **future**. This is a governed,
   human-in-authority system — **not** fully autonomous.
 

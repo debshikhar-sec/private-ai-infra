@@ -4,12 +4,12 @@
 > OpenCode **`apply_result` emit** (`agents/opencode_sandbox/evidence_emit.py`),
 > **OpenClaw's consume/validation** of that signed evidence from an injected sink
 > (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`), and the gateway
-> **`execute_validated` authorization evidence emit** (`src/private_ai_gateway/orchestration.py`,
-> `app.py`) are now built and unit-proven — component-level verification and gateway
-> authorization evidence emit, not yet end-to-end gateway-issued `run_id` / `approval_id`
-> wiring, and the gateway and OpenCode records are not yet linked through `evidence_refs`.
-> The remaining steps in this spec — the **`approval_decided`** authorization record,
-> **`evidence_refs` population**, and **fail-closed runtime integration** — are still
+> **`execute_validated` and `approval_decided` authorization evidence emits**
+> (`src/private_ai_gateway/orchestration.py`, `app.py`) are now built and unit-proven —
+> component-level verification and gateway authorization evidence emit, not yet end-to-end
+> gateway-issued `run_id` / `approval_id` wiring, and the gateway and OpenCode records are
+> not yet linked through `evidence_refs`. The remaining steps in this spec —
+> **`evidence_refs` population** and **fail-closed runtime integration** — are still
 > design-only and gated behind later, separately-authorized increments.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
@@ -153,16 +153,16 @@ One JSON object per record. Field order below is the canonical order for hashing
 
 | `event_type` | Emitter | Payload (indicative) | MVP status |
 |---|---|---|---|
-| `approval_decided` | `gateway` | `{decision: approve\|reject, approver, canonical_plan_hash}` | **Optional** in first implementation (authorization records can land in a later commit). |
+| `approval_decided` | `gateway` | `{decision: approve\|reject, approver, canonical_plan_hash}` (emitted after the approval decision is stored, before the success response) | **Built** (component-level gateway *decision* evidence emit). Payload is exactly `{decision, approver, canonical_plan_hash}`; `run_id`/`approval_id` are envelope fields; the free-text rejection reason is excluded. Backward-compatible no-sink default; under `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit invalidates the run and active approvals and denies with HTTP 503 `authorization_evidence_unavailable`. Not yet linked via `evidence_refs`. |
 | `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true}` (emitted after `validate_for_execute` + `mark_used`, before mutation) | **Built** (component-level gateway authorization evidence emit; backward-compatible no-sink default; `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation). Not yet full fail-closed pre-apply gating (§9b). |
 | `apply_result` | `opencode` | `{status, declared_files, changed_files, violations, committed}` | **Required (MVP core).** This is the artifact that most directly replaces the self-attested `apply_report.json` and closes T1/T4. |
 | `assurance_verdict` | `openclaw` | `{verdict: PASS\|FAIL, counts, notes}` | **Optional** in first implementation; useful for a self-recorded, chained verdict. |
 
 **First-implementation minimum:** `apply_result` (executor→sink) + OpenClaw consuming it from
-the sink. `execute_validated` has since landed (gateway emit); `approval_decided` and
-`assurance_verdict` still follow in later authorization-emit and fail-closed-integration
-commits (§13). Consuming controls must treat an absent-but-required record as **fail closed**,
-not INCONCLUSIVE (§9).
+the sink. `execute_validated` and `approval_decided` have since landed (gateway emit);
+`assurance_verdict` still follows in a later self-recorded-verdict commit, and
+`evidence_refs` linking + fail-closed runtime integration remain future (§13). Consuming
+controls must treat an absent-but-required record as **fail closed**, not INCONCLUSIVE (§9).
 
 ---
 
@@ -193,12 +193,13 @@ Only then does the sink provide non-repudiation across a real trust boundary.
 
 ---
 
-## 8. Integration points (future code — described, not implemented)
+## 8. Integration points (first two shipped; the rest future — described, not implemented)
 
-- **`src/private_ai_gateway/app.py`, `v1_approvals`** — after `decide_approval` returns, emit
-  an `approval_decided` record (`run_id`, `approval_id`, decision, approver, hash).
-- **`src/private_ai_gateway/orchestration.py`, `_run_execute`** — after `validate_for_execute`
-  succeeds and `mark_used` runs, and **before** `session.execute`, emit `execute_validated`.
+- **(shipped)** **`src/private_ai_gateway/app.py`, `v1_approvals`** — after `decide_approval`
+  returns, emit an `approval_decided` record (`run_id`, `approval_id`, decision, approver, hash).
+- **(shipped)** **`src/private_ai_gateway/orchestration.py`, `_run_execute`** — after
+  `validate_for_execute` succeeds and `mark_used` runs, and **before** `session.execute`, emit
+  `execute_validated`.
 - **`agents/opencode_sandbox/worker.py`, `_start`** — after `apply_proposal` returns
   (currently writes `apply_report.json`), also emit an `apply_result` record carrying
   `run_id`/`approval_id`. Keep the file initially for back-compat; the sink record becomes the
@@ -309,12 +310,28 @@ Keys in all tests are **ephemeral**, generated under `tmp_path`; no key material
    after approval validation and `mark_used`, before `session.execute`; payload
    `{canonical_plan_hash, validated: true}`; backward-compatible no-sink default;
    `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation) + tests. `approval_decided`
-   remains **future**.
+   has **also landed** (emitted at `POST /v1/approvals` after the decision is stored and
+   before the success response; payload exactly `{decision, approver, canonical_plan_hash}`;
+   backward-compatible no-sink default; under `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit
+   invalidates the run and active approvals and denies HTTP 503
+   `authorization_evidence_unavailable`) + tests.
 6. **`evidence_refs` population** — link approvals to sink records in `approvals.py` + tests.
+   **Future.**
 7. **Fail-closed integration** — pre-apply authorization must record before mutation, else
    halt; end-to-end integration + sink-unavailable refusal tests.
 
 Each is its own commit; steps 1–2 are the safest first landing.
+
+### CI hermeticity (test-infrastructure note)
+
+So these evidence increments stay reproducible, normal CI runs are **hermetic**: the
+application backend is pinned to `demo` (`PRIVATE_AI_BACKEND=demo`) and Hugging Face /
+Transformers network access is disabled, so *installing* MLX does not cause unit tests to
+select a real model backend or load model weights. The macOS leg still verifies MLX
+installation and compatibility using deterministic/fake-loader tests, and feature branches
+run CI through the pull-request event (avoiding duplicate push + pull-request runs). This is
+**CI hermeticity only** — a test-infrastructure guarantee, not a production model-isolation
+claim.
 
 ---
 
