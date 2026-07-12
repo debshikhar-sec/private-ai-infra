@@ -91,8 +91,10 @@ def test_genesis_prev_hash_is_sha256_of_64_zeros():
     assert SHA256_RE.match(sink.GENESIS_PREV_HASH)
 
 
-def test_schema_version_is_one():
-    assert sink.SCHEMA_VERSION == 1
+def test_schema_version_is_two():
+    # Bumped to 2 in Step 6A when the signed ``evidence_id`` field was added; v1 is no longer
+    # supported (no dual-version path — there are no durable/external v1 consumers).
+    assert sink.SCHEMA_VERSION == 2
 
 
 # 11 — the serializer is pure: no filesystem writes / runtime-log side effects
@@ -119,6 +121,7 @@ def test_non_serializable_payload_fails_closed():
 def test_signing_envelope_to_mapping_is_stable():
     env = sink.SigningEnvelope(
         schema_version=sink.SCHEMA_VERSION,
+        evidence_id="ev-" + "a" * 32,
         sink_id="sink-1",
         run_id="run-abc",
         emitter=sink.EMITTER_GATEWAY,
@@ -132,6 +135,7 @@ def test_signing_envelope_to_mapping_is_stable():
     m = env.to_mapping()
     assert m["approval_id"] == "appr-xyz"
     assert m["sink_id"] == "sink-1"
+    assert m["evidence_id"] == "ev-" + "a" * 32
     # Deterministic canonical form (no signing performed here).
     assert sink.canonicalize(m) == sink.canonicalize(env.to_mapping())
 
@@ -146,6 +150,7 @@ _KEY2 = b"a-different-emitter-key-abcdef012"
 def _envelope(**overrides):
     fields = {
         "schema_version": sink.SCHEMA_VERSION,
+        "evidence_id": sink.new_evidence_id(),
         "sink_id": "sink-1",
         "run_id": "run-abc",
         "emitter": sink.EMITTER_OPENCODE,
@@ -353,6 +358,7 @@ def _signed(
     run_id="run-abc",
     sink_id=_SINK_ID,
     schema_version=None,
+    evidence_id=None,
     ts="2026-07-05T00:00:00Z",
     payload_hash=None,
 ):
@@ -366,6 +372,7 @@ def _signed(
         payload = {"status": "applied", "changed_files": ["a.py"]}
     env = sink.SigningEnvelope(
         schema_version=sink.SCHEMA_VERSION if schema_version is None else schema_version,
+        evidence_id=sink.new_evidence_id() if evidence_id is None else evidence_id,
         sink_id=sink_id,
         run_id=run_id,
         emitter=emitter,
@@ -775,3 +782,144 @@ def test_sink_module_imports_are_stdlib_only():
     assert not any(
         tok in name for name in module_globals for tok in ("worker", "checks", "orchestration")
     )
+
+
+# =================== Step 6A: stable, chain-independent evidence identity ===================
+EV_ID_RE = re.compile(r"^ev-[0-9a-f]{32}$")
+
+
+def test_new_evidence_id_is_prefixed_uuid4_hex():
+    eid = sink.new_evidence_id()
+    assert EV_ID_RE.match(eid)
+
+
+def test_evidence_ids_are_unique_between_envelopes():
+    # Item 6 — two freshly generated ids differ (and are well-formed).
+    ids = {sink.new_evidence_id() for _ in range(50)}
+    assert len(ids) == 50
+
+
+def test_default_signed_envelope_is_schema_version_two():
+    # Item 1 — the sink's submittable envelope carries the current schema version (2).
+    env, _payload, _sig = _signed()
+    assert env.schema_version == 2 == sink.SCHEMA_VERSION
+
+
+def test_append_rejects_schema_version_one():
+    # Item 2 — a v1 envelope is unsupported and rejected (no dual-version path).
+    s = _sink()
+    env, payload, sig = _signed(schema_version=1)
+    with pytest.raises(sink.EvidenceError) as e:
+        s.append(env, payload, sig)
+    assert sink.REASON_SCHEMA_UNSUPPORTED in str(e.value)
+    assert len(s) == 0
+
+
+def test_evidence_id_is_covered_by_the_signature():
+    # Item 3 — evidence_id is a signed envelope field: altering it invalidates the signature.
+    env, _payload, sig = _signed()
+    tampered = replace(env, evidence_id=sink.new_evidence_id())
+    assert not sink.verify_envelope_signature(tampered, sig, _KEY)
+    # The original still verifies (sanity).
+    assert sink.verify_envelope_signature(env, sig, _KEY)
+
+
+def test_append_rejects_missing_evidence_id():
+    # Item 4 — an empty evidence_id fails closed with the dedicated reason.
+    s = _sink()
+    env, payload, sig = _signed(evidence_id="")
+    with pytest.raises(sink.EvidenceError) as e:
+        s.append(env, payload, sig)
+    assert sink.REASON_EVIDENCE_ID_INVALID in str(e.value)
+    assert len(s) == 0
+
+
+def test_append_rejects_malformed_evidence_id():
+    # Item 5 — wrong prefix / wrong length / uppercase all fail the format check.
+    s = _sink()
+    for bad in ("nope", "ev-XYZ", "ev-" + "A" * 32, "ev-" + "a" * 31, "ev-" + "a" * 33):
+        env, payload, sig = _signed(evidence_id=bad, nonce=f"n-{bad}")
+        with pytest.raises(sink.EvidenceError) as e:
+            s.append(env, payload, sig)
+        assert sink.REASON_EVIDENCE_ID_INVALID in str(e.value)
+    assert len(s) == 0
+
+
+def test_evidence_digest_is_deterministic_and_formatted():
+    # Item 7 — same (envelope, signature) -> same digest, in the sha256: convention.
+    env, _payload, sig = _signed()
+    d1 = sink.evidence_digest(env, sig)
+    d2 = sink.evidence_digest(env, sig)
+    assert d1 == d2
+    assert SHA256_RE.match(d1)
+
+
+def test_evidence_digest_changes_when_a_signed_envelope_field_changes():
+    # Item 8 — any change to a signed envelope field changes the digest.
+    env, _payload, sig = _signed(run_id="run-A")
+    env2, _p2, sig2 = _signed(run_id="run-B", evidence_id=env.evidence_id, nonce="n-1")
+    assert sink.evidence_digest(env, sig) != sink.evidence_digest(env2, sig2)
+
+
+def test_evidence_digest_changes_when_emitter_sig_changes():
+    # Item 9 — the signature is part of the digest input.
+    env, _payload, sig = _signed()
+    other_sig = sink.sign_envelope(env, _KEY2)  # a different key -> a different signature
+    assert other_sig != sig
+    assert sink.evidence_digest(env, sig) != sink.evidence_digest(env, other_sig)
+
+
+def test_evidence_digest_is_independent_of_chain_position():
+    # Items 10 + 11 — the digest/ref computed before append equals the one from the appended
+    # record, even when the record lands at seq>0 with a non-genesis prev_hash. That proves the
+    # digest excludes seq/prev_hash/record_hash.
+    s = _sink()
+    _append_n(s, 3)  # push the next append to seq 3, prev_hash != genesis
+    env, payload, sig = _signed(nonce="n-late", run_id="run-late", approval_id="appr-late")
+    pre_ref = sink.evidence_ref_for(env, sig)
+    appended = s.append(env, payload, sig)
+    assert appended.seq == 3 and appended.prev_hash != sink.GENESIS_PREV_HASH
+    assert appended.evidence_ref() == pre_ref
+    assert appended.evidence_ref().evidence_digest == sink.evidence_digest(env, sig)
+
+
+def test_evidence_ref_shape_and_locator_semantics():
+    # EvidenceRef carries exactly the four identity fields; sink_id is a locator hint only.
+    env, _payload, sig = _signed()
+    ref = sink.evidence_ref_for(env, sig)
+    assert ref.evidence_id == env.evidence_id
+    assert ref.record_type == env.record_type
+    assert ref.sink_id == env.sink_id
+    assert set(ref.to_mapping().keys()) == {
+        "evidence_id", "evidence_digest", "record_type", "sink_id"
+    }
+    assert sink.EvidenceRef.from_mapping(ref.to_mapping()) == ref
+
+
+def test_identical_attestation_same_digest_only_when_id_nonce_sig_match():
+    # Item 12 — the digest matches only when evidence_id, nonce AND signature all match; change
+    # any one (other attestation content held equal) and the digest diverges.
+    eid = sink.new_evidence_id()
+    env_a, _pa, sig_a = _signed(evidence_id=eid, nonce="n-same", run_id="run-x")
+    env_b, _pb, sig_b = _signed(evidence_id=eid, nonce="n-same", run_id="run-x")
+    # Same signed content + same key -> identical signature -> identical digest.
+    assert sig_a == sig_b
+    assert sink.evidence_digest(env_a, sig_a) == sink.evidence_digest(env_b, sig_b)
+    # Differ only in evidence_id -> different digest.
+    env_c, _pc, sig_c = _signed(evidence_id=sink.new_evidence_id(), nonce="n-same", run_id="run-x")
+    assert sink.evidence_digest(env_a, sig_a) != sink.evidence_digest(env_c, sig_c)
+    # Differ only in nonce -> different digest.
+    env_d, _pd, sig_d = _signed(evidence_id=eid, nonce="n-other", run_id="run-x")
+    assert sink.evidence_digest(env_a, sig_a) != sink.evidence_digest(env_d, sig_d)
+
+
+def test_record_hash_still_binds_chain_position_after_identity_added():
+    # Item 13 (record_hash role preserved) — record_hash remains chain-position-dependent and
+    # distinct from the portable evidence digest; tamper/replay/reorder still break verify_chain.
+    s = _sink()
+    recs = _append_n(s, 2)
+    s.verify_chain()  # a healthy v2 chain re-derives
+    # record_hash (chain-local) is not the evidence digest (portable identity).
+    assert recs[0].record_hash != recs[0].evidence_ref().evidence_digest
+    # Sibling records at different positions have different record_hashes.
+    assert recs[0].record_hash != recs[1].record_hash

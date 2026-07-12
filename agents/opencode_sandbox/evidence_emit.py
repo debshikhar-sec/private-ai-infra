@@ -32,6 +32,7 @@ from openclaw.sink import (
     AppendedRecord,
     EvidenceError,
     SigningEnvelope,
+    new_evidence_id,
     payload_digest,
     sign_envelope,
 )
@@ -83,6 +84,7 @@ def emit_apply_result(
     payload_hash = payload_digest(payload)
     envelope = SigningEnvelope(
         schema_version=SCHEMA_VERSION,
+        evidence_id=new_evidence_id(),
         sink_id=sink_id,
         run_id=run_id,
         approval_id=approval_id,

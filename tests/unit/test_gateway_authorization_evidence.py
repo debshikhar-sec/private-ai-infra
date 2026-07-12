@@ -422,3 +422,18 @@ def test_scope_guard_no_forbidden_files_touched():
         if p.startswith(forbidden_prefixes) or p == "pyproject.toml"
     ]
     assert offenders == [], f"out-of-scope files changed: {offenders}"
+
+
+# --- Step 6A: the emitted execute_validated record is v2 with a stable evidence_id -------
+def test_execute_validated_record_is_v2_with_evidence_id(client, owner_token, monkeypatch):
+    import re
+
+    sink = _install_sink(monkeypatch)
+    run_id, plan_hash = _plan_and_hash(client)
+    _execute(client, run_id, _approve(client, run_id, plan_hash))
+    rec = _gateway_records(sink)[0]
+    assert rec.envelope.schema_version == 2
+    assert re.match(r"^ev-[0-9a-f]{32}$", rec.envelope.evidence_id)
+    # Stable EvidenceRef derivable; payload contract unchanged (no ref embedded).
+    assert rec.evidence_ref().record_type == "execute_validated"
+    assert set(rec.payload.keys()) == {"canonical_plan_hash", "validated"}

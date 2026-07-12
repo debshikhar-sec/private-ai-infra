@@ -157,7 +157,8 @@ def test_filters_by_emitter_opencode():
         "declared_files": ["a.py"], "changed_files": ["a.py"],
     }
     env = sinkmod.SigningEnvelope(
-        schema_version=sinkmod.SCHEMA_VERSION, sink_id=_SINK_ID, run_id=_RUN,
+        schema_version=sinkmod.SCHEMA_VERSION, evidence_id=sinkmod.new_evidence_id(),
+        sink_id=_SINK_ID, run_id=_RUN,
         approval_id=_APPR, emitter=sinkmod.EMITTER_GATEWAY, emitter_key_id=_KEY_ID,
         record_type="apply_result", payload_hash=sinkmod.payload_digest(payload),
         ts="t", nonce="n-gw",
@@ -172,7 +173,8 @@ def test_filters_by_record_type_apply_result():
     sink = _sink()
     payload = {"verdict": "PASS"}
     env = sinkmod.SigningEnvelope(
-        schema_version=sinkmod.SCHEMA_VERSION, sink_id=_SINK_ID, run_id=_RUN,
+        schema_version=sinkmod.SCHEMA_VERSION, evidence_id=sinkmod.new_evidence_id(),
+        sink_id=_SINK_ID, run_id=_RUN,
         approval_id=_APPR, emitter=sinkmod.EMITTER_OPENCODE, emitter_key_id=_KEY_ID,
         record_type="assurance_verdict", payload_hash=sinkmod.payload_digest(payload),
         ts="t", nonce="n-av",
