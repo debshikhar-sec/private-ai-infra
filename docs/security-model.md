@@ -177,6 +177,21 @@ reaches its verdict by reading artifacts authored by the very components it veri
   evidence envelope. The default no-sink behavior is backward-compatible, and
   `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before mutation if authorization
   evidence is unavailable.
+- **The mutation-path records are linked into a signed evidence graph.** Every signed record
+  carries a stable `evidence_id` (`ev-` + a UUIDv4 hex, distinct from the replay `nonce`) and a
+  chain-independent `evidence_digest` that binds the whole signed envelope and its `emitter_sig`
+  — never the sink-local `seq`/`prev_hash`/`record_hash`, which stay chain-position identity
+  only. A typed `EvidenceRef` (`evidence_id`, `evidence_digest`, `record_type`, `sink_id`) is
+  the portable anchor. `execute_validated` embeds a signed `approval_ref` to its
+  `approval_decided`, and `apply_result` embeds a signed `execute_ref` to its
+  `execute_validated`, each bound into the referring payload via `payload_hash`; no untrusted
+  client supplies a reference (the gateway threads the execution reference internally to
+  OpenCode). OpenClaw verifies the whole graph — chain, `evidence_id` resolution, recomputed
+  `evidence_digest`, `record_type`/`sink_id`, emitter/`run_id`/`approval_id`, decision must be
+  `approve`, canonical-plan-hash consistency — rejecting dangling, malformed, cross-run,
+  cross-approval, wrong-type, wrong-emitter, ambiguous, and digest-mismatched links, and never
+  letting an unsigned `apply_report.json` rescue a broken graph. Resolution is a verified linear
+  scan; there is no durable evidence index yet (`SCHEMA_VERSION` is `2`).
 
 **Honest scope of this claim:**
 
@@ -192,8 +207,11 @@ reaches its verdict by reading artifacts authored by the very components it veri
   `approval_decided` decision record), not full runtime fail-closed enforcement. Under
   `REQUIRE_AUTHORIZATION_EVIDENCE`, a decision-time emit failure invalidates the run and its
   active approvals and denies with HTTP 503 `authorization_evidence_unavailable`.
-- **No fail-closed runtime enforcement on evidence yet**, no
-  `evidence_refs` linking the gateway and OpenCode records, no trust ledger, no earned
+- **No durable storage and no fail-closed runtime enforcement on evidence yet.** The evidence
+  and approval stores are **in-memory**; durability, crash recovery, reconciliation, and
+  runtime-wide fail-closed enforcement across process crashes are **future**. The signed linkage
+  graph above is the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an
+  **unused, non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned
   autonomy. Autonomy remains fixed-ceiling by policy.
 - **Still no training/fine-tuning pipeline** (consistent with the ATLAS scoping above): the
   local model is pre-trained and served, and Hermes captures no training traces today.

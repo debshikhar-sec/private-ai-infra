@@ -210,8 +210,9 @@ authorized and what then happened. Merged today:
   `approval_id` remain in the evidence envelope. The default no-sink behavior is
   backward-compatible, and `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before
   mutation if authorization evidence is unavailable. This is **component-level gateway
-  authorization evidence emit, not full runtime fail-closed enforcement**, and the gateway
-  and OpenCode records are **not yet linked through `evidence_refs`**.
+  authorization evidence emit, not full runtime fail-closed enforcement**; the
+  `execute_validated` record now also carries a signed `approval_ref` back to its
+  `approval_decided` decision (the signed evidence graph below).
 - **Gateway emits signed `approval_decided` decision evidence** — when an owner approves or
   rejects at `POST /v1/approvals`, the gateway can now emit a signed `approval_decided`
   record after the decision is stored and **before** the success response. The payload
@@ -220,13 +221,36 @@ authorized and what then happened. Merged today:
   excluded. The default no-sink behavior is backward-compatible, and under
   `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit **invalidates the run and its active
   approvals** and denies with HTTP 503 `authorization_evidence_unavailable` (no sink/key
-  internals exposed). This is **component-level decision evidence emit**, not linked through
-  `evidence_refs` and not runtime fail-closed enforcement.
+  internals exposed). This is **component-level decision evidence emit**; it is the root of
+  the signed evidence graph below, and it remains independent of runtime fail-closed
+  enforcement.
+- **Stable evidence identity + signed evidence linkage** — every signed record now carries a
+  dedicated `evidence_id` (`ev-` + a UUIDv4 hex, distinct from the replay-defence `nonce`)
+  and a chain-independent `evidence_digest` that binds the whole signed envelope and its
+  `emitter_sig` — never the sink-local `seq`/`prev_hash`/`record_hash`, which stay
+  chain-position identity only. A typed `EvidenceRef` (`evidence_id`, `evidence_digest`,
+  `record_type`, `sink_id`, where `sink_id` is a locator hint) is the portable anchor. The
+  three mutation-path records now form a **signed graph** —
+  `approval_decided ←approval_ref─ execute_validated ←execute_ref─ apply_result` — with each
+  edge embedded in the referring record's signed payload and bound through its `payload_hash`.
+  References are never supplied by an untrusted client; the gateway threads the execution
+  reference internally to OpenCode. OpenClaw verifies the whole graph: it re-verifies the
+  chain, resolves each reference by `evidence_id`, recomputes and checks `evidence_digest`,
+  checks `record_type`/`sink_id`, validates emitter/`run_id`/`approval_id`, requires the
+  referenced decision to be `approve`, and checks canonical-plan-hash consistency — rejecting
+  dangling, malformed, cross-run, cross-approval, wrong-type, wrong-emitter, ambiguous, and
+  digest-mismatched links, and never letting an unsigned `apply_report.json` rescue a broken
+  signed graph. Resolution is a **verified linear scan**; there is no durable evidence index
+  yet. `SCHEMA_VERSION` is `2`.
 
-**Not done yet** (and *not* claimed): `evidence_refs` population and
-**runtime fail-closed integration** on missing/invalid evidence remain future milestones,
-as do the **trust ledger** and **earned autonomy** that would sit on top. Autonomy stays
-fixed-ceiling by policy — no self-approval, no earned-trust escalation.
+**Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
+signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
+non-authoritative placeholder** and is *not* the signed graph and does not affect
+authorization. **Durable evidence/approval storage**, **runtime fail-closed integration** on
+missing/invalid evidence across process crashes, and **reconciliation** remain future
+milestones, as do the **trust ledger** and **earned autonomy** that would sit on top. Autonomy
+stays fixed-ceiling by policy — no self-approval, no earned-trust escalation. The signed
+evidence is **tamper-evident, not non-repudiation**.
 Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).
 
 ## See it enforce (no GIF)
@@ -382,8 +406,10 @@ docs/                     # architecture, security & threat model, orchestration
   `apply_result` evidence from an injected sink, and the gateway now emits signed
   `execute_validated` authorization evidence when execution authority is granted, and emits
   signed `approval_decided` decision evidence when an owner approves or rejects (all
-  component-level, unit-proven); `evidence_refs`, runtime fail-closed
-  integration, a trust ledger, and earned autonomy remain **future**. This is a governed,
+  component-level, unit-proven), and the three mutation-path records are now linked into a
+  **signed evidence graph** (`approval_ref`/`execute_ref`) that OpenClaw verifies end-to-end.
+  Durable storage, runtime fail-closed integration across crashes, `ApprovalRecord.evidence_refs`
+  population, a trust ledger, and earned autonomy remain **future**. This is a governed,
   human-in-authority system — **not** fully autonomous.
 
 ## License

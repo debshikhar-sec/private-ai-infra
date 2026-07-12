@@ -52,7 +52,7 @@ audit trail in which every deny carries a stable machine-readable code.
 ## What the moat is — and is not
 
 **Is:** the policy model itself (two-axis skill-vs-autonomy rule, attenuation-only
-chains), proven by a large automated test suite (636 tests), an adversarial eval suite,
+chains), proven by a large automated test suite (681 tests), an adversarial eval suite,
 and a reproducible three-agent orchestration demo; a governed execute authority loop
 (owner-gated, single-use, canonical-hash-bound approvals) and a verifier-owned,
 tamper-evident evidence sink core now build on top; local-first architecture that
@@ -79,15 +79,21 @@ emitting a signed `approval_decided` decision record when an owner approves or r
 (component-level decision evidence emit — after the decision is stored and before the success
 response, payload exactly `{decision, approver, canonical_plan_hash}`, with the same
 backward-compatible no-sink default and `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode that
-invalidates the run and denies HTTP 503 `authorization_evidence_unavailable`), a Governance
+invalidates the run and denies HTTP 503 `authorization_evidence_unavailable`), stable evidence
+identity (`evidence_id` + chain-independent `evidence_digest` + typed `EvidenceRef`,
+`SCHEMA_VERSION` 2) and a **signed evidence linkage graph**
+(`approval_decided ← execute_validated ← apply_result`, carried by payload-embedded
+`approval_ref`/`execute_ref` and verified end-to-end by OpenClaw), a Governance
 Console (incl. a conversational `/chat`), an offline demo, CI with security gates, and
 this analysis. What is **future, not built**: end-to-end gateway-issued `run_id` /
-`approval_id` wiring, linking the gateway and
-OpenCode records through `evidence_refs`, fail-closed runtime evidence enforcement, a trust
+`approval_id` wiring, **durable evidence/approval storage**, reconciliation, fail-closed
+runtime evidence enforcement across process crashes, a trust
 ledger, earned autonomy, and any Hermes local training/offload — so this proves
-component-level consume/verification and gateway authorization evidence emit, not full
-runtime fail-closed enforcement, and this is **not** a fully autonomous, production, or
-compliance-certified system, and does not claim non-repudiation. What does
+component-level consume/verification, gateway authorization evidence emit, and a signed
+linkage graph, not full runtime fail-closed enforcement, and this is **not** a fully
+autonomous, production, or compliance-certified system, and does not claim non-repudiation.
+(The canonical linkage is the payload-embedded signed `EvidenceRef` graph; the
+`ApprovalRecord.evidence_refs` field remains an unused placeholder.) What does
 **not** exist: users, revenue, design partners, a company, or a founding team. "YC-eligible" today
 means *a founder with a working product and a defensible thesis can credibly apply* —
 the application-strength evidence (Show HN reception, PyPI installs, 5–10 design-partner
