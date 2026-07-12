@@ -276,15 +276,30 @@ then happened.
   authority decision (approve/reject) was made; `execute_validated` = approved authority was
   validated and consumed for execution; `apply_result` (OpenCode) = the bounded executor
   mutation outcome.
+- **These three records are linked into a signed evidence graph.** Each signed record carries a
+  stable `evidence_id` (`ev-` + a UUIDv4 hex) and a chain-independent `evidence_digest`; a typed
+  `EvidenceRef` (`evidence_id`, `evidence_digest`, `record_type`, `sink_id`) is the portable
+  anchor. `execute_validated` embeds an `approval_ref` to its `approval_decided`, and
+  `apply_result` embeds an `execute_ref` to its `execute_validated` — each edge bound into the
+  referring record's signed payload via `payload_hash`. The gateway threads the execution
+  reference **internally** to OpenCode; no untrusted client supplies a reference. OpenClaw
+  re-verifies the chain, resolves each edge by `evidence_id`, recomputes `evidence_digest`,
+  checks `record_type`/`sink_id`/emitter/`run_id`/`approval_id`, requires the referenced decision
+  to be `approve`, and checks canonical-plan-hash consistency — rejecting dangling, malformed,
+  cross-run, cross-approval, wrong-type, wrong-emitter, ambiguous, and digest-mismatched links,
+  and never letting an unsigned `apply_report.json` rescue a broken graph. Resolution is a
+  verified linear scan; there is no durable evidence index yet (`SCHEMA_VERSION` is `2`).
 
 **Scope of that emit/consume:** it is **component-level consume/verification and gateway
 authorization evidence emit, not full runtime fail-closed enforcement** — unit-proven against
-an injected sink, without the end-to-end gateway-issued `run_id` / `approval_id` wiring, and
-the gateway and OpenCode records are **not yet linked through `evidence_refs`**.
-**`evidence_refs` population** and **runtime fail-closed integration**
-remain future milestones, as do a trust ledger and earned autonomy — all sequenced in
-[roadmap.md](roadmap.md) / [evidence-sink-design.md](evidence-sink-design.md). Autonomy stays
-fixed-ceiling by policy — there is no self-approval and no earned escalation.
+an injected sink, without the end-to-end gateway-issued `run_id` / `approval_id` wiring. The
+canonical linkage is the payload-embedded signed `EvidenceRef` graph above; the
+`ApprovalRecord.evidence_refs` field remains an **unused, non-authoritative placeholder** and is
+*not* that graph. **Durable evidence/approval storage**, **reconciliation**, and **runtime
+fail-closed integration** across process crashes remain future milestones, as do a trust ledger
+and earned autonomy — all sequenced in [roadmap.md](roadmap.md) /
+[evidence-sink-design.md](evidence-sink-design.md). Autonomy stays fixed-ceiling by policy —
+there is no self-approval and no earned escalation.
 
 **Planned (next, behind the same boundary):**
 

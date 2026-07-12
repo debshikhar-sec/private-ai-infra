@@ -3,21 +3,28 @@
 > **Status:** partially implemented. The sink **core** (`agents/openclaw/sink.py`), the
 > OpenCode **`apply_result` emit** (`agents/opencode_sandbox/evidence_emit.py`),
 > **OpenClaw's consume/validation** of that signed evidence from an injected sink
-> (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`), and the gateway
+> (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`), the gateway
 > **`execute_validated` and `approval_decided` authorization evidence emits**
-> (`src/private_ai_gateway/orchestration.py`, `app.py`) are now built and unit-proven —
-> component-level verification and gateway authorization evidence emit, not yet end-to-end
-> gateway-issued `run_id` / `approval_id` wiring, and the gateway and OpenCode records are
-> not yet linked through `evidence_refs`. The remaining steps in this spec —
-> **`evidence_refs` population** and **fail-closed runtime integration** — are still
-> design-only and gated behind later, separately-authorized increments.
+> (`src/private_ai_gateway/orchestration.py`, `app.py`), **stable evidence identity**
+> (`evidence_id` + chain-independent `evidence_digest` + typed `EvidenceRef`, `SCHEMA_VERSION`
+> is `2`), and the **signed evidence linkage graph**
+> (`approval_decided ← execute_validated ← apply_result`, carried by payload-embedded
+> `approval_ref`/`execute_ref`, verified end-to-end by OpenClaw) are now built and
+> unit-proven — component-level verification and gateway authorization evidence emit, not yet
+> end-to-end gateway-issued `run_id` / `approval_id` wiring. The shipped linkage is the
+> **payload-embedded signed `EvidenceRef` graph** (§6a); the `ApprovalRecord.evidence_refs`
+> field remains an **unused, non-authoritative placeholder** and is *not* that graph. The
+> remaining steps in this spec — **durable evidence/approval storage**, **reconciliation**,
+> and **fail-closed runtime integration across process crashes** — are still design-only and
+> gated behind later, separately-authorized increments.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
 > trust ledger, earned autonomy, or production key management. See §10 and §14.
 
 Related: [`threat-model-authority-loop.md`](threat-model-authority-loop.md) (§6 weakness, §7
 target, §10 fail-closed, §12 MVP/prod boundary), [`run-id-approval-design.md`](run-id-approval-design.md)
-(the `evidence_refs` forward-hook), [`orchestration.md`](orchestration.md).
+(the `evidence_refs` placeholder — superseded as the linkage mechanism by the §6a signed
+graph), [`orchestration.md`](orchestration.md).
 
 ---
 
@@ -120,7 +127,7 @@ One JSON object per record. Field order below is the canonical order for hashing
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schema_version` | int | Pins the record shape; unknown version → reject (fail closed). MVP = `1`. |
+| `schema_version` | int | Pins the record shape; unknown version → reject (fail closed). **Shipped: `SCHEMA_VERSION` is `2`** (the identity-carrying envelope of §6a). |
 | `seq` | int | Monotonic per-sink sequence number, assigned **by the sink** on append (not by the emitter). |
 | `sink_id` | str | Identifies the sink instance/log (so records can't be cross-replayed between sinks). |
 | `run_id` | str | The governed run this record belongs to (`run-…`). Required for all MVP event types. |
@@ -147,22 +154,111 @@ One JSON object per record. Field order below is the canonical order for hashing
   computes `record_hash`/`prev_hash` over emitter-core + assigned position**, so tampering with
   either layer is detectable.
 
+**Shipped realization.** The implemented envelope (`agents/openclaw/sink.py`,
+`SCHEMA_VERSION = 2`) carries `record_type` (not `event_type`), an advisory `ts` (not
+`created_at`), a per-emitter `nonce` (the anti-replay token — separate from any evidence
+identity), and a dedicated `evidence_id`. The emitter signs the whole envelope (`to_mapping`);
+the sink assigns and chains `seq`/`prev_hash`/`record_hash`. Stable identity and cross-record
+linkage are documented in §6a below.
+
 ---
 
 ## 6. Event types (MVP)
 
 | `event_type` | Emitter | Payload (indicative) | MVP status |
 |---|---|---|---|
-| `approval_decided` | `gateway` | `{decision: approve\|reject, approver, canonical_plan_hash}` (emitted after the approval decision is stored, before the success response) | **Built** (component-level gateway *decision* evidence emit). Payload is exactly `{decision, approver, canonical_plan_hash}`; `run_id`/`approval_id` are envelope fields; the free-text rejection reason is excluded. Backward-compatible no-sink default; under `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit invalidates the run and active approvals and denies with HTTP 503 `authorization_evidence_unavailable`. Not yet linked via `evidence_refs`. |
-| `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true}` (emitted after `validate_for_execute` + `mark_used`, before mutation) | **Built** (component-level gateway authorization evidence emit; backward-compatible no-sink default; `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation). Not yet full fail-closed pre-apply gating (§9b). |
-| `apply_result` | `opencode` | `{status, declared_files, changed_files, violations, committed}` | **Required (MVP core).** This is the artifact that most directly replaces the self-attested `apply_report.json` and closes T1/T4. |
+| `approval_decided` | `gateway` | `{decision: approve\|reject, approver, canonical_plan_hash}` (emitted after the approval decision is stored, before the success response) | **Built** (component-level gateway *decision* evidence emit). Payload is exactly `{decision, approver, canonical_plan_hash}` — unchanged; `run_id`/`approval_id` are envelope fields; the free-text rejection reason is excluded. Backward-compatible no-sink default; under `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit invalidates the run and active approvals and denies with HTTP 503 `authorization_evidence_unavailable`. It is the **root** of the §6a signed graph. |
+| `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true, approval_ref}` (emitted after `validate_for_execute` + `mark_used`, before mutation) | **Built** (component-level gateway authorization evidence emit; backward-compatible no-sink default; `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation). The payload now also carries `approval_ref` — a signed `EvidenceRef` to the `approval_decided` record (§6a). Not yet full fail-closed pre-apply gating (§9b). |
+| `apply_result` | `opencode` | `{status, declared_files, changed_files, violations, committed, execute_ref}` | **Built (MVP core).** Replaces the self-attested `apply_report.json` and closes T1/T4. Retains its existing outcome fields and now also carries `execute_ref` — a signed `EvidenceRef` to the `execute_validated` record (§6a). When no `execute_ref` is threaded, the record is byte-identical to before (default/no-linkage compatibility). |
 | `assurance_verdict` | `openclaw` | `{verdict: PASS\|FAIL, counts, notes}` | **Optional** in first implementation; useful for a self-recorded, chained verdict. |
 
 **First-implementation minimum:** `apply_result` (executor→sink) + OpenClaw consuming it from
-the sink. `execute_validated` and `approval_decided` have since landed (gateway emit);
-`assurance_verdict` still follows in a later self-recorded-verdict commit, and
-`evidence_refs` linking + fail-closed runtime integration remain future (§13). Consuming
-controls must treat an absent-but-required record as **fail closed**, not INCONCLUSIVE (§9).
+the sink. `execute_validated` and `approval_decided` have since landed (gateway emit), and the
+three are now cross-linked into the §6a signed graph; `assurance_verdict` still follows in a
+later self-recorded-verdict commit, and durable storage + fail-closed runtime integration
+across crashes remain future (§13). Consuming controls must treat an absent-but-required
+record as **fail closed**, not INCONCLUSIVE (§9).
+
+---
+
+## 6a. Stable evidence identity and signed evidence linkage (shipped)
+
+Two increments landed on top of the event types above: a **stable evidence identity** (so a
+record can be referenced portably) and a **signed linkage graph** (so authorization and
+execution evidence point at one another under signature).
+
+**Evidence identity.** Each signed envelope (`SCHEMA_VERSION` is `2`) carries a dedicated
+`evidence_id` — the literal prefix `ev-` followed by UUIDv4 hexadecimal text — generated
+**before** signing and included in the signed envelope. It is distinct from `nonce`, which
+remains the per-emitter replay-defence value only.
+
+**Evidence digest.** `evidence_digest` is a **chain-independent** `sha256:` digest that binds:
+
+- the complete signing-envelope mapping (`to_mapping`, including `schema_version`,
+  `evidence_id`, `payload_hash`, and `nonce`); and
+- the emitter signature `emitter_sig`.
+
+It deliberately **excludes** the sink-assigned `seq`, the previous-record hash, the chain-local
+`record_hash`, the raw payload, and any extra metadata — so the same signed attestation has the
+same digest regardless of which sink it lands in or where in the chain it sits. `record_hash`
+remains the sink-local chain-position and integrity hash; it is **never** a portable evidence
+identity.
+
+**EvidenceRef.** The typed, stable reference is:
+
+```text
+evidence_id
+evidence_digest
+record_type
+sink_id
+```
+
+`sink_id` is a **locator / origin hint** only. Sequence numbers and `record_hash` are **not**
+portable evidence identities and never appear in a reference.
+
+**The signed graph.** The three mutation-path records form:
+
+```text
+approval_decided
+    ↓ approval_ref
+execute_validated
+    ↓ execute_ref
+apply_result
+```
+
+Exact payload contracts:
+
+- `approval_decided` remains exactly `{decision, approver, canonical_plan_hash}` — unchanged.
+- `execute_validated` is `{canonical_plan_hash, validated, approval_ref}`.
+- `apply_result` retains its existing outcome fields and adds `execute_ref`.
+
+The references are **embedded in the referring record's payload**; each payload's `payload_hash`
+binds the reference into the signed envelope, so an edge cannot be altered without breaking a
+signature. References are **never** supplied through an untrusted client request body; the
+gateway threads the execution reference **internally** to OpenCode across the session boundary.
+
+**OpenClaw graph verification.** When consuming the graph, OpenClaw:
+
+- verifies the complete evidence chain from scratch;
+- resolves each reference by `evidence_id` (exactly one matching record, else fail);
+- recomputes and checks `evidence_digest`;
+- checks `record_type` and `sink_id`;
+- validates emitter, `run_id`, and `approval_id`;
+- requires the referenced decision to be `approve`;
+- validates canonical-plan-hash consistency across the edges;
+- rejects dangling, malformed, cross-run, cross-approval, wrong-type, wrong-emitter, ambiguous,
+  and digest-mismatched links;
+- does **not** allow an unsigned `apply_report.json` to rescue a broken signed graph — a
+  present-but-broken link fails closed regardless of mode, while an absent link is INCONCLUSIVE
+  unless the linkage is required.
+
+Current resolution is a **verified linear scan** over the sink's records; **no durable evidence
+index exists yet**.
+
+**ApprovalRecord placeholder.** `ApprovalRecord.evidence_refs` remains **unused**. It is **not**
+the signed graph, it does **not** affect authorization, and the canonical linkage is the
+payload-embedded signed `EvidenceRef` data described here. Populating that field is a separate,
+still-future item (§13).
 
 ---
 
@@ -193,23 +289,25 @@ Only then does the sink provide non-repudiation across a real trust boundary.
 
 ---
 
-## 8. Integration points (first two shipped; the rest future — described, not implemented)
+## 8. Integration points (mutation-path emits, consume, and linkage shipped; durability future)
 
 - **(shipped)** **`src/private_ai_gateway/app.py`, `v1_approvals`** — after `decide_approval`
   returns, emit an `approval_decided` record (`run_id`, `approval_id`, decision, approver, hash).
 - **(shipped)** **`src/private_ai_gateway/orchestration.py`, `_run_execute`** — after
   `validate_for_execute` succeeds and `mark_used` runs, and **before** `session.execute`, emit
   `execute_validated`.
-- **`agents/opencode_sandbox/worker.py`, `_start`** — after `apply_proposal` returns
-  (currently writes `apply_report.json`), also emit an `apply_result` record carrying
-  `run_id`/`approval_id`. Keep the file initially for back-compat; the sink record becomes the
-  authoritative one.
-- **`agents/openclaw/worker.py` + `checks.py` + `evidence.py`** — during `verify`, read the
-  apply/authorization evidence **from the sink** (validate chain + HMAC) rather than the
-  handed `apply_report` path; a new control in `checks.py` asserts chain integrity and
-  required-record presence; `report.py` surfaces a chain-integrity finding.
-- **`src/private_ai_gateway/approvals.py`** — populate `ApprovalRecord.evidence_refs` with the
-  sink `seq`/`record_hash` of the records linked to that approval (the documented forward-hook).
+- **(shipped)** **`agents/opencode_sandbox/worker.py` + `evidence_emit.py`** — after
+  `apply_proposal` returns (still writes `apply_report.json`), also emit a signed `apply_result`
+  record carrying `run_id`/`approval_id`, and — when threaded — the `execute_ref` edge (§6a).
+  The sink record is the authoritative one.
+- **(shipped)** **`agents/openclaw/worker.py` + `checks.py` + `evidence.py`** — during `verify`,
+  read the apply/authorization evidence **from the sink** (validate chain + HMAC) rather than
+  the handed `apply_report` path; controls assert chain integrity, required-record presence, and
+  (§6a) the full signed graph; `report.py` surfaces the findings.
+- **`src/private_ai_gateway/approvals.py`** — `ApprovalRecord.evidence_refs` remains an
+  **unused, non-authoritative placeholder**. The **canonical** linkage shipped instead as the
+  §6a payload-embedded signed `EvidenceRef` graph (`approval_ref`/`execute_ref`); populating the
+  `evidence_refs` field is a separate, still-future convenience index, not the graph.
 - **Gateway audit mirroring** — **deferred** (not MVP). Mirroring `decisions.jsonl` into the
   sink as signed `gateway`-emitter records would extend tamper-evidence to the full audit; MVP
   restricts scope to the **mutation path** (`apply_result` + authorization) to keep the change
@@ -244,9 +342,14 @@ f. **Unknown `schema_version` or emitter → reject the record** (fail closed).
 
 ## 10. MVP vs. future split
 
-- **Evidence sink MVP (this increment):** verifier-owned append-only log; per-emitter HMAC;
+- **Evidence sink MVP (shipped increments):** verifier-owned append-only log; per-emitter HMAC;
   `prev_hash` chaining; `apply_result` (required) + authorization records; `run_id`/`approval_id`
-  binding; `evidence_refs` population; fail-closed verification. Single host, HMAC keyfiles.
+  binding; stable evidence identity (`evidence_id` + `evidence_digest` + `EvidenceRef`, §6a); the
+  signed linkage graph (`approval_ref`/`execute_ref`) verified by OpenClaw. Single host, HMAC
+  keyfiles, **in-memory** stores, verified linear scan.
+- **Later — durability and runtime fail-closed:** durable evidence/approval storage, crash
+  recovery, reconciliation, append-first authority transitions, and runtime-wide fail-closed
+  enforcement across process crashes. **Out of scope here** — the current stores are in-memory.
 - **Later — hash-chained trust ledger:** derived, per-principal trust state built *on top of*
   the sink. **Out of scope here.** (The sink is the prerequisite; the ledger records what the
   sink proves.)
@@ -315,10 +418,16 @@ Keys in all tests are **ephemeral**, generated under `tmp_path`; no key material
    backward-compatible no-sink default; under `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit
    invalidates the run and active approvals and denies HTTP 503
    `authorization_evidence_unavailable`) + tests.
-6. **`evidence_refs` population** — link approvals to sink records in `approvals.py` + tests.
-   **Future.**
-7. **Fail-closed integration** — pre-apply authorization must record before mutation, else
-   halt; end-to-end integration + sink-unavailable refusal tests.
+6. **Stable evidence identity + signed linkage** — **built.** `evidence_id` +
+   chain-independent `evidence_digest` + typed `EvidenceRef` (`SCHEMA_VERSION` 2), then the
+   `approval_decided ← execute_validated ← apply_result` graph via payload-embedded
+   `approval_ref`/`execute_ref`, verified end-to-end by OpenClaw (§6a) + tests. This is the
+   **canonical** linkage; populating the separate `ApprovalRecord.evidence_refs` convenience
+   field remains **future** and is not the graph.
+7. **Durability + fail-closed integration** — **future.** Durable evidence/approval stores,
+   reconciliation, append-first authority transitions, and pre-apply authorization that must
+   record before mutation (else halt) across process crashes; end-to-end integration +
+   sink-unavailable refusal tests.
 
 Each is its own commit; steps 1–2 are the safest first landing.
 
