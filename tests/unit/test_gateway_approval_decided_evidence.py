@@ -405,3 +405,18 @@ def test_no_hardcoded_production_key():
     assert gw.EVIDENCE_KEY is None
     assert gw.EVIDENCE_KEY_ID == ""
     assert gw.REQUIRE_AUTHORIZATION_EVIDENCE is False
+
+
+# --- 14. Step 6A: the emitted decision record is v2 with a stable evidence_id ------------
+def test_approval_decided_record_is_v2_with_evidence_id(client, owner_token, monkeypatch):
+    import re
+
+    sink = _install_sink(monkeypatch)
+    run_id, plan_hash = _plan_and_hash(client)
+    _approve(client, run_id, plan_hash)
+    rec = _decision_records(sink)[0]
+    assert rec.envelope.schema_version == 2
+    assert re.match(r"^ev-[0-9a-f]{32}$", rec.envelope.evidence_id)
+    # A stable EvidenceRef is derivable; the payload contract is unchanged (no ref embedded).
+    assert rec.evidence_ref().record_type == "approval_decided"
+    assert set(rec.payload.keys()) == {"decision", "approver", "canonical_plan_hash"}

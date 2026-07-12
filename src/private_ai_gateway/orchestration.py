@@ -298,6 +298,7 @@ def _emit_gateway_evidence(
             SCHEMA_VERSION,
             EvidenceError,
             SigningEnvelope,
+            new_evidence_id,
             payload_digest,
             sign_envelope,
         )
@@ -307,6 +308,7 @@ def _emit_gateway_evidence(
     try:
         envelope = SigningEnvelope(
             schema_version=SCHEMA_VERSION,
+            evidence_id=new_evidence_id(),
             sink_id=sink.sink_id,
             run_id=run_id,
             approval_id=approval_id,

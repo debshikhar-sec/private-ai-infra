@@ -318,3 +318,28 @@ def test_worker_with_sink_emits_after_apply(tmp_path):
     s.verify_chain()
     # apply_report.json is preserved alongside the sink record (back-compat).
     assert list((tmp_path / "rt").rglob("apply_report.json"))
+
+
+# --- Step 6A: the executor emit carries a v2, evidence-identified envelope ---
+def test_emit_envelope_is_schema_v2_with_stable_evidence_id():
+    # The apply_result record is v2 and carries a well-formed, signed evidence_id, and its
+    # EvidenceRef is derivable from the appended record. The payload is unchanged (item 15).
+    import re
+
+    s = _sink()
+    rec = _emit(s)
+    assert rec.envelope.schema_version == 2
+    assert re.match(r"^ev-[0-9a-f]{32}$", rec.envelope.evidence_id)
+    # Payload contract unchanged: exactly the report record, no evidence-ref field added.
+    assert rec.payload == _report().to_record()
+    ref = rec.evidence_ref()
+    assert ref.evidence_id == rec.envelope.evidence_id
+    assert ref.record_type == "apply_result"
+    assert ref.sink_id == _SINK_ID
+
+
+def test_two_emits_have_distinct_evidence_ids():
+    s = _sink()
+    r1 = _emit(s, run_id="run-1", approval_id="appr-1")
+    r2 = _emit(s, run_id="run-2", approval_id="appr-2")
+    assert r1.envelope.evidence_id != r2.envelope.evidence_id
