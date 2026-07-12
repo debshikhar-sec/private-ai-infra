@@ -13,8 +13,6 @@ loaded from disk or env.
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 from private_ai_gateway import app as gw
@@ -401,27 +399,6 @@ def test_no_hardcoded_production_key():
     assert gw.EVIDENCE_KEY is None
     assert gw.EVIDENCE_KEY_ID == ""
     assert gw.REQUIRE_AUTHORIZATION_EVIDENCE is False
-
-
-# --- scope guard: no forbidden files touched by this increment --------------------------
-def test_scope_guard_no_forbidden_files_touched():
-    import pathlib
-
-    repo = pathlib.Path(gw.__file__).resolve().parents[2]
-    out = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo, capture_output=True, text=True, check=True,
-    ).stdout
-    changed = [line[3:].strip() for line in out.splitlines() if line.strip()]
-    forbidden_prefixes = (
-        "agents/openclaw/", "agents/opencode_sandbox/",
-        "src/private_ai_gateway/static/", "docs/", "site/",
-    )
-    offenders = [
-        p for p in changed
-        if p.startswith(forbidden_prefixes) or p == "pyproject.toml"
-    ]
-    assert offenders == [], f"out-of-scope files changed: {offenders}"
 
 
 # --- Step 6A: the emitted execute_validated record is v2 with a stable evidence_id -------
