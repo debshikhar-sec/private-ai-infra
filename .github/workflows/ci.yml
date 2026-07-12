@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -33,9 +34,18 @@ jobs:
           done
 
   test:
-    # The gateway is model-plane-agnostic: the full suite (269 tests) runs identically
-    # on Linux (no MLX — backends are faked/simulated) and on Apple Silicon (MLX
-    # installed). Both must pass; neither skips.
+    # The gateway is model-plane-agnostic: the full suite runs identically on Linux
+    # (no MLX — backends are faked/simulated) and on Apple Silicon (MLX installed).
+    # Both must pass; neither skips. Tests are hermetic: PRIVATE_AI_BACKEND=demo pins
+    # the deterministic offline backend at import (so an installed MLX never becomes the
+    # app default), and the offline flags forbid any Hugging Face / Transformers network
+    # fetch. The macOS leg still installs and imports MLX and exercises the MLX backend
+    # via injected/fake loaders — it never downloads or loads real model weights.
+    timeout-minutes: 20
+    env:
+      PRIVATE_AI_BACKEND: demo
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
     strategy:
       matrix:
         include:

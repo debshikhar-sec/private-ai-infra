@@ -8,6 +8,7 @@ behaviour*: what a cooperating — or misbehaving — agent actually sees.
 import pytest
 
 from private_ai_gateway import app as gw
+from private_ai_gateway.backends import DemoBackend
 from private_ai_gateway.delegation import (
     COMPLETED,
     SUBMITTED,
@@ -193,6 +194,11 @@ def client(monkeypatch):
     monkeypatch.setattr(gw, "AUTH_TOKEN", "")
     monkeypatch.setattr(gw, "RATE_LIMITER", RateLimiter(0))
     monkeypatch.setattr(gw, "DELEGATIONS", gw.delegation.DelegationLedger())
+    # Pin the deterministic offline backend at the same `gw.BACKEND` seam the demo and
+    # evals use. The import-time default is `select_backend("auto")`, which selects a
+    # *real* MLX model whenever MLX is installed (the macOS CI leg) — a unit test must
+    # never load or download a model. See test_client_fixture_pins_demo_backend.
+    monkeypatch.setattr(gw, "BACKEND", DemoBackend())
     return gw.app.test_client()
 
 
@@ -202,6 +208,14 @@ def _hdr(name):
 
 def _delegate(client, who, **body):
     return client.post("/a2a/tasks", json=body, headers=_hdr(who))
+
+
+def test_client_fixture_pins_demo_backend(client):
+    # Regression: unit tests must be hermetic even with MLX installed. The fixture pins
+    # the deterministic demo backend rather than the environment-selected real backend,
+    # so no test can trigger a model load or a network download.
+    assert isinstance(gw.BACKEND, DemoBackend)
+    assert gw.BACKEND.name == "demo"
 
 
 def test_agent_directory_lists_policy_cards(client):
