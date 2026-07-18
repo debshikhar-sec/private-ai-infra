@@ -75,6 +75,10 @@ SIG_ALGO = "hmac-sha256"
 # Defined now so append/verify (later steps) draw from one vocabulary. Unused in 1A.
 REASON_SCHEMA_UNSUPPORTED = "schema_unsupported"
 REASON_EVIDENCE_ID_INVALID = "evidence_id_invalid"
+# A record's portable identity (``evidence_id``) must be unique within a sink — the same
+# invariant enforced by the in-memory ``_seen_evidence_ids`` set and the durable store's
+# ``UNIQUE(evidence_id)`` constraint, so both backends reject a duplicate identically.
+REASON_DUPLICATE_EVIDENCE_ID = "duplicate_evidence_id"
 REASON_SINK_MISMATCH = "sink_mismatch"
 REASON_UNKNOWN_EMITTER = "unknown_emitter"
 REASON_SIG_INVALID = "sig_invalid"
@@ -568,6 +572,7 @@ class EvidenceSink:
         self._registry = registry
         self._records: list[AppendedRecord] = []
         self._seen_nonces: set[tuple[str, str]] = set()
+        self._seen_evidence_ids: set[str] = set()
 
     def __len__(self) -> int:
         return len(self._records)
@@ -592,16 +597,15 @@ class EvidenceSink:
         """
         return tuple(_detach_record(rec) for rec in self._records)
 
-    def append(
+    def _validate_submission(
         self, envelope: SigningEnvelope, payload: Any, emitter_sig: str
-    ) -> AppendedRecord:
-        """Validate, then chain, one evidence record. Fail-closed; returns a detached copy.
+    ) -> None:
+        """Run every append precondition; raise on the first failure, leaving no state change.
 
-        Validation runs to completion before any state change: structural shape → schema →
-        target sink → nonce present → emitter key resolvable → emitter signature → payload
-        binding → replay. Only if every check passes is the record snapshotted, positioned
-        (sink-assigned ``seq``/``prev_hash``/``record_hash``), appended, and its nonce
-        recorded — atomically. The returned record is a detached snapshot.
+        The full validation sequence shared by the in-memory ``append`` and any durable
+        subclass that positions/persists a record itself: structural shape → schema →
+        evidence identity → target sink → nonce present → emitter key resolvable → emitter
+        signature → payload binding → replay. It never touches ``_records``/``_seen_nonces``.
         """
         # 1. Structural shape.
         if not isinstance(envelope, SigningEnvelope):
@@ -637,11 +641,31 @@ class EvidenceSink:
                 f"{REASON_PAYLOAD_HASH_MISMATCH}: payload does not match payload_hash"
             )
         # 8. Replay: this (emitter, nonce) must not have been appended before.
-        replay_key = (envelope.emitter, envelope.nonce)
-        if replay_key in self._seen_nonces:
-            raise EvidenceError(f"{REASON_REPLAY}: duplicate (emitter, nonce) {replay_key!r}")
+        if (envelope.emitter, envelope.nonce) in self._seen_nonces:
+            raise EvidenceError(
+                f"{REASON_REPLAY}: duplicate (emitter, nonce) "
+                f"{(envelope.emitter, envelope.nonce)!r}"
+            )
+        # 8b. Portable identity: this evidence_id must not have been appended before (the
+        # in-memory equivalent of the durable store's UNIQUE(evidence_id) constraint).
+        if envelope.evidence_id in self._seen_evidence_ids:
+            raise EvidenceError(
+                f"{REASON_DUPLICATE_EVIDENCE_ID}: {envelope.evidence_id!r}"
+            )
 
-        # 9. All checks passed — snapshot, position, chain, and commit atomically.
+    def append(
+        self, envelope: SigningEnvelope, payload: Any, emitter_sig: str
+    ) -> AppendedRecord:
+        """Validate, then chain, one evidence record. Fail-closed; returns a detached copy.
+
+        Validation runs to completion before any state change: structural shape → schema →
+        target sink → nonce present → emitter key resolvable → emitter signature → payload
+        binding → replay. Only if every check passes is the record snapshotted, positioned
+        (sink-assigned ``seq``/``prev_hash``/``record_hash``), appended, and its nonce
+        recorded — atomically. The returned record is a detached snapshot.
+        """
+        self._validate_submission(envelope, payload, emitter_sig)
+        # All checks passed — snapshot, position, chain, and commit atomically.
         snapshot = _detached_payload(payload)
         seq = len(self._records)
         prev_hash = self.head_hash
@@ -656,8 +680,9 @@ class EvidenceSink:
             extra={},
         )
         self._records.append(record)
-        self._seen_nonces.add(replay_key)
-        # 10. Hand back a detached copy so the caller cannot reach internal state.
+        self._seen_nonces.add((envelope.emitter, envelope.nonce))
+        self._seen_evidence_ids.add(envelope.evidence_id)
+        # Hand back a detached copy so the caller cannot reach internal state.
         return _detach_record(record)
 
     def verify_chain(self) -> None:
@@ -669,6 +694,7 @@ class EvidenceSink:
         the seen-nonce set independently of the live ``_seen_nonces``.
         """
         seen: set[tuple[str, str]] = set()
+        seen_ids: set[str] = set()
         for i, record in enumerate(self._records):
             # Structural: a stored record must be well-formed.
             if not isinstance(record, AppendedRecord) or not isinstance(
@@ -711,3 +737,9 @@ class EvidenceSink:
             if replay_key in seen:
                 raise EvidenceError(f"{REASON_REPLAY}: index {i} duplicate {replay_key!r}")
             seen.add(replay_key)
+            # Portable identity, from scratch: no evidence_id may recur.
+            if env.evidence_id in seen_ids:
+                raise EvidenceError(
+                    f"{REASON_DUPLICATE_EVIDENCE_ID}: index {i} duplicate {env.evidence_id!r}"
+                )
+            seen_ids.add(env.evidence_id)

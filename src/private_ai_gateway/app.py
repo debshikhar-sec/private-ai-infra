@@ -21,8 +21,8 @@ import uuid
 
 from flask import Flask, Response, g, jsonify, request
 
-from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, siem, tools
-from private_ai_gateway.approvals import ApprovalError, ApprovalStore
+from private_ai_gateway import a2a, autonomy, backends, contextopt, delegation, siem, state, tools
+from private_ai_gateway.approvals import ApprovalError
 from private_ai_gateway.audit import DecisionLog
 from private_ai_gateway.guardrails import Guardrails
 from private_ai_gateway.ingress import IngressFirewall
@@ -101,11 +101,16 @@ SIEM = siem.from_policy(
 )
 DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=SIEM)
 
-# In-process approval store for the governed chat loop. Process-local by design — a
-# restart drops pending approvals (no persistence until the verifier-owned evidence sink
-# exists). D1 only *registers* a run + its canonical plan hash on plan; execute-time
-# validation and the approval decision endpoint arrive in a later step.
-APPROVAL_STORE = ApprovalStore()
+# Authority store for the governed chat loop. The backend is selected by
+# PRIVATE_AI_STATE_BACKEND (default "memory"): "memory" is the in-process, restart-forgetting
+# ApprovalStore (byte-identical to before); "sqlite" opens a durable single-node store under
+# PRIVATE_AI_STATE_DIR (Step 7A). Store selection changes *durability only* — the governed
+# lifecycle, ordering, and authorization semantics are unchanged. The durable evidence
+# database is initialized/validated alongside it but left unwired (no keys loaded here), so
+# EVIDENCE_SINK stays None below.
+_STATE_CONFIG = state.StateConfig.from_env(os.environ)
+_OPENED_BACKEND = state.open_backend(_STATE_CONFIG)
+APPROVAL_STORE = _OPENED_BACKEND.authority_store
 
 # Step 5 / 5b — gateway authorization evidence emit: injection points ONLY (additive).
 # The gateway can emit signed authorization records into a verifier-owned EvidenceSink at two
