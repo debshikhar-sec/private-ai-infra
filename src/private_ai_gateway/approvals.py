@@ -29,6 +29,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Protocol, runtime_checkable
 
 DEFAULT_APPROVAL_TTL_SECONDS = 300
 
@@ -113,6 +114,71 @@ class ValidationResult:
     ok: bool
     reason: str = ""
     record: ApprovalRecord | None = None
+
+
+@runtime_checkable
+class AuthorityStore(Protocol):
+    """The narrow authority surface both the in-memory and durable stores implement.
+
+    A structural protocol (Step 7A): the gateway holds an ``AuthorityStore`` and neither knows
+    nor cares whether it is the in-memory :class:`ApprovalStore` or the durable
+    ``SqliteApprovalStore``. Every method preserves identical governed semantics; only
+    persistence differs.
+    """
+
+    def create_run(
+        self,
+        *,
+        run_id: str,
+        principal_id: str,
+        canonical_plan_hash: str,
+        effective_autonomy: int,
+        policy_ceiling: int,
+    ) -> RunRecord: ...
+
+    def get_run(self, run_id: str) -> RunRecord | None: ...
+
+    def invalidate_run(self, run_id: str) -> None: ...
+
+    def create_pending_approval(
+        self,
+        run_id: str,
+        *,
+        requested_autonomy: int | None = ...,
+        task_class: str = ...,
+        tool_or_skill: str = ...,
+        target_resources: tuple[str, ...] = ...,
+        single_use: bool = ...,
+        policy_rule_triggered: str = ...,
+    ) -> ApprovalRecord: ...
+
+    def get_approval(self, approval_id: str) -> ApprovalRecord | None: ...
+
+    def decide_approval(
+        self,
+        approval_id: str,
+        *,
+        decision: str,
+        approver: str,
+        reason: str = ...,
+        ttl_seconds: int = ...,
+        now: datetime | None = ...,
+    ) -> ApprovalRecord: ...
+
+    def validate_for_execute(
+        self,
+        run_id: str,
+        approval_id: str | None,
+        canonical_plan_hash: str,
+        *,
+        now: datetime | None = ...,
+    ) -> ValidationResult: ...
+
+    def mark_used(
+        self, approval_id: str, *, now: datetime | None = ...
+    ) -> ApprovalRecord: ...
+
+    def clear(self) -> None: ...
 
 
 class ApprovalStore:
