@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from typing import Any, Protocol, runtime_checkable
 
 from openclaw import sink as _sink
@@ -41,7 +42,14 @@ from openclaw.sink import (
     _hashable_core,
     record_digest,
 )
-from openclaw.sqlite_util import DurableStoreError, connect, migrate, transaction
+from openclaw.sqlite_util import (
+    DatabaseOwnership,
+    DurableStoreError,
+    check_integrity,
+    connect,
+    migrate,
+    transaction,
+)
 
 
 @runtime_checkable
@@ -140,25 +148,48 @@ class SqliteEvidenceSink(EvidenceSink):
     def __init__(self, sink_id: str, registry: EmitterKeyRegistry, *, path: str) -> None:
         super().__init__(sink_id, registry)
         self._path = str(path)
-        self._conn = connect(self._path)
-        migrate(self._conn, "evidence", EVIDENCE_DB_SCHEMA_VERSION, _MIGRATIONS)
-        self._load_and_verify()
+        # Serializes the whole append (validate -> position -> commit -> mirror) so the
+        # in-memory mirror can never diverge from, or fall behind, the database.
+        self._lock = threading.Lock()
+        # Exclusive ownership first; a second live owner fails closed. Every path after this
+        # releases ownership (and closes the connection) on failure — no leaked lock or handle.
+        self._own = DatabaseOwnership(self._path)
+        try:
+            self._conn = connect(self._path)
+        except BaseException:
+            self._own.release()
+            raise
+        try:
+            migrate(self._conn, "evidence", EVIDENCE_DB_SCHEMA_VERSION, _MIGRATIONS)
+            self._load_and_verify()
+        except BaseException:
+            self._conn.close()
+            self._own.release()
+            raise
 
     def close(self) -> None:
-        self._conn.close()
+        try:
+            self._conn.close()
+        finally:
+            self._own.release()
 
     # -- load / integrity --------------------------------------------------------------
     def _load_and_verify(self) -> None:
         """Rebuild the in-memory mirror from the database, then full-chain verify it.
 
-        Loads records in ``seq`` order and reconstructs each :class:`AppendedRecord` from its
-        stored (non-derived) fields; ``verify_chain`` then recomputes payload hashes, signatures,
+        Runs SQLite ``integrity_check`` first, then loads records in ``seq`` order and
+        reconstructs each :class:`AppendedRecord` from its stored (non-derived) fields. The
+        redundant identity columns (``evidence_id`` / ``emitter`` / ``nonce``) that back the DB
+        uniqueness constraints are cross-checked against the reconstructed signed envelope, so a
+        column tampered out of step with the envelope fails closed even though the record hash
+        only covers the envelope. ``verify_chain`` then recomputes payload hashes, signatures,
         sequence, previous hashes, record hashes, and nonce/evidence-id uniqueness from scratch.
-        A load or verification failure leaves the database untouched and fails closed.
+        Any failure leaves the database untouched and fails closed — nothing is repaired.
         """
+        check_integrity(self._conn, "evidence")
         rows = self._conn.execute(
-            "SELECT seq, envelope, payload, emitter_sig, prev_hash, record_hash, extra "
-            "FROM records ORDER BY seq ASC"
+            "SELECT seq, evidence_id, emitter, nonce, envelope, payload, emitter_sig, "
+            "prev_hash, record_hash, extra FROM records ORDER BY seq ASC"
         ).fetchall()
         for i, row in enumerate(rows):
             if row["seq"] != i:
@@ -166,6 +197,15 @@ class SqliteEvidenceSink(EvidenceSink):
                     f"evidence database has a sequence gap at index {i} (seq {row['seq']!r})"
                 )
             envelope = _envelope_from_json(row["envelope"])
+            if (
+                row["evidence_id"] != envelope.evidence_id
+                or row["emitter"] != envelope.emitter
+                or row["nonce"] != envelope.nonce
+            ):
+                raise DurableStoreError(
+                    f"evidence record at seq {i} has identity columns inconsistent with its "
+                    f"signed envelope (evidence_id/emitter/nonce mismatch)"
+                )
             try:
                 payload = json.loads(row["payload"])
                 extra = json.loads(row["extra"])
@@ -196,58 +236,64 @@ class SqliteEvidenceSink(EvidenceSink):
 
         Same preconditions as the in-memory sink (via ``_validate_submission``); the record is
         positioned and inserted in one transaction that reads the authoritative head, so a
-        competing writer cannot claim the same ``seq``. The in-memory mirror is updated only
-        after the commit succeeds.
+        competing writer cannot claim the same ``seq``. The whole operation — validation,
+        replay/evidence-id checks, head selection, hashing, transaction, mirror update, and the
+        nonce/evidence-id set updates — is serialized by an instance lock, so concurrent appends
+        keep database and mirror in the same order and a failed transaction leaves both (and the
+        seen-sets) unchanged. The in-memory mirror is updated only after the commit succeeds.
         """
-        self._validate_submission(envelope, payload, emitter_sig)
-        snapshot = _detached_payload(payload)
-        try:
-            with transaction(self._conn):
-                head = self._conn.execute(
-                    "SELECT seq, record_hash FROM records ORDER BY seq DESC LIMIT 1"
-                ).fetchone()
-                if head is None:
-                    seq = 0
-                    prev_hash = _sink.GENESIS_PREV_HASH
-                else:
-                    seq = head["seq"] + 1
-                    prev_hash = head["record_hash"]
-                record_hash = record_digest(
-                    _hashable_core(envelope, emitter_sig, seq, prev_hash)
-                )
-                self._conn.execute(
-                    "INSERT INTO records (seq, evidence_id, emitter, nonce, envelope, "
-                    "payload, emitter_sig, prev_hash, record_hash, extra) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        seq,
-                        envelope.evidence_id,
-                        envelope.emitter,
-                        envelope.nonce,
-                        json.dumps(envelope.to_mapping(), separators=(",", ":"),
-                                   ensure_ascii=False),
-                        json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False),
-                        emitter_sig,
-                        prev_hash,
-                        record_hash,
-                        "{}",
-                    ),
-                )
-        except sqlite3.IntegrityError as exc:
-            # A UNIQUE(evidence_id) / UNIQUE(emitter, nonce) / PK(seq) violation — the durable
-            # backstop for the same identities ``_validate_submission`` guards in memory.
-            raise EvidenceError(f"{_sink.REASON_MALFORMED}: durable constraint violated: {exc}") from exc
-        # Committed — now update the in-memory mirror to match.
-        record = AppendedRecord(
-            envelope=envelope,
-            payload=snapshot,
-            emitter_sig=emitter_sig,
-            seq=seq,
-            prev_hash=prev_hash,
-            record_hash=record_hash,
-            extra={},
-        )
-        self._records.append(record)
-        self._seen_nonces.add((envelope.emitter, envelope.nonce))
-        self._seen_evidence_ids.add(envelope.evidence_id)
-        return _detach_record(record)
+        with self._lock:
+            self._validate_submission(envelope, payload, emitter_sig)
+            snapshot = _detached_payload(payload)
+            try:
+                with transaction(self._conn):
+                    head = self._conn.execute(
+                        "SELECT seq, record_hash FROM records ORDER BY seq DESC LIMIT 1"
+                    ).fetchone()
+                    if head is None:
+                        seq = 0
+                        prev_hash = _sink.GENESIS_PREV_HASH
+                    else:
+                        seq = head["seq"] + 1
+                        prev_hash = head["record_hash"]
+                    record_hash = record_digest(
+                        _hashable_core(envelope, emitter_sig, seq, prev_hash)
+                    )
+                    self._conn.execute(
+                        "INSERT INTO records (seq, evidence_id, emitter, nonce, envelope, "
+                        "payload, emitter_sig, prev_hash, record_hash, extra) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            seq,
+                            envelope.evidence_id,
+                            envelope.emitter,
+                            envelope.nonce,
+                            json.dumps(envelope.to_mapping(), separators=(",", ":"),
+                                       ensure_ascii=False),
+                            json.dumps(snapshot, separators=(",", ":"), ensure_ascii=False),
+                            emitter_sig,
+                            prev_hash,
+                            record_hash,
+                            "{}",
+                        ),
+                    )
+            except sqlite3.IntegrityError as exc:
+                # A UNIQUE(evidence_id) / UNIQUE(emitter, nonce) / PK(seq) violation — the
+                # durable backstop for the identities ``_validate_submission`` guards in memory.
+                raise EvidenceError(
+                    f"{_sink.REASON_MALFORMED}: durable constraint violated: {exc}"
+                ) from exc
+            # Committed — now update the in-memory mirror to match, still under the lock.
+            record = AppendedRecord(
+                envelope=envelope,
+                payload=snapshot,
+                emitter_sig=emitter_sig,
+                seq=seq,
+                prev_hash=prev_hash,
+                record_hash=record_hash,
+                extra={},
+            )
+            self._records.append(record)
+            self._seen_nonces.add((envelope.emitter, envelope.nonce))
+            self._seen_evidence_ids.add(envelope.evidence_id)
+            return _detach_record(record)

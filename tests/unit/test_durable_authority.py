@@ -328,10 +328,10 @@ def test_malformed_stored_enum_fails_closed(tmp_path):
     raw.execute("UPDATE runs SET status='not-a-status' WHERE run_id='run-1'")
     raw.commit()
     raw.close()
-    store2 = SqliteApprovalStore(path)
+    # Step 7A.1: corruption is caught by the full startup scan — construction itself fails
+    # closed rather than opening and surfacing the bad enum lazily on a later read.
     with pytest.raises(DurableStoreError):
-        store2.get_run("run-1")
-    store2.close()
+        SqliteApprovalStore(path)
 
 
 def test_empty_to_current_schema_is_deterministic(tmp_path):

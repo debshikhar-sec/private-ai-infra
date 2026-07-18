@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 from private_ai_gateway.approvals import (
     REASON_APPROVAL_MISSING,
@@ -50,7 +50,10 @@ from private_ai_gateway.approvals import (
     _now,
 )
 from private_ai_gateway.sqlite_util import (
+    DatabaseOwnership,
     DurableStoreError,
+    check_foreign_keys,
+    check_integrity,
     connect,
     migrate,
     transaction,
@@ -114,28 +117,48 @@ _MIGRATIONS = [_migrate_to_v1]
 
 # --- serialization helpers ----------------------------------------------------------
 def _dt_to_text(value: datetime | None) -> str | None:
-    """Serialize a timezone-aware UTC datetime deterministically (ISO 8601), or ``None``."""
+    """Serialize a datetime as a deterministic ISO-8601 **UTC** string, or ``None``.
+
+    A naive (tz-unaware) datetime is rejected. Any valid aware offset is normalized to UTC
+    before persistence so the durable audit stores one canonical instant representation
+    regardless of the caller's timezone; the instant itself is preserved.
+    """
     if value is None:
         return None
     if value.tzinfo is None:
         raise DurableStoreError("refusing to persist a naive (tz-unaware) datetime")
-    return value.isoformat()
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _text_to_dt(value: str | None) -> datetime | None:
-    """Parse a stored ISO 8601 timestamp back to a tz-aware datetime, or ``None``.
+    """Parse a stored ISO 8601 timestamp back to a tz-aware **UTC** datetime, or ``None``.
 
-    A malformed timestamp or a naive value is a stored-integrity failure (fail closed).
+    A malformed timestamp or a naive value is a stored-integrity failure (fail closed). A valid
+    aware offset is normalized to UTC on reconstruction, preserving instant equality.
     """
     if value is None:
         return None
     try:
         dt = datetime.fromisoformat(value)
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise DurableStoreError(f"malformed stored timestamp {value!r}") from exc
     if dt.tzinfo is None:
         raise DurableStoreError(f"stored timestamp {value!r} is not timezone-aware")
-    return dt
+    return dt.astimezone(timezone.utc)
+
+
+def _int_to_bool(value: object, field: str) -> bool:
+    """Strictly decode a persisted boolean: only integer ``0`` or ``1`` is valid.
+
+    Rejects ``-1``, ``2``, floats, strings, ``None``, and every other representation rather
+    than leaning on ``bool(value)`` (which would silently accept arbitrary truthy values).
+    """
+    if value is True or value is False:
+        # sqlite3 never yields Python bools for INTEGER columns, but stay strict if it does.
+        return bool(value)
+    if isinstance(value, int) and value in (0, 1):
+        return value == 1
+    raise DurableStoreError(f"malformed stored boolean for {field}: {value!r}")
 
 
 def _tuple_to_text(value: tuple[str, ...]) -> str:
@@ -196,7 +219,7 @@ def _row_to_approval(row: sqlite3.Row) -> ApprovalRecord:
         created_at=_text_to_dt(row["created_at"]),
         expires_at=_text_to_dt(row["expires_at"]),
         decided_at=_text_to_dt(row["decided_at"]),
-        single_use=bool(row["single_use"]),
+        single_use=_int_to_bool(row["single_use"], "single_use"),
         used_at=_text_to_dt(row["used_at"]),
         rejection_reason=row["rejection_reason"],
         policy_rule_triggered=row["policy_rule_triggered"],
@@ -215,11 +238,70 @@ class SqliteApprovalStore:
     def __init__(self, path: str) -> None:
         self._path = str(path)
         self._lock = threading.Lock()
-        self._conn = connect(self._path)
-        migrate(self._conn, "authority", AUTHORITY_SCHEMA_VERSION, _MIGRATIONS)
+        # Acquire exclusive ownership first; a second live owner fails closed. Every path
+        # after this point releases ownership (and closes the connection) on failure so a
+        # partially-constructed store never leaks its lock or file handle.
+        self._own = DatabaseOwnership(self._path)
+        try:
+            self._conn = connect(self._path)
+        except BaseException:
+            self._own.release()
+            raise
+        try:
+            migrate(self._conn, "authority", AUTHORITY_SCHEMA_VERSION, _MIGRATIONS)
+            self._validate_on_open()
+        except BaseException:
+            self._conn.close()
+            self._own.release()
+            raise
 
     def close(self) -> None:
-        self._conn.close()
+        try:
+            self._conn.close()
+        finally:
+            self._own.release()
+
+    # -- startup integrity -------------------------------------------------------------
+    def _validate_on_open(self) -> None:
+        """Fully validate the database before the store is usable; fail closed on anything off.
+
+        Runs SQLite ``integrity_check`` and ``foreign_key_check``, then reads and typed-
+        reconstructs **every** run and approval (which validates enums, JSON tuples,
+        timestamps, and the strict ``single_use`` boolean), and checks referential/binding
+        consistency: ``effective_autonomy <= policy_ceiling`` on every run, and every approval
+        bound to an existing run with matching ``run_id`` / ``principal_id`` /
+        ``canonical_plan_hash`` / ``effective_autonomy``. A malformed or inconsistent database
+        raises here — construction fails rather than opening and discovering corruption lazily
+        on a later read. Nothing is repaired, rewritten, or deleted.
+        """
+        check_integrity(self._conn, "authority")
+        check_foreign_keys(self._conn, "authority")
+        runs = {
+            row["run_id"]: _row_to_run(row)
+            for row in self._conn.execute("SELECT * FROM runs").fetchall()
+        }
+        for run in runs.values():
+            if run.effective_autonomy > run.policy_ceiling:
+                raise DurableStoreError(
+                    f"run {run.run_id!r} has effective_autonomy L{run.effective_autonomy} "
+                    f"above its policy ceiling L{run.policy_ceiling}"
+                )
+        for row in self._conn.execute("SELECT * FROM approvals").fetchall():
+            appr = _row_to_approval(row)
+            run = runs.get(appr.run_id)
+            if run is None:
+                raise DurableStoreError(
+                    f"approval {appr.approval_id!r} references unknown run {appr.run_id!r}"
+                )
+            if (
+                appr.principal_id != run.principal_id
+                or appr.canonical_plan_hash != run.canonical_plan_hash
+                or appr.effective_autonomy != run.effective_autonomy
+            ):
+                raise DurableStoreError(
+                    f"approval {appr.approval_id!r} is inconsistently bound to run "
+                    f"{appr.run_id!r} (principal/hash/autonomy mismatch)"
+                )
 
     # -- runs --------------------------------------------------------------------------
     def create_run(
@@ -246,26 +328,27 @@ class SqliteApprovalStore:
             effective_autonomy=effective_autonomy,
             policy_ceiling=policy_ceiling,
         )
-        with self._lock:
+        # The existence check and the insert share one BEGIN IMMEDIATE transaction, so the
+        # read that authorizes the write is atomic with it (no cross-process TOCTOU window).
+        with self._lock, transaction(self._conn):
             if self._conn.execute(
                 "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone():
                 raise ApprovalError(f"run {run_id!r} already exists")
-            with transaction(self._conn):  # atomic: BEGIN ... COMMIT (or ROLLBACK on error)
-                self._conn.execute(
-                    "INSERT INTO runs (run_id, principal_id, canonical_plan_hash, "
-                    "effective_autonomy, policy_ceiling, created_at, status) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        run.run_id,
-                        run.principal_id,
-                        run.canonical_plan_hash,
-                        run.effective_autonomy,
-                        run.policy_ceiling,
-                        _dt_to_text(run.created_at),
-                        run.status.value,
-                    ),
-                )
+            self._conn.execute(
+                "INSERT INTO runs (run_id, principal_id, canonical_plan_hash, "
+                "effective_autonomy, policy_ceiling, created_at, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run.run_id,
+                    run.principal_id,
+                    run.canonical_plan_hash,
+                    run.effective_autonomy,
+                    run.policy_ceiling,
+                    _dt_to_text(run.created_at),
+                    run.status.value,
+                ),
+            )
         return run
 
     def get_run(self, run_id: str) -> RunRecord | None:
@@ -308,7 +391,8 @@ class SqliteApprovalStore:
         """Create a pending approval bound to an open run's id and canonical plan hash."""
         import uuid
 
-        with self._lock:
+        # Read the authorizing run and insert the approval in one transaction.
+        with self._lock, transaction(self._conn):
             run_row = self._conn.execute(
                 "SELECT * FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -330,8 +414,7 @@ class SqliteApprovalStore:
                 single_use=single_use,
                 policy_rule_triggered=policy_rule_triggered,
             )
-            with transaction(self._conn):
-                self._insert_approval(record)
+            self._insert_approval(record)
         return record
 
     def get_approval(self, approval_id: str) -> ApprovalRecord | None:
@@ -359,7 +442,8 @@ class SqliteApprovalStore:
         if not approver:
             raise ApprovalError("approver is required")
         now = now or _now()
-        with self._lock:
+        # Read the pending approval and write the decision in one transaction.
+        with self._lock, transaction(self._conn):
             row = self._conn.execute(
                 "SELECT * FROM approvals WHERE approval_id = ?", (approval_id,)
             ).fetchone()
@@ -379,8 +463,7 @@ class SqliteApprovalStore:
             else:
                 appr.approval_status = ApprovalStatus.REJECTED
                 appr.rejection_reason = reason
-            with transaction(self._conn):
-                self._update_approval(appr)
+            self._update_approval(appr)
         return appr
 
     def validate_for_execute(
@@ -397,7 +480,10 @@ class SqliteApprovalStore:
         expiry transition (approved-but-expired -> expired), committed before the deny.
         """
         now = now or _now()
-        with self._lock:
+        # The whole evaluation runs inside one BEGIN IMMEDIATE transaction so the reads that
+        # authorize the (single) possible write — the approved-but-expired lazy transition —
+        # are atomic with it. A pure allow/deny commits an empty transaction.
+        with self._lock, transaction(self._conn):
             run_row = self._conn.execute(
                 "SELECT * FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
@@ -426,11 +512,10 @@ class SqliteApprovalStore:
                 return ValidationResult(False, REASON_EXPIRED, appr)
             if appr.approval_status is not ApprovalStatus.APPROVED:
                 return ValidationResult(False, REASON_NOT_APPROVED, appr)
-            # Lazily transition an approved-but-expired approval — durably.
+            # Lazily transition an approved-but-expired approval — durably, in this same txn.
             if appr.expires_at is not None and now >= appr.expires_at:
                 appr.approval_status = ApprovalStatus.EXPIRED
-                with transaction(self._conn):
-                    self._update_approval(appr)
+                self._update_approval(appr)
                 return ValidationResult(False, REASON_EXPIRED, appr)
             # Bind to BOTH the hash on the approval and the hash on the run.
             if appr.canonical_plan_hash != canonical_plan_hash:
@@ -447,7 +532,9 @@ class SqliteApprovalStore:
     ) -> ApprovalRecord:
         """Consume a single-use approval after a successful validation."""
         now = now or _now()
-        with self._lock:
+        # Read the approved approval and consume it in one transaction, so single-use
+        # consumption is exactly-once under the exclusive-owner model.
+        with self._lock, transaction(self._conn):
             row = self._conn.execute(
                 "SELECT * FROM approvals WHERE approval_id = ?", (approval_id,)
             ).fetchone()
@@ -462,8 +549,7 @@ class SqliteApprovalStore:
             if appr.single_use:
                 appr.approval_status = ApprovalStatus.USED
             appr.used_at = now
-            with transaction(self._conn):
-                self._update_approval(appr)
+            self._update_approval(appr)
         return appr
 
     def clear(self) -> None:

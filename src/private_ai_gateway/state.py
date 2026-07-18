@@ -146,7 +146,14 @@ def open_backend(config: StateConfig) -> OpenedBackend:
     evidence_path = os.path.join(state_dir, EVIDENCE_DB_FILENAME)
     _check_paired_existence(authority_path, evidence_path)
     authority_store = SqliteApprovalStore(authority_path)
-    _init_evidence_db(evidence_path)
+    # If the evidence database fails to initialize, close the already-open authority store
+    # (releasing its connection and ownership lock) before propagating — no partial backend
+    # is left holding resources, and a subsequent clean open can succeed.
+    try:
+        _init_evidence_db(evidence_path)
+    except BaseException:
+        authority_store.close()
+        raise
     return OpenedBackend(
         authority_store=authority_store,
         evidence_sink=None,
