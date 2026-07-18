@@ -18,6 +18,8 @@ Standard library only. Parameterized SQL only; no pickle or executable serializa
 
 from __future__ import annotations
 
+import fcntl
+import os
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -28,6 +30,63 @@ _BUSY_TIMEOUT_MS = 5000
 
 class DurableStoreError(Exception):
     """A durable store cannot be opened, validated, or mutated safely — fail closed."""
+
+
+class DatabaseOwnership:
+    """Exclusive single-owner advisory lock over one durable database file (Step 7A.1).
+
+    Ownership is expressed by an ``flock`` (``LOCK_EX | LOCK_NB``) held on a sidecar
+    ``<db>.lock`` file for the owning store's whole lifetime. Because ``flock`` locks are keyed
+    to the *open file description*, a second acquisition — from another thread, another store
+    instance in this process, or another process on a supported POSIX platform (both CI legs
+    are POSIX) — fails closed while the first owner holds it, and succeeds only once that owner
+    releases (on ``close`` or any construction-failure path).
+
+    This is a single-owner contract, not coherent multi-writer support: it exists precisely to
+    stop a second instance from operating on a stale in-memory mirror. The lock file is created
+    if absent and **never unlinked** (removing an active lock file would invite an
+    inode-replacement race); it stores no keys, credentials, tokens, or runtime data.
+    """
+
+    def __init__(self, db_path: str) -> None:
+        self._lock_path = db_path + ".lock"
+        self._fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            os.close(self._fd)
+            self._fd = -1
+            raise DurableStoreError(
+                f"durable database {db_path!r} is already owned by another store or process; "
+                f"refusing a second concurrent owner (fail closed)"
+            ) from exc
+
+    def release(self) -> None:
+        """Release ownership; idempotent and safe on every cleanup path."""
+        if self._fd >= 0:
+            fd, self._fd = self._fd, -1
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+
+
+def check_integrity(conn: sqlite3.Connection, domain: str) -> None:
+    """Fail closed unless ``PRAGMA integrity_check`` reports exactly ``ok`` (no repair)."""
+    result = [r[0] for r in conn.execute("PRAGMA integrity_check").fetchall()]
+    if result != ["ok"]:
+        raise DurableStoreError(
+            f"{domain} database failed SQLite integrity_check: {result!r}"
+        )
+
+
+def check_foreign_keys(conn: sqlite3.Connection, domain: str) -> None:
+    """Fail closed on any ``PRAGMA foreign_key_check`` violation."""
+    violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise DurableStoreError(
+            f"{domain} database has {len(violations)} foreign-key violation(s)"
+        )
 
 
 def connect(path: str) -> sqlite3.Connection:
