@@ -146,6 +146,43 @@ def _check_paired_existence(authority_path: str, evidence_path: str) -> None:
         )
 
 
+def _ensure_repo_openclaw_importable() -> None:
+    """Put the repo's ``agents/`` directory ahead of site-packages for ``openclaw``.
+
+    The assurance plane lives at ``agents/openclaw`` in this repository. An unrelated
+    third-party distribution also named ``openclaw`` can exist in site-packages; importing
+    that instead of ours would be a silent identity swap for authority-adjacent code, so
+    this resolves deterministically — no try-the-import-first heuristic. Locations tried:
+    ``PRIVATE_AI_AGENTS_PATH``, the CWD, and the path inferred from this file. If ours is
+    found it is prepended to ``sys.path`` (idempotent); if not, the subsequent import
+    fails closed with the normal ImportError.
+    """
+    import sys
+    from pathlib import Path
+
+    candidates = []
+    env = os.environ.get("PRIVATE_AI_AGENTS_PATH")
+    if env:
+        candidates.append(Path(env))
+    candidates.append(Path.cwd() / "agents")
+    # src/private_ai_gateway/state.py -> <repo>/agents
+    candidates.append(Path(__file__).resolve().parents[2] / "agents")
+    for cand in candidates:
+        if (cand / "openclaw" / "assurance.py").exists():
+            resolved = str(cand)
+            if resolved in sys.path:
+                sys.path.remove(resolved)
+            sys.path.insert(0, resolved)
+            # Drop a previously-imported foreign 'openclaw' so ours resolves cleanly.
+            mod = sys.modules.get("openclaw")
+            if mod is not None and not str(
+                getattr(mod, "__file__", "") or ""
+            ).startswith(resolved):
+                for name in [m for m in sys.modules if m == "openclaw" or m.startswith("openclaw.")]:
+                    del sys.modules[name]
+            return
+
+
 def _init_evidence_db(evidence_path: str) -> None:
     """Initialize/validate the durable evidence database as an empty substrate, then close it.
 
@@ -155,6 +192,7 @@ def _init_evidence_db(evidence_path: str) -> None:
     configured registry, so it fails closed here with an explicit remediation message — the
     ``off`` evidence mode never silently ignores unverifiable evidence.
     """
+    _ensure_repo_openclaw_importable()
     from openclaw.sink import EmitterKeyRegistry, EvidenceError
     from openclaw.sink_sqlite import SqliteEvidenceSink
 
@@ -179,6 +217,7 @@ def _open_durable_evidence(environ: Any, evidence_path: str):
     a configuration failure into a :class:`StateError`. Error messages never carry key
     material — the assurance loader names variables, not values.
     """
+    _ensure_repo_openclaw_importable()
     from openclaw.assurance import AssuranceConfigError, open_durable_sink
 
     try:

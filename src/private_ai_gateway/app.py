@@ -704,6 +704,10 @@ def v1_approvals():
     """
     principal = getattr(g, "principal", None)
     if principal is not OWNER_PRINCIPAL:
+        # Counted as an authz denial so the audit and the metrics stream stay
+        # reconcilable — OpenClaw's AC-METRICS-RECONCILE treats a 403 deny in the audit
+        # without a matching counter increment as evidence of a dropped metric.
+        METRICS.inc("gateway_authz_denials_total", {"reason": "owner_required"})
         DECISION_LOG.record(
             request_id=getattr(g, "request_id", ""),
             principal=(principal.name if principal else None),

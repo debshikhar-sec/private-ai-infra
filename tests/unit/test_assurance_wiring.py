@@ -308,6 +308,19 @@ def test_wired_loop_lands_all_three_records_in_one_durable_chain(tmp_path, wired
     assert out["applied"] is True and out["verdict"] == "PASS"
 
     sink = opened.evidence_sink
+    # The transcript surfaces the gateway's own minted execute_validated reference (safe
+    # identifiers only) so the chat can render the lineage truthfully from server data.
+    ev = out["evidence"]
+    assert ev["durable"] is True and ev["approval_id"] == approval_id
+    exec_ref = ev["execute_validated"]
+    assert exec_ref["record_type"] == "execute_validated"
+    assert exec_ref["sink_id"] == assurance.DURABLE_SINK_ID
+    durable_exec = next(
+        r for r in sink.records if r.envelope.record_type == "execute_validated"
+    )
+    assert exec_ref["evidence_id"] == durable_exec.envelope.evidence_id
+    assert exec_ref["evidence_digest"] == durable_exec.evidence_ref().evidence_digest
+    assert set(exec_ref) == {"evidence_id", "evidence_digest", "record_type", "sink_id"}
     types = [r.envelope.record_type for r in sink.records]
     assert types == ["approval_decided", "execute_validated", "apply_result"]
     by_type = {r.envelope.record_type: r for r in sink.records}
@@ -332,6 +345,35 @@ def test_wired_loop_lands_all_three_records_in_one_durable_chain(tmp_path, wired
     assert [r.envelope.record_type for r in reopened.evidence_sink.records] == types
     reopened.evidence_sink.verify_chain()
     reopened.close()
+
+
+def test_foreign_openclaw_package_is_displaced_before_assurance_import():
+    # An unrelated PyPI distribution also named `openclaw` can shadow the repo's assurance
+    # plane in a non-pytest process (the CLI). The state module must displace it and put
+    # the repo's agents/ directory first — a silent identity swap here would hand
+    # authority-adjacent code to foreign software. Every real openclaw module is snapshotted
+    # and restored so sibling tests keep their original class identities.
+    import sys
+    import types
+
+    from private_ai_gateway import state as state_mod
+
+    saved = {m: sys.modules[m] for m in list(sys.modules)
+             if m == "openclaw" or m.startswith("openclaw.")}
+    try:
+        foreign = types.ModuleType("openclaw")
+        foreign.__file__ = "/site-packages/openclaw/__init__.py"
+        sys.modules["openclaw"] = foreign
+
+        state_mod._ensure_repo_openclaw_importable()
+
+        import openclaw.assurance as reimported
+
+        assert "agents/openclaw/assurance.py" in reimported.__file__.replace("\\", "/")
+    finally:
+        for m in [m for m in list(sys.modules) if m == "openclaw" or m.startswith("openclaw.")]:
+            del sys.modules[m]
+        sys.modules.update(saved)
 
 
 def test_unwired_injected_sink_keeps_gateway_only_emit(tmp_path, monkeypatch, client):

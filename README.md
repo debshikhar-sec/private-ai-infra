@@ -26,19 +26,32 @@
 > loads** — not asserted in a README — with every allow/deny recorded and independently
 > re-verified.
 
+<!-- Product walkthrough: regenerate with tools/capture_walkthrough.py + tools/build_walkthrough_media.py -->
+<p align="center">
+  <img src="docs/assets/product-walkthrough.gif" alt="Walkthrough: a goal is typed into the Governed Chat Console; Hermes plans within its L1 ceiling and proposes a delegation; the planner is refused 403 owner_required when it tries to approve its own plan; a human owner approves a hash-bound single-use approval; OpenCode applies in a confined sandbox; OpenClaw verifies the signed evidence chain and returns PASS; the Governance Console then shows the entire run in the live decision audit." width="900">
+</p>
+
+<p align="center"><sub><b>One goal, end to end.</b> Twelve real frames captured by driving a live gateway in a browser — no mockups. Step-by-step, with the reasoning behind each frame: <a href="https://debshikhar-sec.github.io/private-ai-infra/#tour"><b>the product tour</b></a>.</sub></p>
+
+### The trust loop, in one paragraph
+
+You state an **intent**. A capable planner produces a **governed plan** and *proposes* a
+delegation — it cannot execute, and it cannot approve itself (the gateway returns
+`403 owner_required` on its own token). A **human grants authority**: an owner-gated,
+single-use approval bound to that plan's canonical hash. Only then does a confined
+executor take a **bounded action** in a sandbox, and an **independent verifier**
+re-derives the outcome from a signed, hash-chained evidence graph — fail-closed, so an
+unsigned self-attested report can never produce a PASS. Capability flows freely; authority
+does not.
+
 <!-- DEMO: regenerate with `vhs demo/enforce.tape` -->
 <p align="center">
   <img src="docs/assets/enforce.gif" alt="Live demo: a principal capped at autonomy L1 is denied 403 when it declares L6, and denied 403 for a model outside its allowlist — enforced before any model loads." width="860">
 </p>
 
-<p align="center"><sub>A principal capped at <b>L1 (suggest)</b> is refused <code>403</code> the instant it asks for more — autonomy it doesn't have, or a model it was never granted. Enforced <i>before</i> the model even loads. <a href="#see-it-enforce-no-gif">Text version ↓</a></sub></p>
+<p align="center"><sub><b>The boundary itself.</b> A principal capped at <b>L1 (suggest)</b> is refused <code>403</code> the instant it asks for more — autonomy it doesn't have, or a model it was never granted. Enforced <i>before</i> the model even loads. <a href="#see-it-enforce-no-gif">Text version ↓</a></sub></p>
 
-<!-- Console walkthrough: regenerate frames with the CDP capture rig against `private-ai-gateway demo` -->
-<p align="center">
-  <img src="docs/assets/console-walkthrough.gif" alt="38-second walkthrough of the Governance Console: an auditor reviews the live decision audit; a suggest-only trading assistant is refused a model, a tool, and an autonomy level; an ops agent holding the payments tool is still refused below its L5 floor; a prompt-injected credential is redacted on the wire." width="860">
-</p>
-
-<p align="center"><sub><b>The Governance Console, end to end</b> — five simulated enterprise agent identities driving the real enforcement code (<code>private-ai-gateway demo</code>). Scroll-driven, step-by-step version with the reasoning behind each frame: <a href="https://debshikhar-sec.github.io/private-ai-infra/#tour"><b>the product tour</b></a>.</sub></p>
+<p align="center"><sub>Two surfaces, one runtime: <b><code>/chat</code></b> to operate (propose → approve → observe) and <b><code>/console</code></b> to inspect (identity, decision audit, metrics, policy boundaries, probes). They link to each other but authenticate independently — no token is shared or persisted between them. Console-only deep dive: <a href="https://debshikhar-sec.github.io/private-ai-infra/assets/console-walkthrough.mp4">38-second video</a>.</sub></p>
 
 ---
 

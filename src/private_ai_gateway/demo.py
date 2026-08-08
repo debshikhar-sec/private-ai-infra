@@ -208,6 +208,12 @@ def install_demo_plane(gw) -> None:
     # authority-bearing canonical plan hash reads POLICY_PATH, so on the demo plane it must
     # resolve to this ships-with-the-package file that enforcement is really using.
     gw.POLICY_PATH = str(policy_file)
+    # Rebuild the model-route table from the policy actually installed. The demo policy
+    # pins every alias in [models.routes], so on this plane the alias -> backend-model
+    # binding comes from the same file the authority-bearing policy hash covers — a route
+    # change is a policy change, never a silent code-side drift.
+    gw.ROUTE_MAP = {**gw.DEFAULT_ROUTE_MAP, **policy.model_routes}
+    gw.DEFAULT_MODEL_ALIAS = policy.default_model_alias or "strategy"
     gw.BACKEND = backends.DemoBackend()
     gw.RATE_LIMITER = RateLimiter(policy.default_requests_per_minute)
     gw.GUARDRAILS = Guardrails(policy.guardrail_action)

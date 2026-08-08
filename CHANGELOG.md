@@ -57,11 +57,56 @@ All notable changes to this project are documented here. Format based on
   forced on in this mode; evidence ownership is held for the runtime lifetime; populated
   databases reopen and re-verify across restarts; misconfiguration fails closed at startup.
 
+- **Signed evidence lineage in the Governed Chat Console** — a successful execute now
+  returns a server-derived `evidence` summary (the gateway's own `execute_validated`
+  identifier, digest, record type and sink id, plus whether the chain is durable), and
+  `/chat` renders the `approval_decided → execute_validated → apply_result → verified`
+  lineage from it. Identifiers and digests only: no keys, tokens, or payload contents, and
+  the key is absent entirely when no record was emitted.
+- **Chat ⇄ Console navigation** — `/chat` (operate) and `/console` (inspect) now link to
+  each other as two views of one runtime. Each page still authenticates independently; no
+  bearer token is shared, persisted, or passed between them, and neither page touches
+  `localStorage`/`sessionStorage`/cookies.
+- **Policy-pinned model routes** — `demo_policy.toml` now pins every alias in
+  `[models.routes]`, so the alias → backend-model binding is covered by the
+  authority-bearing policy hash and the demo plane rebuilds its route table from the policy
+  it actually installed. Swapping the model behind an alias is a policy change, not silent
+  code-side drift.
+- **Hardened durable demo harness** (`scripts/demo_durable.sh`) — runs the ordinary demo
+  with `PRIVATE_AI_STATE_BACKEND=sqlite` + `PRIVATE_AI_EVIDENCE_MODE=durable` using
+  ephemeral per-run keys in a temporary state directory that is removed on exit. Keys are
+  never printed, committed, or persisted; the zero-config `private-ai-gateway demo`
+  defaults are unchanged.
+- **Walkthrough capture and verification tooling** (`tools/capture_walkthrough.py`,
+  `tools/build_walkthrough_media.py`, `tools/verify_site.py`) — the public walkthrough is
+  captured by driving a live gateway in a real browser, and the site's assets, anchors,
+  tour wiring and static stat fallbacks are verified before publication.
+- **Step 7B.1/7B.2 implementation contract** (`docs/step-7b1-7b2-implementation-contract.md`)
+  — the binding specification for append-first reservation and startup reconciliation,
+  including crash-injection points, the six reconciliation classes, acceptance criteria,
+  and the explicit 7C exclusion.
+
+### Fixed
+- **Denial accounting gap** — `POST /v1/approvals` recorded a 403 `owner_required` decision
+  in the audit without incrementing `gateway_authz_denials_total`. Because OpenClaw's
+  `AC-METRICS-RECONCILE` control treats an audited 403 denial with no matching counter as a
+  dropped metric, a refused self-approval attempt could make the *next*, entirely
+  legitimate governed run fail verification. Found by a real end-to-end walkthrough run;
+  all nine audited 403-denial sites now increment, and a runtime invariant test asserts
+  `metric total ≥ audited 403-deny count` across the full denial scenario.
+
 ### Changed
 - A concurrent double-execute loser now receives the governed `replay` refusal instead of
   surfacing an unhandled error.
-- Test suite now at **813** (~92% coverage) across the evidence, durability, hardening, and
-  live-wiring increments; the full suite runs on Linux and macOS in CI.
+- The `openclaw` assurance plane is now resolved deterministically from the repository's
+  `agents/` directory before import, so an unrelated third-party distribution of the same
+  name in site-packages cannot silently substitute authority-adjacent code.
+- The public walkthrough is now chat-first: a twelve-frame product tour (request → governed
+  plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
+  verification → console inspection) replaces the sixteen-frame console-only tour, which is
+  retained as a secondary console deep-dive.
+- Test suite now at **831** (~92% coverage) across the evidence, durability, hardening,
+  live-wiring, and chat-integration increments; the full suite runs on Linux and macOS in CI.
 
 ### Not yet built (explicitly)
 - Append-first execution reservation ordering (7B.1), startup cross-store reconciliation

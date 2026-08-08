@@ -104,6 +104,8 @@ h1, h2, h3 { line-height: 1.08; letter-spacing: -0.03em; font-weight: 700; }
 .eyebrow::before { content: ""; width: 1.6rem; height: 1px; background: var(--accent); opacity: .6; }
 .section-title { font-size: clamp(1.7rem, 4vw, 2.6rem); margin: .8rem 0 .6rem; }
 .section-sub { color: var(--muted); max-width: 60ch; font-size: 1.05rem; }
+/* the operate/inspect role suffix on the two surface cards */
+.dimtx { color: var(--muted); font-weight: 400; }
 .gradient-text {
   background: var(--grad); -webkit-background-clip: text; background-clip: text;
   color: transparent;

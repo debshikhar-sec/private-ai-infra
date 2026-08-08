@@ -151,6 +151,9 @@ capability second.
 ## Next — evidence integrity (verifier-owned), in sequence
 
 Design: [evidence-sink-design.md](evidence-sink-design.md). Each step is separately gated.
+The next two steps are specified as a binding contract — exact target ordering, crash
+injection points, reconciliation classes and acceptance criteria — in
+[step-7b1-7b2-implementation-contract.md](step-7b1-7b2-implementation-contract.md).
 
 - **Append-first execution reservation (7B.1)** — *not yet built.* Reorder the execute path
   so the durable `execute_validated` record is appended **before** single-use consumption and
