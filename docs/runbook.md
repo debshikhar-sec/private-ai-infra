@@ -190,6 +190,13 @@ Expected failures (all fail closed, by design):
 - corruption of either database → constructor-time integrity failure (restore from backup;
   nothing is auto-repaired).
 
+To see the hardened configuration end to end without committing to persistent keys, run
+`scripts/demo_durable.sh`. It starts the ordinary demo plane with the sqlite backend and
+durable evidence mode using **ephemeral per-run keys** in a temporary state directory that
+is deleted on exit — the keys are never printed, written to disk, or committed. Use it for
+demos, captures, and verification sessions; use the exported configuration above for any
+state you intend to keep.
+
 ## Strategy Benchmark
 
 Run:

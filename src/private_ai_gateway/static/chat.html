@@ -52,13 +52,22 @@
   .composer input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:.7rem .9rem;font-size:.95rem}
   .hint{color:var(--dim);font-size:.78rem;text-align:center;max-width:920px;margin:.4rem auto 0}
   a{color:var(--brand)}
+  header .navlink{font-size:.82rem;color:var(--dim);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:.25rem .7rem;white-space:nowrap}
+  header .navlink:hover{color:var(--ink);border-color:var(--brand)}
+  .card.stale{opacity:.55}
+  .card .note{color:var(--dim);font-size:.8rem;margin-top:.5rem}
+  .evgraph{font-family:var(--mono);font-size:.8rem;color:var(--dim);white-space:pre;overflow-x:auto;margin:.5rem 0 .2rem;line-height:1.55}
+  .evgraph b{color:var(--ink)} .evgraph .ok{color:var(--allow)} .evgraph .lk{color:var(--brand)}
+  button:focus-visible, input:focus-visible, a:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 </style>
 </head>
 <body>
 <header>
   <span class="brand"><span class="dot"></span>Governed Chat Console</span>
-  <span class="tag">plan → approve → verify · every step enforced</span>
-  <input id="token" type="password" placeholder="Paste a bearer token (demo: the hermes identity)" autocomplete="off" />
+  <span class="tag">operate · plan → approve → verify, every step enforced</span>
+  <input id="token" type="password" placeholder="Paste a bearer token (demo: the hermes identity)"
+         autocomplete="off" aria-label="Planner bearer token (kept in this tab only)" />
+  <a class="navlink" href="/console" title="Inspect identity, decisions, metrics and policy boundaries">Governance Console — inspect ▸</a>
 </header>
 
 <div class="wrap" id="wrap">
@@ -68,12 +77,13 @@
     <b>OpenCode</b> applies in a confined sandbox and sub-delegates verification to <b>OpenClaw</b>.
     Authority to change anything stays with you. Runs on the <b>demo plane</b> (<code>private-ai-gateway demo</code>).
   </div>
-  <div id="thread"></div>
+  <div id="thread" role="log" aria-live="polite" aria-label="Governed run transcript"></div>
 </div>
 
 <div class="composer">
   <div class="inner">
-    <input id="goal" placeholder="e.g. Apply the reviewed fix under governed delegation and verify it" />
+    <input id="goal" placeholder="e.g. Apply the reviewed fix under governed delegation and verify it"
+           aria-label="Goal for the governed plan" />
     <button id="send">Plan ▸</button>
     <button id="probe" class="ghost" title="Abuse the same wire on purpose">Probe boundary</button>
   </div>
@@ -89,10 +99,30 @@ const LNAME = { 0:"observe",1:"suggest",2:"propose",3:"execute",5:"unbounded" };
 
 // The current governed run: captured from the plan response and frozen for approval +
 // execute, so editing the goal box after planning can never silently change the run.
+// Each proposal card additionally closes over its own run snapshot, so a superseded card
+// can never act on a newer run.
 let currentRun = null;
+let activeCard = null;   // the one live proposal card; superseded on a new plan
+let busy = false;        // one in-flight governed operation at a time (no double-submit)
 
 function token(){ return $("token").value.trim(); }
 function scroll(){ window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}); }
+
+function setBusy(on, label){
+  busy = on;
+  $("send").disabled = on; $("probe").disabled = on;
+  $("send").textContent = on ? (label||"Working…") : "Plan ▸";
+}
+
+function supersedeActiveCard(){
+  if (!activeCard) return;
+  activeCard.classList.add("stale");
+  activeCard.querySelectorAll("button,input").forEach(el=>{ el.disabled = true; });
+  const note = document.createElement("div"); note.className="note";
+  note.textContent = "Superseded by a newer plan — this proposal can no longer be acted on here.";
+  activeCard.appendChild(note);
+  activeCard = null;
+}
 
 function bubble({who, name, action, detail, level, decision}){
   const m = document.createElement("div"); m.className = "msg";
@@ -118,7 +148,7 @@ function bubble({who, name, action, detail, level, decision}){
 function renderSteps(steps){
   for (const s of steps){
     bubble({ who:s.actor, name:s.actor, action:s.action, detail:s.detail,
-             level:s.level, decision:s.code||s.decision==="deny" ? s.decision : null });
+             level:s.level, decision:s.decision==="deny" ? "deny" : null });
   }
 }
 
@@ -142,95 +172,179 @@ async function api(phase, extra, objective){
   return j;
 }
 
-function proposalCard(p){
+// All server/model strings land through textContent — never string-built markup.
+function proposalCard(p, run){
   const card = document.createElement("div"); card.className="card";
-  card.innerHTML = "<h4>Proposed delegation — awaiting owner approval</h4>" +
-    "<div class='chain'><b>"+p.executor+"</b> would run <b>"+p.skill+"</b> at <b>L"+p.level+"</b> in a confined, sandboxed apply.</div>" +
-    "<div class='detail'>Approval is owner-gated and bound to this plan's hash. Paste the <b>owner / break-glass</b> token — the planner token above cannot approve its own plan.</div>";
+  const h = document.createElement("h4"); h.textContent = "Proposed delegation — awaiting owner approval"; card.appendChild(h);
+  const line = document.createElement("div"); line.className = "chain";
+  const ex = document.createElement("b"); ex.textContent = String(p.executor);
+  const sk = document.createElement("b"); sk.textContent = String(p.skill);
+  const lv = document.createElement("b"); lv.textContent = "L" + String(p.level);
+  line.appendChild(ex); line.appendChild(document.createTextNode(" would run "));
+  line.appendChild(sk); line.appendChild(document.createTextNode(" at "));
+  line.appendChild(lv); line.appendChild(document.createTextNode(" in a confined, sandboxed apply."));
+  card.appendChild(line);
+  const d = document.createElement("div"); d.className = "detail";
+  d.textContent = "Approval is owner-gated and bound to this plan's hash. Paste the owner / break-glass token — the planner token above cannot approve its own plan.";
+  card.appendChild(d);
   const row = document.createElement("div"); row.className="row"; row.style.marginTop=".6rem";
-  const owner = document.createElement("input"); owner.className="txt"; owner.type="password"; owner.placeholder="owner / break-glass token"; owner.style.flex="1"; owner.style.minWidth="200px"; owner.autocomplete="off";
-  const why = document.createElement("input"); why.className="txt"; why.placeholder="approval reason (optional)"; why.style.flex="1"; why.style.minWidth="160px"; why.value="reviewed the proposal; approved for sandbox apply";
+  const owner = document.createElement("input"); owner.className="txt"; owner.type="password"; owner.placeholder="owner / break-glass token"; owner.style.flex="1"; owner.style.minWidth="200px"; owner.autocomplete="off"; owner.setAttribute("aria-label","Owner / break-glass token for this approval");
+  const why = document.createElement("input"); why.className="txt"; why.placeholder="approval reason (optional)"; why.style.flex="1"; why.style.minWidth="160px"; why.value="reviewed the proposal; approved for sandbox apply"; why.setAttribute("aria-label","Approval reason");
   const ok = document.createElement("button"); ok.textContent="Approve & apply ▸";
   const no = document.createElement("button"); no.className="danger"; no.textContent="Deny (show refusal)";
   row.appendChild(owner); row.appendChild(why); row.appendChild(ok); row.appendChild(no);
   card.appendChild(row); thread.appendChild(card); scroll();
-  ok.onclick = ()=>{ card.remove(); approveAndExecute(owner.value.trim(), why.value.trim()); };
-  no.onclick = ()=>{ card.remove(); runExecuteNoApproval(); };
+  // Bind the card to ITS run snapshot: a stale card can never act on a newer run. The
+  // card is only consumed when the owner decision actually lands — a refused approval
+  // (wrong token, network error) re-arms it so the user can correct and retry.
+  const disarm = ()=>{ ok.disabled = true; no.disabled = true; };
+  const rearm  = ()=>{ ok.disabled = false; no.disabled = false; };
+  const consume = ()=>{ card.remove(); if (activeCard===card) activeCard=null; };
+  ok.onclick = async ()=>{
+    if (busy) return; disarm();
+    const landed = await approveAndExecute(run, owner.value.trim(), why.value.trim());
+    if (landed) consume(); else rearm();
+  };
+  no.onclick = ()=>{ if (busy) return; disarm(); consume(); runExecuteNoApproval(run); };
+  return card;
+}
+
+// The signed-evidence lineage, rendered only from server-returned identifiers — shown
+// only when the gateway actually emitted a record (result.evidence), never fabricated.
+function evidenceGraph(ev, verdictPass){
+  const g = document.createElement("div"); g.className = "evgraph";
+  function line(parts){
+    for (const p of parts){
+      if (typeof p === "string"){ g.appendChild(document.createTextNode(p)); continue; }
+      const el = document.createElement(p.tag); el.textContent = p.text;
+      if (p.cls) el.className = p.cls; g.appendChild(el);
+    }
+    g.appendChild(document.createTextNode("\n"));
+  }
+  const rec = ev.execute_validated || {};
+  line([{tag:"b",text:"approval_decided"}, "     owner decision, hash-bound  ·  ", String(ev.approval_id||"")]);
+  line([{tag:"span",cls:"lk",text:"      ↓ approval_ref"}]);
+  line([{tag:"b",text:"execute_validated"}, "   ", String(rec.evidence_id||""), "  @ ", String(rec.sink_id||"")]);
+  if (ev.durable){
+    line([{tag:"span",cls:"lk",text:"      ↓ execute_ref"}]);
+    line([{tag:"b",text:"apply_result"}, "        signed by the executor with its own key"]);
+    if (verdictPass){
+      line([{tag:"span",cls:"lk",text:"      ↓ verified"}]);
+      line([{tag:"span",cls:"ok",text:"OpenClaw"}, "            signed chain + linkage verified, fail-closed"]);
+    }
+  }
+  const cap = document.createElement("div"); cap.className = "note";
+  cap.textContent = ev.durable
+    ? "Recorded in the durable signed evidence chain (SQLite, per-emitter HMAC keys)."
+    : "Recorded by the gateway's signed evidence emit (non-durable configuration).";
+  const box = document.createElement("div"); box.appendChild(g); box.appendChild(cap);
+  return box;
 }
 
 function resultCard(j){
   const card = document.createElement("div"); card.className="card";
+  const h = document.createElement("h4"); h.textContent = "Outcome"; card.appendChild(h);
   const v = (j.verdict||"—").toLowerCase();
   const cls = j.applied ? "pass" : (v==="refused"?"refused":"fail");
-  let chain = "";
-  (j.chain||[]).forEach(d=>{
-    chain += "  ".repeat(d.depth||0) + d.delegator + " → " + d.delegatee + "  " + d.skill + "@L" + d.level +
-             "  [" + d.status + (d.verdict?(" "+d.verdict):"") + "]\n";
-  });
-  card.innerHTML = "<h4>Outcome</h4>" +
-    (chain?("<div class='chain'>"+chain.replace(/→/g,"<span class='arrow'>→</span>")+"</div>"):"") +
-    "<div>Verdict: <span class='verdict "+cls+"'>"+(j.verdict||"—")+"</span>" +
-    (j.applied?"  · applied in sandbox, verified end to end":"  · nothing was applied — authority was not granted")+"</div>";
+  if ((j.chain||[]).length){
+    const chain = document.createElement("div"); chain.className = "chain";
+    for (const d of (j.chain||[])){
+      chain.appendChild(document.createTextNode("  ".repeat(d.depth||0) + String(d.delegator) + " "));
+      const ar = document.createElement("span"); ar.className = "arrow"; ar.textContent = "→";
+      chain.appendChild(ar);
+      chain.appendChild(document.createTextNode(
+        " " + String(d.delegatee) + "  " + String(d.skill) + "@L" + String(d.level) +
+        "  [" + String(d.status) + (d.verdict?(" "+String(d.verdict)):"") + "]\n"));
+    }
+    card.appendChild(chain);
+  }
+  const vd = document.createElement("div");
+  vd.appendChild(document.createTextNode("Verdict: "));
+  const vs = document.createElement("span"); vs.className = "verdict "+cls; vs.textContent = j.verdict||"—";
+  vd.appendChild(vs);
+  vd.appendChild(document.createTextNode(j.applied
+    ? "  · applied in sandbox, verified end to end"
+    : "  · nothing was applied — authority was not granted"));
+  card.appendChild(vd);
+  if (j.evidence){
+    const eh = document.createElement("h4"); eh.textContent = "Signed evidence lineage"; eh.style.marginTop=".8rem";
+    card.appendChild(eh);
+    card.appendChild(evidenceGraph(j.evidence, j.applied === true && (j.verdict==="PASS")));
+  }
   thread.appendChild(card); scroll();
 }
 
 async function runPlan(){
+  if (busy) return;
   const objective = $("goal").value.trim() || "Apply the reviewed fix and verify it";
   bubble({who:"you",name:"you",action:objective});
-  $("send").disabled=true;
+  supersedeActiveCard();
+  setBusy(true, "Planning…");
   currentRun = null;
   const j = await api("plan", null, objective);
-  $("send").disabled=false;
+  setBusy(false);
   if (!j) return;
   renderSteps(j.steps||[]);
   // Freeze the exact run identity used for approval + execute (never the live goal box).
   if (j.needs_approval && j.proposal && j.run_id && j.canonical_plan_hash){
     currentRun = { run_id:j.run_id, canonical_plan_hash:j.canonical_plan_hash, objective };
-    proposalCard(j.proposal);
+    activeCard = proposalCard(j.proposal, currentRun);
   }
 }
 
 // Step 1: owner approval (/v1/approvals, owner token). Step 2: execute with approval_id
 // (/v1/orchestrate, planner token). Authority is the owner-issued, hash-bound approval —
-// not any field the browser sends to execute.
-async function approveAndExecute(ownerToken, reason){
-  if (!currentRun){ bubble({who:"system",name:"system",action:"No active run to approve — plan first.",decision:"deny"}); return; }
-  if (!ownerToken){ bubble({who:"system",name:"system",action:"Paste the owner / break-glass token to approve.",decision:"deny"}); return; }
+// not any field the browser sends to execute. ``run`` is the card's frozen snapshot.
+// Returns true when the owner decision landed (the proposal card is then consumed).
+async function approveAndExecute(run, ownerToken, reason){
+  if (busy) return false;
+  if (!run){ bubble({who:"system",name:"system",action:"No active run to approve — plan first.",decision:"deny"}); return false; }
+  if (!ownerToken){ bubble({who:"system",name:"system",action:"Paste the owner / break-glass token to approve.",decision:"deny"}); return false; }
+  setBusy(true, "Executing…");
   let r, j;
   try{
     r = await fetch("/v1/approvals", { method:"POST",
       headers:{ "Authorization":"Bearer "+ownerToken, "Content-Type":"application/json" },
-      body: JSON.stringify({ run_id:currentRun.run_id, canonical_plan_hash:currentRun.canonical_plan_hash,
+      body: JSON.stringify({ run_id:run.run_id, canonical_plan_hash:run.canonical_plan_hash,
                              decision:"approve", reason:reason||"" }) });
-  }catch(e){ bubble({who:"system",name:"system",action:"Network error",detail:String(e),decision:"deny"}); return; }
+  }catch(e){ setBusy(false); bubble({who:"system",name:"system",action:"Network error",detail:String(e),decision:"deny"}); return false; }
   j = await r.json().catch(()=>({}));
   if (!r.ok){
+    setBusy(false);
     const err = (j.error||{});
     bubble({who:"system",name:"gateway",action:err.message||("HTTP "+r.status),detail:err.code||"",decision:"deny"});
-    return;
+    return false;
   }
   bubble({who:"owner",name:"owner",action:"approves the sandbox apply (owner-gated, hash-bound)",
           detail:j.approval_id+" · "+j.approval_status});
   // Execute under the planner token, carrying only the run_id + approval_id + frozen objective.
-  const ex = await api("execute", { run_id:currentRun.run_id, approval_id:j.approval_id }, currentRun.objective);
-  if (!ex) return;
+  const ex = await api("execute", { run_id:run.run_id, approval_id:j.approval_id }, run.objective);
+  setBusy(false);
+  if (!ex) return true;   // decision landed; the execute error was already surfaced
   renderSteps(ex.steps||[]);
   resultCard(ex);
+  return true;
 }
 
 // The refusal demo: execute the frozen run with no approval_id — the server returns the
 // governed approval_missing refusal on the wire (nothing is applied).
-async function runExecuteNoApproval(){
-  if (!currentRun){ bubble({who:"system",name:"system",action:"No active run — plan first.",decision:"deny"}); return; }
-  const ex = await api("execute", { run_id:currentRun.run_id }, currentRun.objective);
+async function runExecuteNoApproval(run){
+  if (busy) return;
+  if (!run){ bubble({who:"system",name:"system",action:"No active run — plan first.",decision:"deny"}); return; }
+  setBusy(true, "Refusing…");
+  const ex = await api("execute", { run_id:run.run_id }, run.objective);
+  setBusy(false);
   if (!ex) return;
   renderSteps(ex.steps||[]);
   resultCard(ex);
 }
 
 async function runProbe(){
+  if (busy) return;
   bubble({who:"you",name:"you",action:"Probe the boundary — try to break it."});
+  setBusy(true, "Probing…");
   const j = await api("probe");
+  setBusy(false);
   if (!j) return;
   renderSteps(j.steps||[]);
   bubble({who:"system",name:"boundary",action:"Every abuse was refused with its exact audit code.",decision:"allow"});
@@ -238,7 +352,7 @@ async function runProbe(){
 
 $("send").onclick = runPlan;
 $("probe").onclick = runProbe;
-$("goal").addEventListener("keydown", (e)=>{ if(e.key==="Enter"){ e.preventDefault(); runPlan(); }});
+$("goal").addEventListener("keydown", (e)=>{ if(e.key==="Enter" && !busy){ e.preventDefault(); runPlan(); }});
 </script>
 </body>
 </html>

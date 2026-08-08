@@ -567,13 +567,30 @@ def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> 
     # durable chain and OpenClaw verifies from signed evidence rather than the self-attested
     # report. Injected test sinks without the flag keep the pre-7B.0 gateway-only emit.
     wired = bool(getattr(gw, "EVIDENCE_RUNTIME_WIRED", False))
-    return session.execute(
+    result = session.execute(
         validation.record.approver,
         "",
         execute_ref=emit.evidence_ref,
         evidence_sink=getattr(gw, "EVIDENCE_SINK", None) if wired else None,
         approval_id=approval_id if wired else "",
     )
+    # Surface the gateway's own minted evidence reference in the transcript so the chat can
+    # render the lineage truthfully. Only identifiers/digests the gateway already produced —
+    # never keys, tokens, or payload contents — and only when a record was actually emitted;
+    # the default (no evidence plane) response shape is unchanged.
+    if emit.evidence_ref is not None:
+        ref = emit.evidence_ref
+        result["evidence"] = {
+            "durable": wired,
+            "approval_id": approval_id,
+            "execute_validated": {
+                "evidence_id": ref.evidence_id,
+                "evidence_digest": ref.evidence_digest,
+                "record_type": ref.record_type,
+                "sink_id": ref.sink_id,
+            },
+        }
+    return result
 
 
 def run_phase(

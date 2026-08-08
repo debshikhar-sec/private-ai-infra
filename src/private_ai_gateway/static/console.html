@@ -35,6 +35,11 @@
   nav button.nv.active { background: #131a2a; color: var(--text);
         box-shadow: inset 2px 0 0 var(--accent); }
   nav button.nv .ic { width: 1.1rem; text-align: center; font-size: .82rem; opacity: .9; }
+  nav a.nv { display: flex; align-items: center; gap: .6rem; width: 100%;
+        color: var(--dim); text-decoration: none; padding: .5rem .6rem; border-radius: 8px;
+        font-size: .82rem; border-top: 1px solid var(--line); margin-top: .4rem; }
+  nav a.nv:hover { background: var(--panel); color: var(--text); }
+  nav a.nv .ic { width: 1.1rem; text-align: center; font-size: .82rem; opacity: .9; }
   nav .foot { margin-top: auto; padding: .6rem .5rem 0; color: var(--dim);
               font-size: .64rem; border-top: 1px solid var(--line); }
 
@@ -68,6 +73,7 @@
     nav .brand small { display: none; }
     nav button.nv { width: auto; white-space: nowrap; flex: none; }
     nav button.nv.active { box-shadow: inset 0 -2px 0 var(--accent); }
+    nav a.nv { width: auto; white-space: nowrap; flex: none; border-top: 0; margin-top: 0; }
     nav .foot { display: none; }
     header { flex-wrap: wrap; padding: .5rem .8rem; row-gap: .4rem; }
     header .space { flex-basis: 100%; height: 0; }
@@ -76,6 +82,8 @@
   @media (max-width: 420px) {
     nav button.nv .ic { margin: 0; }        /* icons-only tabs when very narrow */
     nav button.nv span:not(.ic) { display: none; }
+    nav a.nv .ic { margin: 0; }
+    nav a.nv span:not(.ic) { display: none; }
   }
   header button:hover { background: #1a2b50; }
   header button.ghost { background: transparent; border-color: var(--line); font-weight: 400; }
@@ -173,6 +181,7 @@
   <button class="nv" data-pane="tools"><span class="ic">⚒</span>Tools</button>
   <button class="nv" data-pane="agents"><span class="ic">⧉</span>Agents</button>
   <button class="nv" data-pane="metrics"><span class="ic">∿</span>Metrics</button>
+  <a class="nv" href="/chat" title="Operate: propose, approve and observe a governed run"><span class="ic">💬</span><span>Governed Chat — operate ▸</span></a>
   <div class="foot">capability is not authority — every decision below is enforced, then recorded.</div>
 </nav>
 

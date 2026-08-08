@@ -84,7 +84,13 @@ lazily swaps models on demand (clearing the MLX cache between loads).
 | `offsec` | `mlx-community/Llama-3-70B-Instruct-Gradient-1048k-4bit` | long-context security analysis |
 
 The alias table is the single source of truth in `ROUTE_MAP`
-([app.py](../src/private_ai_gateway/app.py)).
+([app.py](../src/private_ai_gateway/app.py)). `ROUTE_MAP` is `DEFAULT_ROUTE_MAP` overlaid
+with the policy file's `[models.routes]` table, and the packaged demo policy **pins every
+alias**. That makes model-route identity part of the authority-bearing policy hash: swapping
+the model behind an alias changes the hash, so a previously-approved plan cannot silently
+execute against a different model build. Aliases left unpinned in a custom policy fall back
+to the built-in defaults. This matters before local-model qualification — a different model
+build must not inherit the same governed identity.
 
 ## Gateway controls
 
