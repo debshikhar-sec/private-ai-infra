@@ -1,10 +1,14 @@
 # Step 7B.1 / 7B.2 implementation contract
 
-**Audience:** the next implementing model/engineer (Opus 5 handoff).
-**Status:** binding contract, ratified by the pre-7B architecture audit and the 7B.0
-implementation (PR #40). This is not a roadmap — it specifies exactly what to build,
-what to reuse, and what is out of bounds. Do not reinterpret the architecture; if the
-repository reveals a genuine correctness blocker, stop and surface it instead.
+**Audience:** implementers and reviewers of the Step 7B increments.
+**Status: Step 7B is COMPLETE.** Part I (7B.1, append-first reservation) and Part II
+(7B.2, startup cross-store reconciliation) are both **shipped and merged**; they are
+retained here as the *specification of what was built* and the reasoning behind each
+binding decision, not as pending work. Part III (Tracks C/D) remains future, carries no
+authority, and is unblocked. Step 7C remains future and out of scope.
+
+Do not reinterpret the architecture; if the repository reveals a genuine correctness
+blocker, stop and surface it instead.
 
 Ground truth this contract assumes:
 
@@ -13,9 +17,15 @@ Ground truth this contract assumes:
   (`agents/openclaw/assurance.py`), all three records (`approval_decided`,
   `execute_validated`, `apply_result`) land in one durable chain, and OpenClaw verifies
   fail-closed with `require_signed_apply_evidence` + `require_signed_linkage`.
-- Authority ordering is still: `validate_for_execute` → `mark_used` →
-  emit `execute_validated` → `session.execute` (mutation) — see
-  `src/private_ai_gateway/orchestration.py::_run_execute`.
+- Authority ordering is the append-first sequence shipped in Step 7B.1:
+  `validate_for_execute` → emit `execute_validated` (durable reservation) → `mark_used` →
+  `session.execute` (mutation) → `apply_result` — see
+  `src/private_ai_gateway/orchestration.py::_run_execute`. At most one reservation can
+  exist per `approval_id`, enforced by a per-approval critical section.
+- Startup runs one cross-store reconciliation pass
+  (`src/private_ai_gateway/reconciliation.py::reconcile`) after both stores have
+  independently passed their own integrity validation. It classifies before it acts, and
+  its only action is `invalidate_run`.
 - Two separate SQLite stores (never merged): `authority.sqlite3`
   (`SqliteApprovalStore`) and `evidence.sqlite3` (`SqliteEvidenceSink`), both
   exclusively owned via `flock` sidecar locks, both integrity-checked at the
@@ -37,11 +47,11 @@ branch delete; never push `main` directly; no co-author trailer; deterministic t
 
 ---
 
-## Part I — Step 7B.1: append-first reservation
+## Part I — Step 7B.1: append-first reservation · **SHIPPED**
 
-### Current vs target ordering
+### The ordering change (historical: this is what 7B.1 changed)
 
-Current (`_run_execute`):
+Before 7B.1 (`_run_execute`):
 
 ```text
 validate_for_execute
@@ -50,7 +60,7 @@ validate_for_execute
 → session.execute            (mutation)
 ```
 
-Target:
+Shipped:
 
 ```text
 validate_for_execute
@@ -138,7 +148,10 @@ exists before consumption, so on restart the state is classifiable.
 > the approval is still APPROVED, then `mark_used` cannot have completed, and therefore
 > the mutation cannot have started. **Resolution: INVALIDATE.**
 
-Shipped as `state.resolve_interrupted_reservations`, run at durable startup.
+Shipped at durable startup. 7B.1 landed this as a standalone resolver
+(`state.resolve_interrupted_reservations`); **Step 7B.2 subsumed it** as class 2 of the
+general reconciler (`reconciliation.reconcile`), so there is now exactly one pass and it
+observes the original cross-store shape before anything is repaired.
 
 **Why invalidate rather than consume** (this supersedes the earlier
 "consume-or-invalidate, pick one" wording): consuming would turn a state we *know* to be
@@ -195,16 +208,27 @@ PASS to FAIL. With the critical section restored: one reservation, one PASS, one
 
 ---
 
-## Part II — Step 7B.2: startup cross-store reconciliation
+## Part II — Step 7B.2: startup cross-store reconciliation · **SHIPPED**
 
-At durable startup (after both stores' own integrity validation), join the authority
-scan (reuse the pass `SqliteApprovalStore._validate_on_open` already makes) against the
-evidence chain filtered by `(run_id, approval_id)` and classify:
+Shipped as `src/private_ai_gateway/reconciliation.py::reconcile`, called from
+`state.open_backend` once both stores are open and each has independently passed its own
+integrity validation. It **subsumes** the 7B.1 reserved-but-unconsumed resolver as class 2
+— deliberately not run as a separate repair beforehand, which would have erased the
+original cross-store shape the general classifier needs to observe.
+
+The pass reads the authority snapshot (`snapshot_approvals`) and the verified evidence
+chain, builds immutable findings for **every** approval, and only then applies actions.
+Its sole action is `invalidate_run`; it creates nothing, deletes nothing, retries nothing,
+and has no access to an executor. Any failure to inspect either store raises
+`ReconciliationError`, surfaced by `state.open_backend` as a fail-closed `StateError` —
+"unable to inspect" is never treated as "clean".
+
+Classes:
 
 | Class | Authority state | Evidence state | Resolution |
 |-------|-----------------|----------------|------------|
 | 1 | APPROVED | no reservation | no-op (clean) |
-| 2 | APPROVED | reservation present | automatic safe repair: consume-or-invalidate (same rule as 7B.1 C2) |
+| 2 | APPROVED | reservation present | **invalidate** — the mutation provably never started (this *is* the 7B.1 C2 rule, subsumed here) |
 | 3 | USED | reservation present, no `apply_result` | dirty run: invalidate (`RunStatus.INVALIDATED`), surface disposition, fail closed |
 | 4 | USED | full chain (reservation + `apply_result`) | complete (clean) |
 | 5 | no matching approval | evidence records exist | fail closed: surface for human disposition — evidence never regrants authority |
@@ -212,8 +236,21 @@ evidence chain filtered by `(run_id, approval_id)` and classify:
 
 ### Binding decisions
 
-- Automatic repair is permitted ONLY for classes 1, 2, 4 (2 being the only one that
-  acts). Classes 3, 5, 6 fail closed with a surfaced disposition.
+- Automatic repair is permitted ONLY for class 2 (classes 1 and 4 are clean no-ops).
+  Classes 3, 5, 6 fail closed with a surfaced finding — 3 and 6 by invalidating the run,
+  5 by surfacing the inconsistency without ever synthesizing authority.
+- **Classify first, act second.** The complete cross-store scan produces immutable
+  findings before the first mutation, so a repair can never erase the shape a later
+  classification depends on. This is why the 7B.1 resolver had to be *subsumed* rather
+  than left as a preceding pass.
+- **"Unable to inspect" is not "clean".** Any failure to read either store raises
+  `ReconciliationError`, surfaced as a fail-closed `StateError` from `open_backend`.
+- **Ambiguity is never normalized.** More than one reservation for an approval, or
+  conflicting `apply_result` records, fails closed — never pick latest, never pick first,
+  never silently discard.
+- **Class 4 requires real signed linkage**, resolved with OpenClaw's own
+  `resolve_evidence_ref`: presence of an `apply_result` is never sufficient. No weaker
+  parallel verifier exists.
 - **No automatic double-apply, ever.** Reconciliation never re-runs a mutation.
 - **No evidence-derived regrant.** Evidence records prove what happened; they never
   become authority to do anything again.
@@ -222,18 +259,29 @@ evidence chain filtered by `(run_id, approval_id)` and classify:
   `INVALIDATED`.
 - Use the existing `RunStatus.INVALIDATED` as the terminal bar. Do NOT pull 7C's
   `run_disposition` / `verification_result` forward.
-- Pending-approval expiry semantics land here (with the staleness handling), not in
-  7B.1.
+- **Pending-approval expiry: deliberately DEFERRED, not implemented.** The repository
+  provides no grounded source for a pending lifetime: `expires_at` is set only by
+  `decide_approval` (the *approved* TTL), the only policy-level TTL is
+  `[delegation] ttl_seconds` which governs A2A delegation grants rather than approvals,
+  and startup coherence explicitly *rejects* a pending approval that carries expiry data.
+  Closing this LOW-severity item would therefore mean inventing a TTL, weakening a
+  coherence rule, or adding a schema migration for it — none of which 7B.2 correctness
+  needs. It stays open until a policy/config source for a pending lifetime exists.
 
-### Acceptance criteria (7B.2)
+### Acceptance criteria (7B.2) — met; see `tests/unit/test_reconciliation.py`
 
-- A startup classifier with one deterministic test per class (raw-SQL/state fixtures to
-  construct each shape, close/reopen to trigger).
-- Classes 3/5/6 produce a fail-closed startup outcome whose message names the run and
-  the class — an operator can act without reading source.
-- Class-2 repair is idempotent (a second restart classifies the same run as clean).
-- The 7B.1 crash tests C3/C4 now assert the classifier's verdicts.
+- A startup classifier with one deterministic test per class (classes 1–4 produced by
+  driving the governed loop and crashing it; 5–6 by constructing the durable shape).
+- Classes 3/5/6 produce a fail-closed outcome whose finding names the class, run and
+  approval — an operator can act without reading source.
+- Class-2 repair is idempotent (repeated restarts classify the run as already resolved).
+- The 7B.1 crash tests C3/C4 assert the classifier's verdicts.
 - Full suite green; coverage gate holds.
+
+**Status: shipped.** Three load-bearing guarantees were falsified before being trusted:
+neutralizing the linkage check makes class 3 collapse into class 4 (4 tests fail);
+resolving ambiguity by picking the first reservation fails the duplicate test; and
+returning an empty index on an unreadable chain fails the unreadable-input test.
 
 ### Explicit 7C exclusion (both steps)
 

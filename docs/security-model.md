@@ -224,11 +224,19 @@ reaches its verdict by reading artifacts authored by the very components it veri
   exist per approval — enforced by a per-approval critical section over
   validate/reserve/consume, which is sufficient here *only* because both databases are held
   under an exclusive single-owner `flock` for the process lifetime, so no second writer
-  exists. What is **not** built yet: startup cross-store reconciliation of the remaining
-  shapes — in particular a crash *during* the mutation (approval consumed, reservation
-  present, no `apply_result`) is left untouched for 7B.2 to classify conservatively — plus
-  signed verifier verdicts and terminal disposition. Sandbox-confined mutation remains the
-  safe execution target until then. The signed linkage graph above is
+  exists. Since 7B.2 a single startup pass joins both stores after each has
+  independently validated itself, classifies every approval into the six ratified classes,
+  and acts only afterwards: it invalidates a reserved-but-unconsumed run, invalidates and
+  surfaces a run whose authority was consumed without a valid linked outcome (never
+  claiming the mutation succeeded or failed, never auto-retrying), fails closed on evidence
+  that has no compatible authority projection (evidence is retained append-only and never
+  becomes authority), and leaves complete, signature-linked runs alone. Ambiguous evidence
+  fails closed rather than being normalized, and a store that cannot be inspected aborts
+  startup instead of reading as clean. What is **not** built yet: the runtime still cannot
+  determine *whether* a mutation interrupted mid-flight actually landed — it records that
+  the outcome is unknown and stops. Signed verifier verdicts and a terminal, recorded
+  disposition of a dirty run are 7C. Sandbox-confined mutation remains the safe execution
+  target until then. The signed linkage graph above is
   the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an **unused,
   non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned
   autonomy. Autonomy remains fixed-ceiling by policy.

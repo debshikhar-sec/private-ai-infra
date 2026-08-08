@@ -33,11 +33,8 @@ from private_ai_gateway import app as gw
 from private_ai_gateway import orchestration
 from private_ai_gateway.approvals import ApprovalError, ApprovalStatus, RunStatus
 from private_ai_gateway.demo import TOKENS, install_demo_plane
-from private_ai_gateway.state import (
-    StateConfig,
-    open_backend,
-    resolve_interrupted_reservations,
-)
+from private_ai_gateway.reconciliation import reconcile
+from private_ai_gateway.state import StateConfig, open_backend
 
 _GW_HEX = "aa" * 32
 _OC_HEX = "bb" * 32
@@ -267,10 +264,10 @@ def test_c2_resolution_is_idempotent_across_repeated_restarts(tmp_path, monkeypa
                 ApprovalStatus.INVALIDATED
             )
             assert _types(again.evidence_sink) == first_types
-            # Re-running the pass directly reports nothing left to resolve.
-            assert resolve_interrupted_reservations(
-                again.authority_store, again.evidence_sink
-            ) == []
+            # Re-running the pass directly reports nothing left to resolve. Since 7B.2
+            # the class-2 resolver IS the general reconciler, so an already-resolved
+            # database reports no further invalidation.
+            assert reconcile(again.authority_store, again.evidence_sink).invalidated == ()
             again.evidence_sink.verify_chain()
         finally:
             again.close()
@@ -299,10 +296,15 @@ def test_c2_invalidated_approval_cannot_be_executed_after_restart(tmp_path, monk
         reopened.close()
 
 
-# --- C3 / C4: distinguishable durable shapes (classified in 7B.2, not here) -----------
+# --- C3 / C4: the durable shapes 7B.1 produces, as classified by 7B.2 ------------------
 
 def test_c3_shape_is_used_plus_reservation_without_apply_result(tmp_path, monkeypatch, wired):
-    """Crash after consumption, before the apply completes: possibly-dirty, never retried."""
+    """Crash after consumption, before the apply completes: possibly-dirty, never retried.
+
+    7B.1's job is producing a shape a reconciler can *tell apart*; since 7B.2 that shape is
+    classified dirty and the run is invalidated (see `test_reconciliation.py` for the
+    classifier's own coverage).
+    """
     client, opened = wired
     run_id, plan_hash = _plan(client)
     approval_id = _approve(client, run_id, plan_hash)
@@ -322,8 +324,8 @@ def test_c3_shape_is_used_plus_reservation_without_apply_result(tmp_path, monkey
         assert appr.approval_status is ApprovalStatus.USED          # authority WAS spent
         assert len(_reservations(reopened.evidence_sink, approval_id)) == 1
         assert "apply_result" not in _types(reopened.evidence_sink)  # outcome unknown
-        # 7B.1 must NOT touch this shape — resolving it belongs to 7B.2.
-        assert reopened.authority_store.get_run(run_id).status is not RunStatus.INVALIDATED
+        # The shape is distinguishable from C4, and 7B.2 fails it closed at the run level.
+        assert reopened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
     finally:
         reopened.close()
 
@@ -343,7 +345,7 @@ def test_c4_shape_is_used_plus_complete_chain(tmp_path, wired):
         assert _types(reopened.evidence_sink) == [
             "approval_decided", "execute_validated", "apply_result",
         ]
-        # A complete run is left alone by the C2 pass.
+        # A complete run is class 4 — left alone by reconciliation.
         assert reopened.authority_store.get_run(run_id).status is not RunStatus.INVALIDATED
         reopened.evidence_sink.verify_chain()
     finally:

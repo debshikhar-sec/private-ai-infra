@@ -460,6 +460,20 @@ class SqliteApprovalStore:
             ).fetchone()
         return _row_to_approval(row) if row is not None else None
 
+    def snapshot_approvals(self) -> tuple[ApprovalRecord, ...]:
+        """A read-only point-in-time copy of every approval (Step 7B.2).
+
+        The narrowest enumeration startup reconciliation needs. Rows go through the same
+        ``_row_to_approval`` reconstruction the constructor's integrity scan uses, so the
+        reconciler receives typed :class:`ApprovalRecord` values and never a cursor, a raw
+        row, or the connection — storage stays encapsulated here.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM approvals ORDER BY approval_id"
+            ).fetchall()
+        return tuple(_row_to_approval(row) for row in rows)
+
     def decide_approval(
         self,
         approval_id: str,

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Protocol, runtime_checkable
@@ -154,6 +154,8 @@ class AuthorityStore(Protocol):
 
     def get_approval(self, approval_id: str) -> ApprovalRecord | None: ...
 
+    def snapshot_approvals(self) -> tuple[ApprovalRecord, ...]: ...
+
     def decide_approval(
         self,
         approval_id: str,
@@ -222,6 +224,19 @@ class ApprovalStore:
 
     def get_run(self, run_id: str) -> RunRecord | None:
         return self._runs.get(run_id)
+
+    def snapshot_approvals(self) -> tuple[ApprovalRecord, ...]:
+        """A read-only point-in-time copy of every approval (Step 7B.2).
+
+        The narrowest enumeration startup reconciliation needs: it must see the *whole*
+        authority side to classify runs against the evidence chain, and the per-id getters
+        cannot express "everything". Returns detached copies under the store lock, so a
+        caller can neither observe a torn read nor mutate stored state through the result —
+        reconciliation classifies from a snapshot and acts only through the normal governed
+        methods.
+        """
+        with self._lock:
+            return tuple(replace(appr) for appr in self._approvals.values())
 
     def invalidate_run(self, run_id: str) -> None:
         """Invalidate a run and all its non-terminal approvals (fail closed downstream)."""

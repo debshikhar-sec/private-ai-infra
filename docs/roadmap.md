@@ -156,28 +156,29 @@ capability second.
   survives a crash into a later process is invalidated fail-closed at startup — the run is
   closed out, no mutation had started, nothing is retried, and another attempt needs fresh
   authority. A reservation that cannot be appended refuses before consuming anything.
+- **Startup cross-store reconciliation (7B.2)** — one pass joins the authority store and the
+  evidence chain at startup (after each independently validates itself), classifies every
+  approval into the six ratified classes, and only then acts. Automatic repair is limited to
+  the provably-safe class; a crash during the mutation is failed closed as dirty (invalidated
+  and surfaced, never auto-retried, never claimed successful); evidence with no compatible
+  authority never becomes authority; ambiguity fails closed rather than being normalized;
+  and a store that cannot be inspected aborts startup instead of reading as clean. It
+  subsumes the 7B.1 class-2 resolver, so one pass sees the original cross-store shape.
 
 ## Next — evidence integrity (verifier-owned), in sequence
 
 Design: [evidence-sink-design.md](evidence-sink-design.md). Each step is separately gated.
-The next two steps are specified as a binding contract — exact target ordering, crash
-injection points, reconciliation classes and acceptance criteria — in
+Step 7B is complete; what it built, and the reasoning behind each binding decision, is
+recorded in
 [step-7b1-7b2-implementation-contract.md](step-7b1-7b2-implementation-contract.md).
 
-- **Startup cross-store reconciliation (7B.2)** — *not yet built.* A startup classifier joins
-  the authority scan against the evidence chain, auto-resolves only provably-safe states, and
-  fails closed (run invalidated, surfaced for disposition) on ambiguous outcomes. 7B.1
-  shipped only the one shape it could resolve on its own (reservation present + approval
-  still APPROVED ⇒ invalidate); the remaining shapes — a crash *during* the mutation,
-  evidence without matching authority, and authority consumed without a reservation — are
-  still unclassified.
 - **`ApprovalRecord.evidence_refs` population** — *future.* An **unused, non-authoritative
   placeholder** today; it is *not* the signed graph (which shipped as payload-embedded
   `EvidenceRef` data). Populating it would be a convenience index over the sink records.
-- **Crash-safe runtime enforcement across restarts (needs 7B.2)** — *future.* The
-  durable-evidence mode fails closed at decision/emit time and 7B.1 supplies the append-first
-  ordering; treating a mutation as verified only with valid chained evidence **across a
-  process crash** still needs the reconciliation above.
+- **Determining whether an interrupted mutation actually landed** — *future (needs 7C).*
+  7B.1 + 7B.2 make an interrupted execution *classifiable* and fail it closed, but the
+  runtime records only that the outcome is unknown. Turning that into a recorded terminal
+  fact needs the signed verifier verdict and human disposition below.
 - **Signed verifier verdict, terminal disposition, rollback/containment (7C)** — *not yet
   built.* OpenClaw's verdict recorded as signed evidence, human disposition of dirty runs as
   a terminal signed fact, and bounded rollback/containment.
