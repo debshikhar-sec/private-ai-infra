@@ -62,6 +62,19 @@ class CodeActWorker:
         # Evidence-sink emit (design step 3). All optional: when ``evidence_sink`` is None the
         # worker behaves exactly as before (no record emitted). The sink is *verifier-owned* —
         # it is injected here as a handle, never instantiated by the executor.
+        #
+        # Step 7B.0 key custody: with a sink handle but no explicit key, OpenCode loads its
+        # OWN signing key from its own environment variable — the key is never passed through
+        # the session/gateway boundary. A missing/invalid key fails closed (loudly) here.
+        if evidence_sink is not None and evidence_key is None:
+            import os
+
+            from openclaw.assurance import emitter_signing_key
+            from openclaw.sink import EMITTER_OPENCODE
+
+            evidence_key, emitter_key_id = emitter_signing_key(
+                os.environ, EMITTER_OPENCODE
+            )
         self.evidence_sink = evidence_sink
         self.evidence_key = evidence_key
         self.emitter_key_id = emitter_key_id

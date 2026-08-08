@@ -37,6 +37,7 @@ class AssuranceWorker:
         run_id: str | None = None,
         approval_id: str | None = None,
         require_signed_apply_evidence: bool = False,
+        require_signed_linkage: bool = False,
     ):
         self.peer = peer
         self.audit_limit = audit_limit
@@ -49,6 +50,9 @@ class AssuranceWorker:
         self.run_id = run_id
         self.approval_id = approval_id
         self.require_signed_apply_evidence = require_signed_apply_evidence
+        # Step 7B.0: under the wired durable-evidence runtime the apply must also resolve
+        # up the signed graph (apply_result -> execute_validated -> approval_decided).
+        self.require_signed_linkage = require_signed_linkage
 
     def poll(self) -> list[dict]:
         """Handle every submitted ``assurance.verify`` task; return the reports."""
@@ -100,6 +104,7 @@ class AssuranceWorker:
                 run_id=self.run_id,
                 approval_id=self.approval_id,
                 require_signed_apply_evidence=self.require_signed_apply_evidence,
+                require_signed_linkage=self.require_signed_linkage,
             )
         )
         report = build_report(findings)

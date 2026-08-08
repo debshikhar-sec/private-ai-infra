@@ -128,19 +128,46 @@ capability second.
   unsigned report rescue a broken graph. Verified linear scan; no durable index yet
   (`SCHEMA_VERSION` 2).
 
+## Shipped — durable single-node substrate (Steps 7A / 7A.1 / 7B.0)
+
+- **Durable authority + evidence stores (7A)** — `PRIVATE_AI_STATE_BACKEND=sqlite` persists
+  the authority store (runs/approvals) and the evidence chain as **two separate,
+  WAL-backed SQLite databases** under `PRIVATE_AI_STATE_DIR`, with forward-only fail-closed
+  migrations and a both-or-neither initialization rule. `memory` remains the default.
+- **Correctness hardening (7A.1)** — exclusive single-owner `flock` per database (a second
+  live owner fails closed), full startup integrity (`integrity_check`, `foreign_key_check`,
+  typed reconstruction of every row, binding/coherence consistency — corruption fails at the
+  constructor), fully serialized evidence appends, atomic authority read-modify-write, strict
+  persisted booleans, UTC-normalized timestamps, and resource cleanup on every failure path.
+- **Live durable evidence wiring (7B.0)** — `PRIVATE_AI_EVIDENCE_MODE=durable` (requires the
+  sqlite backend + per-emitter HMAC keys) opens the durable evidence store as a **live sink**
+  under assurance-owned construction (`openclaw.assurance` builds the verification registry;
+  the gateway holds only a sink handle and its own signing key). The gateway's
+  `approval_decided`/`execute_validated` and OpenCode's `apply_result` land in **one durable
+  signed chain** that OpenClaw verifies fail-closed (signed apply + signed linkage required),
+  `REQUIRE_AUTHORIZATION_EVIDENCE` is forced on, evidence ownership is held for the process
+  lifetime, and a populated database reopens and re-verifies across restarts.
+
 ## Next — evidence integrity (verifier-owned), in sequence
 
 Design: [evidence-sink-design.md](evidence-sink-design.md). Each step is separately gated.
 
-- **Durable evidence/approval storage + reconciliation** — *future.* The stores are in-memory
-  today; durability, crash recovery, append-first authority transitions, and startup/periodic
-  reconciliation come next.
+- **Append-first execution reservation (7B.1)** — *not yet built.* Reorder the execute path
+  so the durable `execute_validated` record is appended **before** single-use consumption and
+  any mutation, closing the crash window where a consumed approval leaves no durable trace.
+- **Startup cross-store reconciliation (7B.2)** — *not yet built.* A startup classifier joins
+  the authority scan against the evidence chain, auto-resolves only provably-safe states, and
+  fails closed (run invalidated, surfaced for disposition) on ambiguous outcomes.
 - **`ApprovalRecord.evidence_refs` population** — *future.* An **unused, non-authoritative
   placeholder** today; it is *not* the signed graph (which shipped as payload-embedded
   `EvidenceRef` data). Populating it would be a convenience index over the sink records.
-- **Fail-closed runtime evidence enforcement** — *future.* A mutating action is not treated
-  as verified without valid, chained evidence across process crashes; sink-unavailable fails
-  closed.
+- **Crash-safe runtime enforcement across restarts (7B.1/7B.2 together)** — *future.* The
+  durable-evidence mode already fails closed at decision/emit time; treating a mutation as
+  verified only with valid chained evidence **across a process crash** additionally needs the
+  append-first ordering and reconciliation above.
+- **Signed verifier verdict, terminal disposition, rollback/containment (7C)** — *not yet
+  built.* OpenClaw's verdict recorded as signed evidence, human disposition of dirty runs as
+  a terminal signed fact, and bounded rollback/containment.
 - **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.

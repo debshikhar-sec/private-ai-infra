@@ -9,6 +9,7 @@ upstream (an enterprise LLM-as-a-Service platform, vLLM, Ollama, …), or an off
 demo simulator. See backends.py.
 """
 
+import atexit
 import hmac
 import importlib.resources
 import json
@@ -105,26 +106,45 @@ DECISION_LOG = DecisionLog(os.path.join(LOG_DIR, "decisions.jsonl"), forwarder=S
 # PRIVATE_AI_STATE_BACKEND (default "memory"): "memory" is the in-process, restart-forgetting
 # ApprovalStore (byte-identical to before); "sqlite" opens a durable single-node store under
 # PRIVATE_AI_STATE_DIR (Step 7A). Store selection changes *durability only* — the governed
-# lifecycle, ordering, and authorization semantics are unchanged. The durable evidence
-# database is initialized/validated alongside it but left unwired (no keys loaded here), so
-# EVIDENCE_SINK stays None below.
+# lifecycle, ordering, and authorization semantics are unchanged.
 _STATE_CONFIG = state.StateConfig.from_env(os.environ)
-_OPENED_BACKEND = state.open_backend(_STATE_CONFIG)
+_OPENED_BACKEND = state.open_backend(_STATE_CONFIG, environ=os.environ)
 APPROVAL_STORE = _OPENED_BACKEND.authority_store
 
-# Step 5 / 5b — gateway authorization evidence emit: injection points ONLY (additive).
-# The gateway can emit signed authorization records into a verifier-owned EvidenceSink at two
+# Gateway authorization evidence (Steps 5/5b emit points; Step 7B.0 live durable wiring).
+# The gateway emits signed authorization records into a verifier-owned EvidenceSink at two
 # points: `execute_validated` when execution authority is granted (orchestration._run_execute)
-# and `approval_decided` when an approval decision is recorded (v1_approvals). Production
-# defaults to no sink, so behavior is byte-identical to before. No key material is ever loaded
-# from disk or env here — a caller (a test, or a later, separately-authorized wiring step) sets
-# these. With REQUIRE_AUTHORIZATION_EVIDENCE True a configured-but-failing emit fails closed
-# *before* the outcome it guards (execution refused / approval denied + run invalidated); with
-# it False (default) emit is best-effort and never changes the governed outcome.
-EVIDENCE_SINK = None
-EVIDENCE_KEY = None
-EVIDENCE_KEY_ID = ""
-REQUIRE_AUTHORIZATION_EVIDENCE = False
+# and `approval_decided` when an approval decision is recorded (v1_approvals).
+#
+# Default (PRIVATE_AI_EVIDENCE_MODE=off): no sink — behavior is byte-identical to before, and
+# no key material is loaded. Tests may still inject a sink/key onto this module directly.
+#
+# Durable mode (PRIVATE_AI_EVIDENCE_MODE=durable, Step 7B.0): open_backend returned a LIVE
+# durable sink constructed by assurance-owned code (openclaw.assurance — the gateway never
+# builds or holds the verification registry). The gateway loads only its OWN emitter signing
+# key; REQUIRE_AUTHORIZATION_EVIDENCE is forced True (durable mode IS the hardened
+# configuration — a configured-but-failing emit fails closed *before* the outcome it guards),
+# and EVIDENCE_RUNTIME_WIRED threads the sink through the execution session so OpenCode's
+# signed apply_result lands in the same durable chain and OpenClaw verifies from it.
+EVIDENCE_SINK = _OPENED_BACKEND.evidence_sink
+if EVIDENCE_SINK is not None:
+    from openclaw import assurance as _assurance  # importable: open_backend already used it
+    from openclaw.sink import EMITTER_GATEWAY as _EMITTER_GATEWAY
+
+    EVIDENCE_KEY, EVIDENCE_KEY_ID = _assurance.emitter_signing_key(
+        os.environ, _EMITTER_GATEWAY
+    )
+    REQUIRE_AUTHORIZATION_EVIDENCE = True
+    EVIDENCE_RUNTIME_WIRED = True
+else:
+    EVIDENCE_KEY = None
+    EVIDENCE_KEY_ID = ""
+    REQUIRE_AUTHORIZATION_EVIDENCE = False
+    EVIDENCE_RUNTIME_WIRED = False
+
+# Release both stores' connections and ownership locks on interpreter shutdown. (Process
+# death releases the flocks anyway; this makes a *clean* shutdown explicit.)
+atexit.register(_OPENED_BACKEND.close)
 
 # Delegation ledger: the lifecycle state for governed agent-to-agent hand-offs.
 # Enforcement outcomes (allow/deny + reason) go to DECISION_LOG like everything else.

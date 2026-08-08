@@ -9,12 +9,17 @@
 
 > ## AI capability is not AI authority.
 >
-> A **model-plane-agnostic AI governance gateway**: OpenAI-compatible on both sides, it
-> sits in front of **whatever serves your models** — an enterprise LLM-as-a-Service
-> platform, vLLM/TGI/Ollama/LM Studio, or in-process Apple Silicon MLX — and enforces
-> **policy-as-code identity, model authorization, an enforced L0–L6 autonomy ceiling,
-> per-tool and per-skill grants (MCP/A2A), egress guardrails, and a structured decision
-> audit** before any token is generated.
+> A **local-first agent runtime assurance and governance plane**: OpenAI-compatible on
+> both sides, it sits in front of **whatever serves your models** — an enterprise
+> LLM-as-a-Service platform, vLLM/TGI/Ollama/LM Studio, or in-process Apple Silicon MLX —
+> and enforces **policy-as-code identity, model authorization, an enforced L0–L6 autonomy
+> ceiling, per-tool and per-skill grants (MCP/A2A), egress guardrails, and a structured
+> decision audit** before any token is generated. On top of that boundary it runs a
+> governed authority loop — owner-gated, single-use, canonical-plan-hash-bound approvals —
+> whose authorization, execution, and outcome are recorded as a **signed, hash-chained,
+> durably stored evidence graph** that an **independent verifier (OpenClaw)** re-derives
+> fail-closed. Explicit authority, evidence lineage, independent verification — none of it
+> inferred from model capability.
 >
 > A leaked low-privilege key can't reach a model it was never granted; an agent capped at
 > *suggest* can't be handed work that *executes*. Enforced in code, **before any model
@@ -178,10 +183,11 @@ hermes -> opencode  code.apply@L3   [completed PASS]
   10/10 steps behaved exactly as policy demands.
 ```
 
-### Evidence integrity — making the record trustworthy (in progress)
+### Evidence integrity — making the record trustworthy
 
 The loop above proves *authority*; the current build hardens the *evidence* of what was
-authorized and what then happened. Merged today:
+authorized and what then happened — signed, chained, durably stored, independently
+verified. Merged today:
 
 - **Owner-gated execute authority loop** — execute requires a durable, **single-use**,
   **owner-approved** decision bound to the plan's **canonical hash** (`run_id` +
@@ -199,20 +205,18 @@ authorized and what then happened. Merged today:
   OpenCode `apply_result` evidence from an injected `EvidenceSink` when signed evidence is
   required: it verifies the chain, finds the matching signed record, and derives the apply
   verdict from it. An unsigned `apply_report.json` alone is insufficient when signed
-  evidence is required. This is **tamper-evident HMAC-signed evidence, not non-repudiation**,
-  and it proves **component-level consume/verification, not full end-to-end runtime
-  enforcement**: it is unit-proven against an injected sink, without the end-to-end
-  gateway-issued `run_id` / `approval_id` wiring.
+  evidence is required. This is **tamper-evident HMAC-signed evidence, not
+  non-repudiation**; under the durable runtime configuration (below) this consume is wired
+  end-to-end with the gateway-issued `run_id` / `approval_id`.
 - **Gateway emits signed `execute_validated` authorization evidence** — the gateway can now
   emit a signed `execute_validated` record when execution authority is granted. The record
   is emitted after approval validation and `mark_used`, before `session.execute`; the
   payload contains `canonical_plan_hash` and `validated=true`, while `run_id` and
   `approval_id` remain in the evidence envelope. The default no-sink behavior is
   backward-compatible, and `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before
-  mutation if authorization evidence is unavailable. This is **component-level gateway
-  authorization evidence emit, not full runtime fail-closed enforcement**; the
-  `execute_validated` record now also carries a signed `approval_ref` back to its
-  `approval_decided` decision (the signed evidence graph below).
+  mutation if authorization evidence is unavailable. The `execute_validated` record also
+  carries a signed `approval_ref` back to its `approval_decided` decision (the signed
+  evidence graph below).
 - **Gateway emits signed `approval_decided` decision evidence** — when an owner approves or
   rejects at `POST /v1/approvals`, the gateway can now emit a signed `approval_decided`
   record after the decision is stored and **before** the success response. The payload
@@ -242,15 +246,35 @@ authorized and what then happened. Merged today:
   digest-mismatched links, and never letting an unsigned `apply_report.json` rescue a broken
   signed graph. Resolution is a **verified linear scan**; there is no durable evidence index
   yet. `SCHEMA_VERSION` is `2`.
+- **Durable single-node stores (Steps 7A/7A.1)** — `PRIVATE_AI_STATE_BACKEND=sqlite`
+  persists the authority store (runs/approvals) and the evidence chain as **two separate,
+  exclusively-owned (`flock`), WAL-backed SQLite databases** under `PRIVATE_AI_STATE_DIR`,
+  with forward-only fail-closed migrations and full fail-closed startup integrity: SQLite
+  `integrity_check`/`foreign_key_check`, typed reconstruction of every stored row (enums,
+  strict booleans, UTC-normalized timestamps, JSON shapes), and binding/coherence
+  consistency — a corrupted database fails at the constructor, and a second live owner of a
+  database fails closed. `memory` remains the default backend.
+- **Live durable evidence wiring (Step 7B.0)** — `PRIVATE_AI_EVIDENCE_MODE=durable`
+  (requires the sqlite backend plus per-emitter HMAC keys) opens the durable evidence store
+  as a **live sink** under **assurance-owned construction**: `openclaw.assurance` builds the
+  verification registry, while the gateway and OpenCode each load **only their own** signing
+  key. The gateway's `approval_decided`/`execute_validated` and OpenCode's `apply_result`
+  land in **one durable signed chain** under the gateway-issued `run_id`/`approval_id`;
+  OpenClaw verifies that chain fail-closed (signed apply evidence **and** signed linkage
+  required); `REQUIRE_AUTHORIZATION_EVIDENCE` is forced on; evidence ownership is held for
+  the process lifetime; and a populated database reopens and re-verifies across restarts.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
 non-authoritative placeholder** and is *not* the signed graph and does not affect
-authorization. **Durable evidence/approval storage**, **runtime fail-closed integration** on
-missing/invalid evidence across process crashes, and **reconciliation** remain future
-milestones, as do the **trust ledger** and **earned autonomy** that would sit on top. Autonomy
-stays fixed-ceiling by policy — no self-approval, no earned-trust escalation. The signed
-evidence is **tamper-evident, not non-repudiation**.
+authorization. **Append-first execution reservation (7B.1)** and **startup cross-store
+reconciliation (7B.2)** are **not yet built** — a crash between single-use consumption and
+mutation still leaves no durable execution trace, so runtime-wide crash-safe mutation
+semantics are not claimed and sandbox-confined mutation remains the safe execution target.
+The **signed verifier verdict, terminal disposition, and rollback/containment (7C)**, the
+**trust ledger**, and **earned autonomy** remain future. Autonomy stays fixed-ceiling by
+policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
+signed evidence is **tamper-evident, not non-repudiation** (symmetric HMAC).
 Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).
 
 ## See it enforce (no GIF)

@@ -199,19 +199,30 @@ reaches its verdict by reading artifacts authored by the very components it veri
   holder of an emitter's key could forge that emitter's record. It defends against an external
   editor and honest-but-broken components — not against a party who holds the key. Asymmetric
   keys / KMS / key separation (which would give non-repudiation) are **future**, not built.
-- **OpenClaw's consume/validation and the gateway's `execute_validated` and
-  `approval_decided` emits are component-level, not end-to-end.** All are unit-proven against
-  an injected sink; the end-to-end gateway-issued `run_id` / `approval_id` wiring is
-  **future**, so this proves component-level consume/verification and gateway authorization
-  evidence emit (both the `execute_validated` authority-consumed record and the
-  `approval_decided` decision record), not full runtime fail-closed enforcement. Under
-  `REQUIRE_AUTHORIZATION_EVIDENCE`, a decision-time emit failure invalidates the run and its
-  active approvals and denies with HTTP 503 `authorization_evidence_unavailable`.
-- **No durable storage and no fail-closed runtime enforcement on evidence yet.** The evidence
-  and approval stores are **in-memory**; durability, crash recovery, reconciliation, and
-  runtime-wide fail-closed enforcement across process crashes are **future**. The signed linkage
-  graph above is the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an
-  **unused, non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned
+- **The emits and consume are wired end-to-end under the durable configuration (Step 7B.0).**
+  With `PRIVATE_AI_EVIDENCE_MODE=durable` (requires `PRIVATE_AI_STATE_BACKEND=sqlite` plus
+  per-emitter HMAC keys), the gateway's `approval_decided` and `execute_validated` and
+  OpenCode's `apply_result` land in **one durable signed chain** under the gateway-issued
+  `run_id`/`approval_id`, and OpenClaw verifies that chain fail-closed (signed apply evidence
+  and signed linkage both required — an unsigned self-attested report alone cannot PASS).
+  Construction of the sink and its verification registry is **assurance-owned**
+  (`openclaw.assurance`): the gateway receives a handle plus only its *own* emitter signing
+  key. `REQUIRE_AUTHORIZATION_EVIDENCE` is forced on in this mode; a decision-time emit
+  failure invalidates the run and its active approvals and denies with HTTP 503
+  `authorization_evidence_unavailable`. The default (`off`) mode remains no-sink and
+  byte-compatible with the pre-evidence behavior.
+- **Durable single-node storage shipped (7A/7A.1); crash-safe mutation semantics are still
+  future (7B.1/7B.2).** The approval/authority store and the evidence chain persist as two
+  separate, exclusively-owned (`flock`), WAL-backed SQLite databases with fail-closed
+  startup integrity (SQLite `integrity_check`/`foreign_key_check`, full typed reconstruction,
+  binding/coherence checks — corruption fails at the constructor) and forward-only
+  migrations; a populated evidence database reopens and re-verifies across restarts. What is
+  **not** built yet: append-first execution reservation ordering (a crash between single-use
+  consumption and mutation still leaves no durable execution trace), startup cross-store
+  reconciliation, signed verifier verdicts, and terminal disposition. Sandbox-confined
+  mutation remains the safe execution target until then. The signed linkage graph above is
+  the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an **unused,
+  non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned
   autonomy. Autonomy remains fixed-ceiling by policy.
 - **Still no training/fine-tuning pipeline** (consistent with the ATLAS scoping above): the
   local model is pre-trained and served, and Hermes captures no training traces today.

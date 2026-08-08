@@ -52,10 +52,12 @@ audit trail in which every deny carries a stable machine-readable code.
 ## What the moat is — and is not
 
 **Is:** the policy model itself (two-axis skill-vs-autonomy rule, attenuation-only
-chains), proven by a large automated test suite (681 tests), an adversarial eval suite,
-and a reproducible three-agent orchestration demo; a governed execute authority loop
-(owner-gated, single-use, canonical-hash-bound approvals) and a verifier-owned,
-tamper-evident evidence sink core now build on top; local-first architecture that
+chains), proven by a large automated test suite (810+ tests, ~92% coverage), an
+adversarial eval suite, and a reproducible three-agent orchestration demo; a governed
+execute authority loop (owner-gated, single-use, canonical-hash-bound approvals), a
+verifier-owned tamper-evident signed evidence chain with durable, exclusively-owned
+single-node storage and live end-to-end wiring, and independent OpenClaw verification of
+the signed authorization→execution→outcome graph; local-first architecture that
 regulated buyers (the design persona is a bank) can run with zero data egress.
 
 **Is not (yet):** network effects, proprietary data, or switching costs. A funded
