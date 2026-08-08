@@ -540,8 +540,13 @@ def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> 
     if not validation.ok:
         return _execute_refusal(run_id, validation.reason)
 
-    # Consume the single-use approval before any delegation/mutation can happen.
-    store.mark_used(approval_id)
+    # Consume the single-use approval before any delegation/mutation can happen. A loser of
+    # a concurrent double-execute race (validated above, but consumed by the winner in
+    # between) is a governed replay refusal, not an unhandled error.
+    try:
+        store.mark_used(approval_id)
+    except approvals.ApprovalError:
+        return _execute_refusal(run_id, approvals.REASON_REPLAY)
     # Step 5: now that authority is granted and consumed, emit the signed gateway
     # `execute_validated` record — BEFORE any mutation. Additive/best-effort by default; it
     # only denies here when REQUIRE_AUTHORIZATION_EVIDENCE is set and the emit fails (the
@@ -555,7 +560,20 @@ def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> 
     # boundary so the downstream apply can bind ``apply_result`` back to it. It is minted
     # server-side (never a client-supplied field) and is ``None`` on the best-effort path.
     # Authority comes from the stored approval, never the request body.
-    return session.execute(validation.record.approver, "", execute_ref=emit.evidence_ref)
+    #
+    # Step 7B.0: under the durable-evidence runtime (EVIDENCE_RUNTIME_WIRED, set only by the
+    # explicit durable configuration at startup) the same verifier-owned sink handle is
+    # threaded to the execution session, so OpenCode's signed apply_result lands in the one
+    # durable chain and OpenClaw verifies from signed evidence rather than the self-attested
+    # report. Injected test sinks without the flag keep the pre-7B.0 gateway-only emit.
+    wired = bool(getattr(gw, "EVIDENCE_RUNTIME_WIRED", False))
+    return session.execute(
+        validation.record.approver,
+        "",
+        execute_ref=emit.evidence_ref,
+        evidence_sink=getattr(gw, "EVIDENCE_SINK", None) if wired else None,
+        approval_id=approval_id if wired else "",
+    )
 
 
 def run_phase(

@@ -302,6 +302,42 @@ class SqliteApprovalStore:
                     f"approval {appr.approval_id!r} is inconsistently bound to run "
                     f"{appr.run_id!r} (principal/hash/autonomy mismatch)"
                 )
+            self._check_status_coherence(appr)
+
+    @staticmethod
+    def _check_status_coherence(appr: ApprovalRecord) -> None:
+        """Reject stored status/timestamp combinations the lifecycle can never produce.
+
+        Beyond per-field validity: a ``pending`` approval has no decision/expiry/use
+        timestamps; every decided status carries ``decided_at``; ``used`` carries
+        ``used_at``; ``rejected`` is never used; a single-use approval still ``approved``
+        cannot already carry ``used_at``. (7A.1 validated fields; this closes the
+        cross-field gap found in the pre-7B audit.)
+        """
+        status = appr.approval_status
+        aid = appr.approval_id
+
+        def _fail(detail: str) -> None:
+            raise DurableStoreError(
+                f"approval {aid!r} has incoherent stored state: {detail}"
+            )
+
+        if status is ApprovalStatus.PENDING:
+            if appr.decided_at or appr.used_at or appr.expires_at:
+                _fail("pending but carries decision/use/expiry timestamps")
+        else:
+            if status is not ApprovalStatus.INVALIDATED and appr.decided_at is None:
+                _fail(f"{status.value} without decided_at")
+        if status is ApprovalStatus.USED and appr.used_at is None:
+            _fail("used without used_at")
+        if status is ApprovalStatus.REJECTED and appr.used_at is not None:
+            _fail("rejected but carries used_at")
+        if (
+            status is ApprovalStatus.APPROVED
+            and appr.single_use
+            and appr.used_at is not None
+        ):
+            _fail("single-use approval still approved but already carries used_at")
 
     # -- runs --------------------------------------------------------------------------
     def create_run(

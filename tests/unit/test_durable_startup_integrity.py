@@ -165,6 +165,45 @@ def test_clean_reopen_succeeds_after_fault_removed(tmp_path):
     s.close()
 
 
+# --- status/timestamp coherence (Step 7B.0 hardening) --------------------------------
+def test_used_without_used_at_fails_at_constructor(tmp_path):
+    path, aid = _authority_with_approval(tmp_path)
+    _corrupt(path,
+             "UPDATE approvals SET approval_status='used', "
+             "decided_at='2026-07-05T00:00:00+00:00', used_at=NULL WHERE approval_id=?",
+             (aid,))
+    with pytest.raises(DurableStoreError):
+        SqliteApprovalStore(path)
+
+
+def test_approved_without_decided_at_fails_at_constructor(tmp_path):
+    path, aid = _authority_with_approval(tmp_path)
+    _corrupt(path,
+             "UPDATE approvals SET approval_status='approved', decided_at=NULL "
+             "WHERE approval_id=?", (aid,))
+    with pytest.raises(DurableStoreError):
+        SqliteApprovalStore(path)
+
+
+def test_pending_with_decision_timestamp_fails_at_constructor(tmp_path):
+    path, aid = _authority_with_approval(tmp_path)
+    _corrupt(path,
+             "UPDATE approvals SET decided_at='2026-07-05T00:00:00+00:00' "
+             "WHERE approval_id=?", (aid,))
+    with pytest.raises(DurableStoreError):
+        SqliteApprovalStore(path)
+
+
+def test_rejected_with_used_at_fails_at_constructor(tmp_path):
+    path, aid = _authority_with_approval(tmp_path)
+    _corrupt(path,
+             "UPDATE approvals SET approval_status='rejected', "
+             "decided_at='2026-07-05T00:00:00+00:00', "
+             "used_at='2026-07-05T00:01:00+00:00' WHERE approval_id=?", (aid,))
+    with pytest.raises(DurableStoreError):
+        SqliteApprovalStore(path)
+
+
 def test_authority_closed_when_evidence_init_fails(tmp_path):
     from openclaw.sink_sqlite import SqliteEvidenceSink
     from openclaw.sqlite_util import DurableStoreError as ClawDurableError

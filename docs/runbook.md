@@ -153,6 +153,43 @@ step 2 is running:
 vhs demo/enforce.tape       # writes docs/assets/enforce.gif
 ```
 
+## Durable State and Live Evidence (Steps 7A / 7B.0)
+
+The default backend is `memory` (restart-forgetting; no configuration needed). To persist
+authority and evidence across restarts, run from the repo checkout (the `agents/` packages
+must be importable) with:
+
+    export PRIVATE_AI_STATE_BACKEND=sqlite
+    export PRIVATE_AI_STATE_DIR=~/private-ai-state     # existing, writable directory
+
+This creates/opens `authority.sqlite3` and `evidence.sqlite3` as two separate,
+exclusively-owned databases (a second concurrent gateway on the same state directory fails
+closed by design; `<db>.lock` sidecar files are the ownership locks — never delete them
+while a gateway runs).
+
+The recommended **hardened** configuration additionally wires the live durable evidence
+chain end to end:
+
+    export PRIVATE_AI_EVIDENCE_MODE=durable
+    export PRIVATE_AI_EVIDENCE_KEY_GATEWAY=$(openssl rand -hex 32)
+    export PRIVATE_AI_EVIDENCE_KEY_OPENCODE=$(openssl rand -hex 32)
+
+Keep the two key values stable across restarts (store them in your shell profile or a
+secrets manager, never in the repo): the chain re-verifies against them on every startup.
+In this mode signed authorization/apply evidence is required fail-closed
+(`REQUIRE_AUTHORIZATION_EVIDENCE` is forced on), and OpenClaw refuses a PASS without a
+verified signed chain.
+
+Expected failures (all fail closed, by design):
+
+- durable mode without the sqlite backend, or with a missing/short/non-hex key → startup
+  refusal naming the variable;
+- a populated `evidence.sqlite3` opened in `off` mode → startup refusal telling you to use
+  durable mode with the configured keys;
+- changed/wrong keys against an existing chain → signature verification failure at startup;
+- corruption of either database → constructor-time integrity failure (restore from backup;
+  nothing is auto-repaired).
+
 ## Strategy Benchmark
 
 Run:

@@ -29,17 +29,44 @@ All notable changes to this project are documented here. Format based on
   `session.execute`; the payload contains `canonical_plan_hash` and `validated=true`, while
   `run_id` and `approval_id` remain in the evidence envelope. The default no-sink behavior
   is backward-compatible (byte-identical old path), and `REQUIRE_AUTHORIZATION_EVIDENCE`
-  strict mode denies before mutation if authorization evidence is unavailable. This is
-  **component-level gateway authorization evidence emit, not full runtime fail-closed
-  enforcement**; the gateway and OpenCode records are **not yet linked through
-  `evidence_refs`**. `approval_decided`, `evidence_refs` population, and runtime fail-closed
-  integration remain future milestones.
+  strict mode denies before mutation if authorization evidence is unavailable.
+- **Gateway `approval_decided` decision evidence emit** (Step 5b) — one signed record per
+  owner decision (approve or reject) at `POST /v1/approvals`, emitted before the response;
+  under strict mode a failed emit invalidates the run and denies with HTTP 503.
+- **Stable evidence identity (Step 6A)** — every signed record carries `evidence_id` and a
+  chain-independent `evidence_digest`; a typed portable `EvidenceRef` anchors linkage.
+- **Signed evidence linkage graph (Step 6B)** —
+  `approval_decided ← execute_validated ← apply_result` via payload-embedded, signed
+  `approval_ref`/`execute_ref`; OpenClaw verifies the whole graph fail-closed.
+- **Durable single-node state stores (Step 7A)** — `PRIVATE_AI_STATE_BACKEND=sqlite`
+  persists the authority store and evidence chain as two separate WAL-backed SQLite
+  databases (`PRIVATE_AI_STATE_DIR`), with forward-only fail-closed migrations and a
+  both-or-neither initialization rule; `memory` stays the default.
+- **Durable-store correctness hardening (Step 7A.1)** — exclusive single-owner `flock` per
+  database, full fail-closed startup integrity (integrity/FK checks, typed reconstruction,
+  binding + status/timestamp coherence), fully serialized evidence appends, atomic authority
+  read-modify-write, strict persisted booleans, UTC-normalized timestamps, and resource
+  cleanup on every constructor/partial-startup failure path.
+- **Live durable evidence wiring (Step 7B.0)** — `PRIVATE_AI_EVIDENCE_MODE=durable` opens
+  the durable evidence store as a live sink under assurance-owned construction
+  (`openclaw.assurance` builds the verification registry; the gateway and OpenCode each load
+  only their own per-emitter HMAC key from `PRIVATE_AI_EVIDENCE_KEY_GATEWAY` /
+  `PRIVATE_AI_EVIDENCE_KEY_OPENCODE`). The gateway's `approval_decided`/`execute_validated`
+  and OpenCode's `apply_result` land in one durable signed chain that OpenClaw verifies
+  fail-closed (signed apply + signed linkage required); `REQUIRE_AUTHORIZATION_EVIDENCE` is
+  forced on in this mode; evidence ownership is held for the runtime lifetime; populated
+  databases reopen and re-verify across restarts; misconfiguration fails closed at startup.
 
 ### Changed
-- Test suite now at **612** (the gateway `execute_validated` emit increment added 22 cases
-  on top of the OpenClaw evidence-consume set: no-sink backward-compat, emit-before-mutation
-  ordering, envelope/payload contract, require-mode deny on no-sink/missing-key/append-or-sign
-  failure, and the not-yet-linked `evidence_refs` guard).
+- A concurrent double-execute loser now receives the governed `replay` refusal instead of
+  surfacing an unhandled error.
+- Test suite now at **813** (~92% coverage) across the evidence, durability, hardening, and
+  live-wiring increments; the full suite runs on Linux and macOS in CI.
+
+### Not yet built (explicitly)
+- Append-first execution reservation ordering (7B.1), startup cross-store reconciliation
+  (7B.2), signed verifier verdict / terminal disposition / rollback-containment (7C), trust
+  ledger, earned autonomy. Autonomy remains fixed-ceiling and human-gated.
 
 ## [0.18.0] - 2026-07-04
 

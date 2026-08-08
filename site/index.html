@@ -4,10 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>private-ai-infra — AI capability is not AI authority</title>
-  <meta name="description" content="A model-plane-agnostic AI governance gateway: policy-as-code identity, an enforced L0–L6 autonomy ceiling, per-tool and per-skill grants, egress guardrails, and a structured decision audit in front of any OpenAI-compatible model plane — enforced in code and proven by adversarial evals." />
+  <meta name="description" content="Local-first agent runtime assurance and governance: policy-as-code identity, an enforced L0–L6 autonomy ceiling, per-tool and per-skill grants, owner-gated execution authority, and a signed, durably stored, independently verified evidence chain in front of any OpenAI-compatible model plane — enforced in code and proven by adversarial evals." />
   <meta name="theme-color" content="#08090d" />
   <meta property="og:title" content="private-ai-infra — AI capability is not AI authority" />
-  <meta property="og:description" content="A local-first AI governance plane: every model call mediated by policy-as-code, an enforced L0–L6 autonomy ceiling, and an independently re-verified audit." />
+  <meta property="og:description" content="Local-first agent runtime assurance and governance: every model call mediated by policy-as-code, explicit owner-gated authority, a signed durable evidence chain, and independent verification." />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='.55' stop-color='%233b82f6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%230d0f14'/%3E%3Ccircle cx='16' cy='16' r='7' fill='url(%23g)'/%3E%3C/svg%3E" />
@@ -36,13 +36,16 @@
 
     <!-- ===================== HERO ===================== -->
     <section class="hero wrap" aria-labelledby="hero-h">
-      <span class="pill"><span class="live" aria-hidden="true"></span> model-plane-agnostic · policy-as-code · loopback-first</span>
+      <span class="pill"><span class="live" aria-hidden="true"></span> local-first · agent runtime assurance · policy-as-code</span>
       <h1 id="hero-h">AI <span class="gradient-text">capability</span> is not AI <span class="nope">authority</span>.</h1>
       <p class="lead">
-        An AI governance gateway that fronts <strong>whatever serves your models</strong> — an enterprise
-        LLM platform, vLLM/Ollama, or local MLX — and mediates every call with
-        <strong>policy-as-code identity</strong>, an enforced <strong>L0–L6 autonomy ceiling</strong>,
-        per-tool and per-skill grants, egress guardrails, and a structured decision audit —
+        A local-first <strong>agent runtime assurance and governance plane</strong> that fronts
+        <strong>whatever serves your models</strong> — an enterprise LLM platform, vLLM/Ollama, or local
+        MLX — and mediates every call with <strong>policy-as-code identity</strong>, an enforced
+        <strong>L0–L6 autonomy ceiling</strong>, per-tool and per-skill grants, egress guardrails, and a
+        structured decision audit. Execution needs <strong>explicit owner-granted authority</strong>, and
+        what was authorized and what then happened is recorded as a <strong>signed, durably stored
+        evidence chain</strong> an independent verifier re-derives —
         <em>enforced in code, before any token is generated</em>, not asserted in a README.
       </p>
       <div class="cta-row">
@@ -63,11 +66,11 @@
     <!-- ===================== STATS ===================== -->
     <section class="wrap" aria-label="Project metrics" style="padding-top:1rem">
       <div class="stats reveal">
-        <div class="stat"><div class="num g" data-count="14">0</div><div class="lbl">enforced controls</div></div>
-        <div class="stat"><div class="num g" data-count="23">0</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="389">0</div><div class="lbl">tests</div></div>
-        <div class="stat"><div class="num g" data-count="2">0</div><div class="lbl">platforms, same suite</div></div>
-        <div class="stat"><div class="num g" data-count="93" data-suffix="%">0</div><div class="lbl">coverage</div></div>
+        <div class="stat"><div class="num g" data-count="14">14</div><div class="lbl">enforced controls</div></div>
+        <div class="stat"><div class="num g" data-count="23">23</div><div class="lbl">adversarial evals</div></div>
+        <div class="stat"><div class="num g" data-count="813">813</div><div class="lbl">tests</div></div>
+        <div class="stat"><div class="num g" data-count="2">2</div><div class="lbl">platforms, same suite</div></div>
+        <div class="stat"><div class="num g" data-count="92" data-suffix="%">92%</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
       </div>
     </section>
@@ -229,7 +232,7 @@
             <div class="tk">16 · Red is the system working</div>
             <h3>The enforcement ratio is the product.</h3>
             <p>Allowed work flowed; everything over-mandate was refused and recorded. Deny-by-default means the red
-              in this bar is the control plane doing its job — backed by 612 tests on two platforms and
+              in this bar is the control plane doing its job — backed by 813 tests on two platforms and
               23 adversarial evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -346,44 +349,47 @@
 
       <div class="grid cols-3 reveal" style="margin-top:1.5rem">
         <article class="card">
-          <h3>✅ What works today</h3>
+          <h3>✅ Working now</h3>
           <ul>
             <li><strong>Owner-gated execute loop</strong> — execute needs a durable, single-use, owner-approved
               decision bound to the plan's canonical hash; an inline approver grants nothing.</li>
-            <li><strong>Evidence sink core</strong> — an append-only, per-emitter HMAC-signed, hash-chained record
-              store with from-scratch chain verification.</li>
-            <li><strong>Signed OpenCode <code>apply_result</code></strong> — the executor emits a run-bound signed
-              record into the sink, additive to the preserved apply report.</li>
-            <li><strong>OpenClaw verifier consume</strong> — OpenClaw validates the chain + signatures and reads
-              apply evidence <em>from an injected sink</em> when signed evidence is required, so an unsigned apply
-              report alone is insufficient. Component-level verification, unit-proven — not yet end-to-end
-              gateway-issued <code>run_id</code> / <code>approval_id</code> wiring.</li>
-            <li><strong>Gateway <code>execute_validated</code> emit</strong> — the gateway emits a signed
-              <code>execute_validated</code> authorization record when execution authority is granted, after approval
-              validation and <code>mark_used</code>, before <code>session.execute</code>; the payload carries
-              <code>canonical_plan_hash</code> and <code>validated=true</code>, with <code>run_id</code> /
-              <code>approval_id</code> in the envelope. The no-sink default stays backward-compatible;
-              <code>REQUIRE_AUTHORIZATION_EVIDENCE</code> strict mode denies before mutation. Component-level
-              gateway authorization evidence emit — not full runtime fail-closed enforcement, and not yet linked to
-              the OpenCode record through <code>evidence_refs</code>.</li>
+            <li><strong>Three signed authority records</strong> — the gateway emits
+              <code>approval_decided</code> (every owner decision) and <code>execute_validated</code>
+              (authority granted, before any mutation); OpenCode emits a signed
+              <code>apply_result</code> instead of leaving only a self-attested report.</li>
+            <li><strong>Stable identity + signed linkage graph</strong> — every record carries an
+              <code>evidence_id</code> and chain-independent digest, and the three records form a signed graph
+              (<code>approval_decided ← execute_validated ← apply_result</code>) that OpenClaw re-derives and
+              validates edge by edge, rejecting dangling, forged, cross-run, or ambiguous links.</li>
+            <li><strong>Durable authority + evidence stores</strong> — runs, approvals, and the evidence chain
+              persist as two separate, exclusively-owned, WAL-backed SQLite databases with fail-closed startup
+              integrity: corruption, tampering, or a second concurrent owner fails at open, never silently.</li>
+            <li><strong>Live durable evidence wiring</strong> — in the hardened configuration the whole loop
+              lands in <em>one durable signed chain</em>: assurance-owned key custody, fail-closed emits
+              (<code>REQUIRE_AUTHORIZATION_EVIDENCE</code> forced on), OpenClaw refusing a PASS without a
+              verified signed chain, and the populated database re-verifying across restarts.</li>
           </ul>
         </article>
         <article class="card">
-          <h3>🚧 In progress — next</h3>
+          <h3>🚧 Next</h3>
           <ul>
-            <li><strong><code>approval_decided</code> emit</strong> — the remaining gateway authorization record, so
-              the decision side of the loop is signed evidence too. The <code>execute_validated</code> emit already
-              ships; this is the next milestone.</li>
+            <li><strong>Append-first execution reservation</strong> — write the durable
+              <code>execute_validated</code> record <em>before</em> consuming the single-use approval, so a
+              crash mid-execute can never leave consumed authority with no durable trace.</li>
+            <li><strong>Startup cross-store reconciliation</strong> — join the authority store against the
+              evidence chain at startup; auto-resolve only provably-safe states.</li>
+            <li><strong>Dirty-run handling</strong> — ambiguous outcomes fail closed into an invalidated run
+              surfaced for human disposition, never a silent retry.</li>
           </ul>
         </article>
         <article class="card">
-          <h3>🗺️ Explicitly future</h3>
+          <h3>🗺️ Later</h3>
           <ul>
-            <li>End-to-end gateway-issued <code>run_id</code> / <code>approval_id</code> wiring</li>
-            <li><code>evidence_refs</code> population (linking the gateway and OpenCode records)</li>
-            <li>Fail-closed runtime evidence enforcement</li>
+            <li>Signed OpenClaw verification verdicts</li>
+            <li>Terminal run disposition as signed evidence</li>
+            <li>Bounded rollback / containment</li>
             <li>Trust ledger &amp; earned autonomy</li>
-            <li>Hermes local training / Claude-to-Hermes offload</li>
+            <li>Local-model engineering lanes (local planning already runs via MLX)</li>
           </ul>
         </article>
       </div>
@@ -393,7 +399,9 @@
         <p>The evidence chain is <strong>tamper-evident, not non-repudiation</strong> — a symmetric-HMAC MVP that
           detects tampering, reordering, and replay, but not a party holding an emitter's key (asymmetric keys / KMS
           are future). Autonomy is <strong>fixed-ceiling by policy</strong>: there is no self-approval and no
-          earned-trust escalation. This is a <strong>local-first, human-in-authority</strong> governance and evidence
+          earned-trust escalation, and execution stays human-gated in a confined sandbox.
+          <strong>Runtime-wide crash-safe mutation semantics are not claimed</strong> until append-first reservation
+          and reconciliation land. This is a <strong>local-first, human-in-authority</strong> assurance and governance
           plane — <strong>not</strong> a fully autonomous, production-deployed, or compliance-certified system, and it
           has no users, revenue, or design partners. It is a working, tested, honestly-scoped engineering artifact.</p>
       </div>

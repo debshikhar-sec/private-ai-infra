@@ -225,10 +225,11 @@ def test_emit_happens_before_session_execute(client, owner_token, monkeypatch):
     seen = {}
     original = hs.GovernedSession.execute
 
-    def spy(self, approver, reason, *, execute_ref=None):
+    def spy(self, approver, reason, *, execute_ref=None, **kwargs):
         # Capture how many gateway records exist at the instant execute (the mutation) runs.
+        # (**kwargs threads the 7B.0 wired-runtime keywords through unchanged.)
         seen["records_at_execute"] = len(_gateway_records(sink))
-        return original(self, approver, reason, execute_ref=execute_ref)
+        return original(self, approver, reason, execute_ref=execute_ref, **kwargs)
 
     monkeypatch.setattr(hs.GovernedSession, "execute", spy)
     run_id, plan_hash = _plan_and_hash(client)

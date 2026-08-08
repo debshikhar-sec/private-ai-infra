@@ -9,14 +9,17 @@
 > (`evidence_id` + chain-independent `evidence_digest` + typed `EvidenceRef`, `SCHEMA_VERSION`
 > is `2`), and the **signed evidence linkage graph**
 > (`approval_decided ← execute_validated ← apply_result`, carried by payload-embedded
-> `approval_ref`/`execute_ref`, verified end-to-end by OpenClaw) are now built and
-> unit-proven — component-level verification and gateway authorization evidence emit, not yet
-> end-to-end gateway-issued `run_id` / `approval_id` wiring. The shipped linkage is the
-> **payload-embedded signed `EvidenceRef` graph** (§6a); the `ApprovalRecord.evidence_refs`
-> field remains an **unused, non-authoritative placeholder** and is *not* that graph. The
-> remaining steps in this spec — **durable evidence/approval storage**, **reconciliation**,
-> and **fail-closed runtime integration across process crashes** — are still design-only and
-> gated behind later, separately-authorized increments.
+> `approval_ref`/`execute_ref`, verified end-to-end by OpenClaw) are built, and — as of
+> Step 7B.0 — wired **end-to-end at runtime** under the durable configuration
+> (`PRIVATE_AI_EVIDENCE_MODE=durable`): the gateway-issued `run_id`/`approval_id` thread
+> through all three records into one durable, exclusively-owned SQLite chain (Steps 7A/7A.1)
+> that OpenClaw verifies fail-closed and that reopens/re-verifies across restarts. The
+> shipped linkage is the **payload-embedded signed `EvidenceRef` graph** (§6a); the
+> `ApprovalRecord.evidence_refs` field remains an **unused, non-authoritative placeholder**
+> and is *not* that graph. The remaining steps in this spec — **append-first reservation
+> ordering (7B.1)**, **cross-store reconciliation (7B.2)**, and the **signed verifier
+> verdict / terminal disposition (7C)** — are still design-only and gated behind later,
+> separately-authorized increments.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
 > trust ledger, earned autonomy, or production key management. See §10 and §14.
@@ -173,11 +176,12 @@ linkage are documented in §6a below.
 | `assurance_verdict` | `openclaw` | `{verdict: PASS\|FAIL, counts, notes}` | **Optional** in first implementation; useful for a self-recorded, chained verdict. |
 
 **First-implementation minimum:** `apply_result` (executor→sink) + OpenClaw consuming it from
-the sink. `execute_validated` and `approval_decided` have since landed (gateway emit), and the
-three are now cross-linked into the §6a signed graph; `assurance_verdict` still follows in a
-later self-recorded-verdict commit, and durable storage + fail-closed runtime integration
-across crashes remain future (§13). Consuming controls must treat an absent-but-required
-record as **fail closed**, not INCONCLUSIVE (§9).
+the sink. `execute_validated` and `approval_decided` have since landed (gateway emit), the
+three are cross-linked into the §6a signed graph, and the durable runtime configuration now
+lands all three in one durable chain (7B.0); `assurance_verdict` still follows in a later
+self-recorded-verdict commit (7C), and crash-safe ordering/reconciliation remain future
+(7B.1/7B.2, §13). Consuming controls must treat an absent-but-required record as **fail
+closed**, not INCONCLUSIVE (§9).
 
 ---
 
@@ -346,10 +350,19 @@ f. **Unknown `schema_version` or emitter → reject the record** (fail closed).
   `prev_hash` chaining; `apply_result` (required) + authorization records; `run_id`/`approval_id`
   binding; stable evidence identity (`evidence_id` + `evidence_digest` + `EvidenceRef`, §6a); the
   signed linkage graph (`approval_ref`/`execute_ref`) verified by OpenClaw. Single host, HMAC
-  keyfiles, **in-memory** stores, verified linear scan.
-- **Later — durability and runtime fail-closed:** durable evidence/approval storage, crash
-  recovery, reconciliation, append-first authority transitions, and runtime-wide fail-closed
-  enforcement across process crashes. **Out of scope here** — the current stores are in-memory.
+  keys from per-emitter environment variables, verified linear scan.
+- **Shipped — durable single-node stores + live wiring (7A/7A.1/7B.0):** the authority store and
+  the evidence chain persist as two separate, exclusively-owned, WAL-backed SQLite databases
+  with fail-closed startup integrity and forward-only migrations; under
+  `PRIVATE_AI_EVIDENCE_MODE=durable` the sink is **live** — assurance-owned construction
+  (`openclaw.assurance`) builds the verification registry, each emitter loads only its own
+  signing key, all three runtime records land in one durable chain that OpenClaw verifies
+  fail-closed, and a populated database reopens/re-verifies across restarts.
+- **Later — crash-safe authority ordering and reconciliation (7B.1/7B.2):** append-first
+  `execute_validated` reservation before single-use consumption, and startup cross-store
+  reconciliation with dirty-run classification. **Not yet built** — until then a crash between
+  consumption and mutation leaves no durable execution trace, and sandbox-confined mutation
+  remains the safe execution target.
 - **Later — hash-chained trust ledger:** derived, per-principal trust state built *on top of*
   the sink. **Out of scope here.** (The sink is the prerequisite; the ledger records what the
   sink proves.)

@@ -148,6 +148,16 @@ hook — empty in MVP, populated once the evidence sink exists.
 
 ## 7. State Storage Design
 
+> **Status update (Steps 7A/7B.0):** the persisted variant this section deferred now
+> exists — `PRIVATE_AI_STATE_BACKEND=sqlite` persists runs/approvals with fail-closed
+> startup integrity, and it landed *after* the evidence boundary this section required:
+> under the hardened configuration (`PRIVATE_AI_EVIDENCE_MODE=durable`,
+> `REQUIRE_AUTHORIZATION_EVIDENCE` forced on) an execute must also resolve the **signed**
+> `approval_decided` record for its `(run_id, approval_id)`, so a forged authority row
+> alone cannot authorize. In sqlite mode approvals now survive restart by design; the
+> in-memory `memory` backend (still the default) keeps the restart-empties-store behavior
+> described below. Startup reconciliation of stale non-terminal state is Step 7B.2.
+
 - **MVP storage location:** an in-process, module-level approval store in the Flask app (a
   keyed map `approval_id → record`, plus a `run_id → run` map). Durable **across the
   plan→execute HTTP calls within one process run** — the "durable" the loop needs today —

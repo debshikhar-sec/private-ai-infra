@@ -133,7 +133,15 @@ class GovernedSession:
 
     # -- phase 2: execute, but only under a human approval ------------------------
 
-    def execute(self, approver: str = "", reason: str = "", *, execute_ref=None) -> dict:
+    def execute(
+        self,
+        approver: str = "",
+        reason: str = "",
+        *,
+        execute_ref=None,
+        evidence_sink=None,
+        approval_id: str = "",
+    ) -> dict:
         from openclaw.worker import AssuranceWorker
         from opencode_sandbox import apply as act
         from opencode_sandbox.worker import CodeActWorker
@@ -171,11 +179,31 @@ class GovernedSession:
         # Step 6B: the gateway-minted execute_validated reference (or None on the best-effort
         # path) is threaded to the executor so a signed apply_result can bind back to it. It
         # is never a client-supplied field — it originates from the gateway's own emit.
+        #
+        # Step 7B.0: when the gateway threads a live (durable) sink handle in, the executor
+        # emits its signed apply_result into that same chain — signing with its OWN key,
+        # which OpenCode loads for itself (never received through this session) — and the
+        # verifier consumes the signed chain fail-closed: an unsigned self-attested report
+        # alone can no longer produce a PASS, and the linkage graph is required end-to-end.
+        wired = evidence_sink is not None
         code_worker = CodeActWorker(
-            self.peers[executor], approval=approval, execute_ref=execute_ref
+            self.peers[executor],
+            approval=approval,
+            execute_ref=execute_ref,
+            evidence_sink=evidence_sink,
+            sink_id=evidence_sink.sink_id if wired else "",
+            run_id=self.run_id,
+            approval_id=approval_id or None,
         )
         verify_workers = [
-            AssuranceWorker(self.peers[n])
+            AssuranceWorker(
+                self.peers[n],
+                evidence_sink=evidence_sink,
+                run_id=self.run_id or None,
+                approval_id=approval_id or None,
+                require_signed_apply_evidence=wired,
+                require_signed_linkage=wired,
+            )
             for n, c in self._cards().items()
             if n != executor and n in self.peers
             and any(s["id"] == VERIFY_SKILL for s in c.get("skills", []))
