@@ -276,14 +276,24 @@ verified. Merged today:
   OpenClaw verifies that chain fail-closed (signed apply evidence **and** signed linkage
   required); `REQUIRE_AUTHORIZATION_EVIDENCE` is forced on; evidence ownership is held for
   the process lifetime; and a populated database reopens and re-verifies across restarts.
+- **Append-first execution reservation (Step 7B.1)** — the execute path now runs
+  `validate → reserve → consume → mutate`: the signed `execute_validated` record is appended
+  as a durable **reservation before** the single-use approval is spent, so a crash in that
+  window can no longer leave a consumed approval with no durable trace. Exactly **one**
+  reservation can exist per approval — validate/reserve/consume run in a per-approval
+  critical section, so two concurrent executes cannot both reserve (a duplicate would make
+  the verifier fail the *winner's* run as ambiguous), and a reservation that survives a
+  crash into a later process is invalidated fail-closed at startup: the run is closed out,
+  nothing is retried, and another attempt needs fresh authority. A reservation that cannot
+  be appended now refuses **before** consuming anything, leaving the approval usable.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
 non-authoritative placeholder** and is *not* the signed graph and does not affect
-authorization. **Append-first execution reservation (7B.1)** and **startup cross-store
-reconciliation (7B.2)** are **not yet built** — a crash between single-use consumption and
-mutation still leaves no durable execution trace, so runtime-wide crash-safe mutation
-semantics are not claimed and sandbox-confined mutation remains the safe execution target.
+authorization. **Startup cross-store reconciliation (7B.2)** is **not yet built** — a crash
+*during* the mutation still leaves an outcome the runtime cannot classify on its own, so
+runtime-wide crash-safe mutation semantics are not claimed and sandbox-confined mutation
+remains the safe execution target.
 The **signed verifier verdict, terminal disposition, and rollback/containment (7C)**, the
 **trust ledger**, and **earned autonomy** remain future. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The

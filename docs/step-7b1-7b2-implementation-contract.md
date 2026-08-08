@@ -75,6 +75,56 @@ validate_for_execute
    removes 7B.0's accepted fail-closed cost of a spent approval on emit failure).
 4. **Refusal semantics unchanged.** Every existing refusal reason keeps its meaning and
    its HTTP-200 governed shape.
+5. **At most one reservation per `approval_id`, ever.** ⚠️ This is *not* satisfied by a
+   naive call reorder — see the next section.
+
+### Reservation uniqueness (the non-obvious part)
+
+Append-first breaks an invariant the old ordering got for free. Previously `mark_used`
+came first, so only its single winner could emit; now `validate_for_execute` and the
+reservation both precede consumption, and two concurrent executes can each validate as
+APPROVED and each append a reservation before either consumes:
+
+```text
+A: validate -> APPROVED          B: validate -> APPROVED
+A: append execute_validated #1   B: append execute_validated #2
+A: mark_used -> ok               B: mark_used -> replay
+```
+
+Authority is still consumed exactly once — but **two `execute_validated` records now exist
+for one approval**. That is a correctness failure, not untidiness: OpenClaw locates the
+authority record with `find_unique_record`, which fails on more than one match with
+`REASON_REF_AMBIGUOUS` (deliberately *not* "latest wins"). The duplicate makes the
+**winner's** otherwise-legitimate run fail verification.
+
+The evidence database's `UNIQUE(evidence_id)` and `UNIQUE(emitter, nonce)` constraints do
+**not** prevent this: both records are legitimately distinct rows. This is an
+operation-level duplicate, so it must be prevented at the operation.
+
+**Required guarantee:** for one `approval_id` — sequentially, concurrently, and across a
+restart — at most one `execute_validated` reservation is ever appended, authority is
+consumed at most once, at most one mutation runs, and the loser receives the governed
+`replay` refusal.
+
+**Shipped mechanism (7B.1).** Two pieces, no schema change:
+
+- **Within a process:** a per-`approval_id` critical section
+  (`orchestration._approval_execution_lock`) makes validate → reserve → consume
+  indivisible. The mutation runs *outside* the lock; by then the approval is USED, so no
+  other thread can proceed anyway. Entries are reference-counted and removed when the last
+  holder leaves.
+- **Across processes and restarts:** an in-process lock is sufficient *only* because both
+  `authority.sqlite3` and `evidence.sqlite3` are held under an exclusive `flock` for the
+  owning process's whole lifetime (`DatabaseOwnership`) — a second gateway on the same
+  state directory cannot open it and fails closed. There is no second writer. The one
+  remaining path, a reservation surviving a crash into a later process, is closed by the C2
+  rule below, which invalidates such an approval before any new execute can validate.
+
+**Do not** relax the verifier to tolerate duplicates, do not add "pick the latest
+reservation" semantics, and do not add a durable idempotency table or schema migration
+unless the exclusive-owner property above ever stops holding (for example a genuine
+multi-writer or multi-node deployment) — at which point this decision must be revisited
+before that deployment ships.
 
 ### The crash window this closes
 
@@ -86,8 +136,20 @@ exists before consumption, so on restart the state is classifiable.
 
 > If an `execute_validated` (reservation) record exists for `(run_id, approval_id)` AND
 > the approval is still APPROVED, then `mark_used` cannot have completed, and therefore
-> the mutation cannot have started. Resolution: consume-or-invalidate — either is safe,
-> pick ONE and test it; the mutation provably never began.
+> the mutation cannot have started. **Resolution: INVALIDATE.**
+
+Shipped as `state.resolve_interrupted_reservations`, run at durable startup.
+
+**Why invalidate rather than consume** (this supersedes the earlier
+"consume-or-invalidate, pick one" wording): consuming would turn a state we *know* to be
+pre-mutation into `USED` + reservation + no `apply_result` — which is byte-identical to
+C3, the genuinely ambiguous shape that 7B.2 must conservatively treat as possibly-dirty.
+Consuming therefore destroys information. Invalidating preserves it: the run is closed
+out, no mutation happened, nothing is retried, and another attempt needs fresh authority.
+
+It uses the existing `invalidate_run` semantics (run → `INVALIDATED`, its non-terminal
+approvals → `INVALIDATED`) and adds no new states. Re-running over an already-resolved
+database is a no-op, so it is idempotent across repeated restarts.
 
 Never infer mutation success from the absence of a failure record. Never auto-retry an
 execute when the mutation may have started.
@@ -105,7 +167,7 @@ framework; no sleeps.
 | # | Crash point | Durable state at restart | Required classification |
 |---|-------------|--------------------------|-------------------------|
 | C1 | after `validate_for_execute`, before reservation emit | approval APPROVED, no reservation | clean — nothing happened; approval remains usable |
-| C2 | after reservation emit, before `mark_used` | approval APPROVED + reservation present | consume-or-invalidate (mutation provably not started) |
+| C2 | after reservation emit, before `mark_used` | approval APPROVED + reservation present | **invalidate** (mutation provably not started) |
 | C3 | after `mark_used`, before mutation completes | approval USED + reservation present, no `apply_result` | dirty — run must be invalidated and surfaced (7B.2 class 3) |
 | C4 | after mutation + `apply_result` append | approval USED + full chain | complete — no action |
 
@@ -113,7 +175,7 @@ framework; no sleeps.
 classification lands in 7B.2 but the 7B.1 tests must already assert the durable state
 that makes them distinguishable.
 
-### Acceptance criteria (7B.1)
+### Acceptance criteria (7B.1) — met; see `tests/unit/test_append_first_reservation.py`
 
 - Ordering change is visible in `_run_execute` with the reservation emit before
   `mark_used`, and `tests/unit/test_gateway_authorization_evidence.py`'s
@@ -121,7 +183,15 @@ that makes them distinguishable.
 - Crash tests C1/C2 pass with close/reopen restarts (no sleeps).
 - Double-execute (sequential and concurrent loser) still converges on `replay`.
 - Emit failure before `mark_used` leaves the approval APPROVED (test it).
+- **Exactly one reservation per approval under a forced concurrent race**, with the
+  verifier's own `find_unique_record` agreeing, and the property surviving a restart.
 - Full suite green; coverage gate ≥ 85 % holds.
+
+**Status: shipped.** The concurrency test was falsified before being trusted — with the
+critical section disabled it reproduces 2 reservations for one approval,
+`find_unique_record` raises `ref_ambiguous`, and the *winning* run's verdict degrades from
+PASS to FAIL. With the critical section restored: one reservation, one PASS, one governed
+`replay`.
 
 ---
 

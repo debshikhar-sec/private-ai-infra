@@ -33,11 +33,14 @@ registry.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
 
 from private_ai_gateway.approvals import ApprovalStore
+
+logger = logging.getLogger("AuditTrail")
 
 STATE_BACKEND_MEMORY = "memory"
 STATE_BACKEND_SQLITE = "sqlite"
@@ -226,6 +229,63 @@ def _open_durable_evidence(environ: Any, evidence_path: str):
         raise StateError(f"durable evidence configuration is invalid: {exc}") from exc
 
 
+def resolve_interrupted_reservations(authority_store, evidence_sink) -> list[str]:
+    """Fail closed on executions that reserved but never consumed authority (Step 7B.1).
+
+    The append-first ordering is ``validate -> reserve (execute_validated) -> mark_used ->
+    mutate``. So a durable reservation whose approval is *still* ``APPROVED`` proves the
+    process died between the reservation and the consumption — which is strictly before
+    any mutation could begin. The execution provably never started.
+
+    Resolution is **invalidate**, not consume. Consuming would convert a state we know to
+    be pre-mutation into ``USED`` + reservation + no ``apply_result`` — indistinguishable
+    from C3, which a later reconciliation must conservatively treat as possibly-dirty.
+    Invalidating keeps the safe knowledge: the run is closed out, no mutation happened, and
+    another attempt needs fresh authority. Nothing is retried and nothing is mutated.
+
+    This is deliberately *only* the 7B.1 half of reconciliation: it looks at one shape and
+    resolves it with the existing :meth:`invalidate_run` semantics, adding no run/approval
+    states. The general cross-store classifier — dirty runs, evidence without authority,
+    disposition — is Step 7B.2. Re-running this over an already-resolved database is a
+    no-op, so it is idempotent across repeated restarts.
+
+    Returns the run ids invalidated (for logging/tests); an empty list is the clean case.
+    """
+    from private_ai_gateway.approvals import ApprovalStatus
+
+    try:
+        records = evidence_sink.records
+    except Exception:  # noqa: BLE001 — an unreadable chain must not mask store startup
+        return []
+
+    invalidated: list[str] = []
+    seen: set[str] = set()
+    for rec in records:
+        env = getattr(rec, "envelope", None)
+        if env is None or env.record_type != "execute_validated":
+            continue
+        approval_id = env.approval_id or ""
+        run_id = env.run_id or ""
+        if not approval_id or approval_id in seen:
+            continue
+        seen.add(approval_id)
+        appr = authority_store.get_approval(approval_id)
+        # Only the reserved-but-unconsumed shape. USED (C3/C4) is left for 7B.2; an
+        # already-INVALIDATED approval is what a previous run of this pass produced.
+        if appr is None or appr.approval_status is not ApprovalStatus.APPROVED:
+            continue
+        authority_store.invalidate_run(run_id or appr.run_id)
+        invalidated.append(run_id or appr.run_id)
+    if invalidated:
+        logger.warning(
+            "RESERVATION_INTERRUPTED_INVALIDATED | runs=%d | detail=execution reserved but "
+            "authority never consumed (crash before mark_used); runs invalidated, no "
+            "mutation had started, fresh authority required",
+            len(invalidated),
+        )
+    return invalidated
+
+
 def open_backend(config: StateConfig, environ: Any | None = None) -> OpenedBackend:
     """Open the configured state backend, failing closed on any unsafe condition.
 
@@ -264,10 +324,13 @@ def open_backend(config: StateConfig, environ: Any | None = None) -> OpenedBacke
     try:
         if config.evidence_mode == EVIDENCE_MODE_DURABLE:
             evidence_sink = _open_durable_evidence(environ, evidence_path)
+            resolve_interrupted_reservations(authority_store, evidence_sink)
         else:
             _init_evidence_db(evidence_path)
     except BaseException:
         authority_store.close()
+        if evidence_sink is not None:
+            evidence_sink.close()
         raise
     return OpenedBackend(
         authority_store=authority_store,

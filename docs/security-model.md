@@ -211,16 +211,24 @@ reaches its verdict by reading artifacts authored by the very components it veri
   failure invalidates the run and its active approvals and denies with HTTP 503
   `authorization_evidence_unavailable`. The default (`off`) mode remains no-sink and
   byte-compatible with the pre-evidence behavior.
-- **Durable single-node storage shipped (7A/7A.1); crash-safe mutation semantics are still
-  future (7B.1/7B.2).** The approval/authority store and the evidence chain persist as two
-  separate, exclusively-owned (`flock`), WAL-backed SQLite databases with fail-closed
-  startup integrity (SQLite `integrity_check`/`foreign_key_check`, full typed reconstruction,
-  binding/coherence checks — corruption fails at the constructor) and forward-only
-  migrations; a populated evidence database reopens and re-verifies across restarts. What is
-  **not** built yet: append-first execution reservation ordering (a crash between single-use
-  consumption and mutation still leaves no durable execution trace), startup cross-store
-  reconciliation, signed verifier verdicts, and terminal disposition. Sandbox-confined
-  mutation remains the safe execution target until then. The signed linkage graph above is
+- **Durable single-node storage shipped (7A/7A.1); append-first reservation shipped (7B.1);
+  crash-safe mutation semantics are still future (7B.2).** The approval/authority store and
+  the evidence chain persist as two separate, exclusively-owned (`flock`), WAL-backed SQLite
+  databases with fail-closed startup integrity (SQLite `integrity_check`/`foreign_key_check`,
+  full typed reconstruction, binding/coherence checks — corruption fails at the constructor)
+  and forward-only migrations; a populated evidence database reopens and re-verifies across
+  restarts. Since 7B.1 the durable `execute_validated` reservation is appended **before** the
+  single-use approval is consumed, so a crash in that window is a classifiable state rather
+  than a silent one, and it is resolved fail-closed at startup by invalidating the affected
+  run (the mutation provably never started; nothing is retried). Exactly one reservation can
+  exist per approval — enforced by a per-approval critical section over
+  validate/reserve/consume, which is sufficient here *only* because both databases are held
+  under an exclusive single-owner `flock` for the process lifetime, so no second writer
+  exists. What is **not** built yet: startup cross-store reconciliation of the remaining
+  shapes — in particular a crash *during* the mutation (approval consumed, reservation
+  present, no `apply_result`) is left untouched for 7B.2 to classify conservatively — plus
+  signed verifier verdicts and terminal disposition. Sandbox-confined mutation remains the
+  safe execution target until then. The signed linkage graph above is
   the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an **unused,
   non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned
   autonomy. Autonomy remains fixed-ceiling by policy.

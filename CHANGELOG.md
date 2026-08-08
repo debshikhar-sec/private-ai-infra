@@ -56,7 +56,6 @@ All notable changes to this project are documented here. Format based on
   fail-closed (signed apply + signed linkage required); `REQUIRE_AUTHORIZATION_EVIDENCE` is
   forced on in this mode; evidence ownership is held for the runtime lifetime; populated
   databases reopen and re-verify across restarts; misconfiguration fails closed at startup.
-
 - **Signed evidence lineage in the Governed Chat Console** — a successful execute now
   returns a server-derived `evidence` summary (the gateway's own `execute_validated`
   identifier, digest, record type and sink id, plus whether the chain is durable), and
@@ -85,6 +84,22 @@ All notable changes to this project are documented here. Format based on
   — the binding specification for append-first reservation and startup reconciliation,
   including crash-injection points, the six reconciliation classes, acceptance criteria,
   and the explicit 7C exclusion.
+- **Append-first execution reservation (Step 7B.1)** — the execute path now runs
+  `validate → reserve → consume → mutate`. The signed `execute_validated` record is appended
+  as a durable **reservation before** the single-use approval is consumed, closing the crash
+  window in which a spent approval left no durable trace of why. Guarantees, all tested:
+  **at most one reservation per `approval_id`** — sequentially, concurrently and across a
+  restart — because validate/reserve/consume run in a per-approval critical section
+  (sufficient here only because both databases are held under an exclusive single-owner
+  `flock` for the process lifetime, so no second writer exists); a reservation surviving a
+  crash into a later process is **invalidated fail-closed at startup**
+  (`state.resolve_interrupted_reservations`) using existing `invalidate_run` semantics, with
+  no new run/approval states, idempotent across repeated restarts; and a reservation that
+  cannot be appended refuses **before** consuming anything, so the approval remains APPROVED
+  and reusable (the cost 7B.0 accepted). No evidence schema change and no new record type —
+  `execute_validated` *is* the reservation. A duplicate reservation is prevented at the
+  source rather than tolerated by the verifier: OpenClaw's `find_unique_record` still fails
+  an approval with more than one authority record as `ref_ambiguous`.
 
 ### Fixed
 - **Denial accounting gap** — `POST /v1/approvals` recorded a 403 `owner_required` decision
@@ -105,13 +120,16 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **831** (~92% coverage) across the evidence, durability, hardening,
-  live-wiring, and chat-integration increments; the full suite runs on Linux and macOS in CI.
+- Test suite now at **846** (~92% coverage) across the evidence, durability, hardening,
+  live-wiring, chat-integration and append-first-reservation increments; the full suite runs
+  on Linux and macOS in CI.
 
 ### Not yet built (explicitly)
-- Append-first execution reservation ordering (7B.1), startup cross-store reconciliation
-  (7B.2), signed verifier verdict / terminal disposition / rollback-containment (7C), trust
-  ledger, earned autonomy. Autonomy remains fixed-ceiling and human-gated.
+- Startup cross-store reconciliation (7B.2) — 7B.1 resolves only the reserved-but-unconsumed
+  shape; a crash *during* the mutation, evidence without matching authority, and authority
+  consumed without a reservation remain unclassified. Signed verifier verdict / terminal
+  disposition / rollback-containment (7C), trust ledger, earned autonomy. Autonomy remains
+  fixed-ceiling and human-gated.
 
 ## [0.18.0] - 2026-07-04
 

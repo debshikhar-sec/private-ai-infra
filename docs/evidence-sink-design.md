@@ -16,10 +16,16 @@
 > that OpenClaw verifies fail-closed and that reopens/re-verifies across restarts. The
 > shipped linkage is the **payload-embedded signed `EvidenceRef` graph** (§6a); the
 > `ApprovalRecord.evidence_refs` field remains an **unused, non-authoritative placeholder**
-> and is *not* that graph. The remaining steps in this spec — **append-first reservation
-> ordering (7B.1)**, **cross-store reconciliation (7B.2)**, and the **signed verifier
-> verdict / terminal disposition (7C)** — are still design-only and gated behind later,
-> separately-authorized increments.
+> and is *not* that graph. **Append-first reservation ordering (7B.1) has since shipped**:
+> the `execute_validated` record is now appended as a durable reservation *before*
+> `mark_used`, so wherever this document says it is emitted "after `validate_for_execute` +
+> `mark_used`" it is describing the superseded Step-5 ordering — the current sequence is
+> `validate → reserve (execute_validated) → mark_used → mutate`, with at most one reservation
+> per approval and a fail-closed startup invalidation for one that outlives a crash. See
+> [step-7b1-7b2-implementation-contract.md](step-7b1-7b2-implementation-contract.md). The
+> remaining steps in this spec — **cross-store reconciliation (7B.2)** and the **signed
+> verifier verdict / terminal disposition (7C)** — are still design-only and gated behind
+> later, separately-authorized increments.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
 > trust ledger, earned autonomy, or production key management. See §10 and §14.
