@@ -147,6 +147,15 @@ capability second.
   signed chain** that OpenClaw verifies fail-closed (signed apply + signed linkage required),
   `REQUIRE_AUTHORIZATION_EVIDENCE` is forced on, evidence ownership is held for the process
   lifetime, and a populated database reopens and re-verifies across restarts.
+- **Append-first execution reservation (7B.1)** — the execute path runs
+  `validate → reserve → consume → mutate`. The signed `execute_validated` record is appended
+  as a durable reservation **before** the single-use approval is spent, closing the crash
+  window where a consumed approval left no durable trace. At most one reservation can exist
+  per approval (a duplicate would make the verifier fail the winner's run as ambiguous):
+  validate/reserve/consume run in a per-approval critical section, and a reservation that
+  survives a crash into a later process is invalidated fail-closed at startup — the run is
+  closed out, no mutation had started, nothing is retried, and another attempt needs fresh
+  authority. A reservation that cannot be appended refuses before consuming anything.
 
 ## Next — evidence integrity (verifier-owned), in sequence
 
@@ -155,19 +164,20 @@ The next two steps are specified as a binding contract — exact target ordering
 injection points, reconciliation classes and acceptance criteria — in
 [step-7b1-7b2-implementation-contract.md](step-7b1-7b2-implementation-contract.md).
 
-- **Append-first execution reservation (7B.1)** — *not yet built.* Reorder the execute path
-  so the durable `execute_validated` record is appended **before** single-use consumption and
-  any mutation, closing the crash window where a consumed approval leaves no durable trace.
 - **Startup cross-store reconciliation (7B.2)** — *not yet built.* A startup classifier joins
   the authority scan against the evidence chain, auto-resolves only provably-safe states, and
-  fails closed (run invalidated, surfaced for disposition) on ambiguous outcomes.
+  fails closed (run invalidated, surfaced for disposition) on ambiguous outcomes. 7B.1
+  shipped only the one shape it could resolve on its own (reservation present + approval
+  still APPROVED ⇒ invalidate); the remaining shapes — a crash *during* the mutation,
+  evidence without matching authority, and authority consumed without a reservation — are
+  still unclassified.
 - **`ApprovalRecord.evidence_refs` population** — *future.* An **unused, non-authoritative
   placeholder** today; it is *not* the signed graph (which shipped as payload-embedded
   `EvidenceRef` data). Populating it would be a convenience index over the sink records.
-- **Crash-safe runtime enforcement across restarts (7B.1/7B.2 together)** — *future.* The
-  durable-evidence mode already fails closed at decision/emit time; treating a mutation as
-  verified only with valid chained evidence **across a process crash** additionally needs the
-  append-first ordering and reconciliation above.
+- **Crash-safe runtime enforcement across restarts (needs 7B.2)** — *future.* The
+  durable-evidence mode fails closed at decision/emit time and 7B.1 supplies the append-first
+  ordering; treating a mutation as verified only with valid chained evidence **across a
+  process crash** still needs the reconciliation above.
 - **Signed verifier verdict, terminal disposition, rollback/containment (7C)** — *not yet
   built.* OpenClaw's verdict recorded as signed evidence, human disposition of dirty runs as
   a terminal signed fact, and bounded rollback/containment.

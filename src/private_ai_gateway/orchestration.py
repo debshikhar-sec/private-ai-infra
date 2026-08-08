@@ -18,7 +18,9 @@ import hashlib
 import logging
 import os
 import sys
+import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -514,14 +516,68 @@ def _recompute_execute_digest(gw, session, objective: str) -> str:
     return plan.digest
 
 
+# --- Step 7B.1: the per-approval execution critical section --------------------------
+# Append-first ordering means `validate_for_execute` no longer immediately precedes the
+# consuming `mark_used`: the durable reservation is appended in between. Each store call
+# is individually atomic, but two concurrent executes could both validate as APPROVED and
+# each append a reservation before either consumed the approval — leaving TWO
+# `execute_validated` records for one approval. That is not merely untidy: OpenClaw locates
+# the authority record with `find_unique_record`, which fails an approval with more than
+# one match as REF_AMBIGUOUS (deliberately not "latest wins"), so a duplicate reservation
+# breaks the signed graph of an otherwise-legitimate run.
+#
+# The fix is a per-approval critical section spanning validate -> reserve -> consume, so
+# those three steps are indivisible for a given approval. Concurrency elsewhere (different
+# approvals, other phases) is unaffected.
+#
+# An in-process lock is sufficient *for this architecture*, and only because of a property
+# the durable stores already guarantee: both `authority.sqlite3` and `evidence.sqlite3` are
+# held under an exclusive `flock` for the owning process's whole lifetime
+# (`DatabaseOwnership`), so a second gateway process cannot open the same state directory
+# at all — it fails closed. There is therefore no second writer to coordinate with, and no
+# durable idempotency table is needed. The remaining path to a duplicate — a reservation
+# that survives a crash into a *later* process — is closed by the C2 startup rule below,
+# which invalidates such an approval before any new execute can validate against it.
+_RESERVATION_LOCKS: dict[str, threading.Lock] = {}
+_RESERVATION_LOCKS_GUARD = threading.Lock()
+
+
+@contextmanager
+def _approval_execution_lock(approval_id: str):
+    """Serialize validate -> reserve -> consume for one ``approval_id``.
+
+    Entries are reference-counted and removed once the last holder leaves, so a long-lived
+    gateway does not accumulate one lock per approval it has ever executed.
+    """
+    with _RESERVATION_LOCKS_GUARD:
+        entry = _RESERVATION_LOCKS.get(approval_id)
+        if entry is None:
+            entry = _RESERVATION_LOCKS[approval_id] = threading.Lock()
+        _RESERVATION_WAITERS[approval_id] = _RESERVATION_WAITERS.get(approval_id, 0) + 1
+    try:
+        with entry:
+            yield
+    finally:
+        with _RESERVATION_LOCKS_GUARD:
+            remaining = _RESERVATION_WAITERS.get(approval_id, 1) - 1
+            if remaining <= 0:
+                _RESERVATION_WAITERS.pop(approval_id, None)
+                _RESERVATION_LOCKS.pop(approval_id, None)
+            else:
+                _RESERVATION_WAITERS[approval_id] = remaining
+
+
+_RESERVATION_WAITERS: dict[str, int] = {}
+
+
 def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> dict:
     """Authorize an apply strictly from a durable, hash-bound approval record.
 
     The request body's approver/reason grant nothing. Real execution requires a run_id and
-    an approval_id that validate against the server-recomputed canonical hash; validation
-    and single-use consumption both complete *before* ``session.execute`` (and therefore
-    before any delegation/mutation). The approver handed to the apply comes from the stored
-    approval, never the request.
+    an approval_id that validate against the server-recomputed canonical hash; validation,
+    the durable execution reservation, and single-use consumption all complete *before*
+    ``session.execute`` (and therefore before any delegation/mutation). The approver handed
+    to the apply comes from the stored approval, never the request.
     """
     store = getattr(gw, "APPROVAL_STORE", None)
     if store is None:
@@ -536,26 +592,39 @@ def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> 
     # any mutation. Fails closed (OrchestrationUnavailable -> 503) if it cannot be rebuilt.
     digest = _recompute_execute_digest(gw, session, objective)
 
-    validation = store.validate_for_execute(run_id, approval_id, digest)
-    if not validation.ok:
-        return _execute_refusal(run_id, validation.reason)
+    # Step 7B.1 — append-first: validate, append the durable execution reservation, then
+    # consume, all inside this approval's critical section. Ordering matters twice over.
+    #
+    # Reservation BEFORE consumption closes the 7B.0 crash window (W4): a crash after
+    # `mark_used` but before the emit used to spend an approval while leaving no durable
+    # trace of why. Now the durable record exists first, so a crash in that window leaves a
+    # classifiable state (C2: reservation + still-APPROVED) rather than a silent one.
+    #
+    # The critical section makes validate/reserve/consume indivisible per approval, so two
+    # concurrent executes can never both reserve (see `_approval_execution_lock`).
+    with _approval_execution_lock(approval_id):
+        validation = store.validate_for_execute(run_id, approval_id, digest)
+        if not validation.ok:
+            return _execute_refusal(run_id, validation.reason)
 
-    # Consume the single-use approval before any delegation/mutation can happen. A loser of
-    # a concurrent double-execute race (validated above, but consumed by the winner in
-    # between) is a governed replay refusal, not an unhandled error.
-    try:
-        store.mark_used(approval_id)
-    except approvals.ApprovalError:
-        return _execute_refusal(run_id, approvals.REASON_REPLAY)
-    # Step 5: now that authority is granted and consumed, emit the signed gateway
-    # `execute_validated` record — BEFORE any mutation. Additive/best-effort by default; it
-    # only denies here when REQUIRE_AUTHORIZATION_EVIDENCE is set and the emit fails (the
-    # approval is already spent in that case — an accepted fail-closed cost for this step).
-    emit = _emit_execute_validated(
-        gw, run_id=run_id, approval_id=approval_id, canonical_plan_hash=digest
-    )
-    if not emit.proceed:
-        return _execute_refusal(run_id, REASON_EVIDENCE_UNAVAILABLE)
+        # The signed `execute_validated` record is now the execution *reservation*: it is
+        # appended before any authority is spent and long before any mutation. Under the
+        # hardened durable runtime a failed append refuses here — and because nothing has
+        # been consumed yet, the approval is left untouched in APPROVED and stays usable.
+        # (In 7B.0 this same failure spent the approval; that cost is now gone.)
+        emit = _emit_execute_validated(
+            gw, run_id=run_id, approval_id=approval_id, canonical_plan_hash=digest
+        )
+        if not emit.proceed:
+            return _execute_refusal(run_id, REASON_EVIDENCE_UNAVAILABLE)
+
+        # Consume the single-use approval. Everything above is non-mutating, so a loser
+        # here has changed nothing; a sequential replay (approval already USED) is refused
+        # by `validate_for_execute` above and never reaches this point or the reservation.
+        try:
+            store.mark_used(approval_id)
+        except approvals.ApprovalError:
+            return _execute_refusal(run_id, approvals.REASON_REPLAY)
     # Step 6B: thread the signed execute_validated reference through the internal execution
     # boundary so the downstream apply can bind ``apply_result`` back to it. It is minted
     # server-side (never a client-supplied field) and is ``None`` on the best-effort path.

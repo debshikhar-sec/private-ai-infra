@@ -256,8 +256,10 @@ then happened.
   authority is granted, the gateway can now emit a signed `execute_validated` record into an
   injected `EvidenceSink`
   ([`orchestration.py`](../src/private_ai_gateway/orchestration.py),
-  [`app.py`](../src/private_ai_gateway/app.py)). The record is emitted **after** approval
-  validation and `mark_used`, **before** `session.execute`; the payload contains
+  [`app.py`](../src/private_ai_gateway/app.py)). The record was emitted **after** approval
+  validation and `mark_used`, **before** `session.execute` — *superseded by Step 7B.1*,
+  which appends it as a durable reservation **before** `mark_used` (see the README evidence
+  section and `docs/step-7b1-7b2-implementation-contract.md`); the payload contains
   `canonical_plan_hash` and `validated=true`, while `run_id` and `approval_id` remain in the
   evidence envelope. The default no-sink behavior stays backward-compatible, and
   `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before mutation if authorization
