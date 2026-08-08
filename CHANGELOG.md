@@ -101,6 +101,30 @@ All notable changes to this project are documented here. Format based on
   source rather than tolerated by the verifier: OpenClaw's `find_unique_record` still fails
   an approval with more than one authority record as `ref_ambiguous`.
 
+- **Startup cross-store reconciliation (Step 7B.2)** — one pass
+  (`private_ai_gateway/reconciliation.py`) joins the authority store and the evidence chain
+  at durable startup, after each has independently passed its own integrity validation, and
+  classifies every approval into one of six classes: **1** approved with nothing reserved
+  (clean); **2** reserved but authority never consumed (invalidate — the mutation provably
+  never started); **3** authority consumed without a valid linked `apply_result` (dirty:
+  invalidate, surface, never auto-retry, never claim the mutation succeeded or failed);
+  **4** reservation plus a uniquely-bound, signature-linked `apply_result` (clean); **5**
+  evidence with no compatible authority projection — orphan, mismatched run binding, or
+  apply evidence without consumed authority (fail closed; evidence is retained append-only
+  and never synthesizes authority); **6** authority consumed with no reservation (pre-7B.1
+  legacy, evidence loss, or tampering — invalidate). It **subsumes** the 7B.1
+  reserved-but-unconsumed resolver as class 2, so a single pass observes the original
+  cross-store shape rather than a pre-repaired one. It classifies into immutable findings
+  *before* acting; its only action is `invalidate_run`; it creates, deletes, retries and
+  executes nothing (structurally and behaviorally asserted). Class 4 requires the real
+  signed linkage resolved through OpenClaw's own `resolve_evidence_ref` — the presence of
+  an `apply_result` is never sufficient — and ambiguity (duplicate reservations,
+  conflicting outcomes) fails closed rather than being normalized. Failure to inspect
+  either store raises `ReconciliationError`, surfaced as a fail-closed `StateError`:
+  "unable to inspect" is never "clean". A minimal read-only `snapshot_approvals()` was
+  added to both authority stores; no raw SQL or connection is exposed to the reconciler.
+  No schema change, no new run/approval states, and no persisted findings.
+
 ### Fixed
 - **Denial accounting gap** — `POST /v1/approvals` recorded a 403 `owner_required` decision
   in the audit without incrementing `gateway_authz_denials_total`. Because OpenClaw's
@@ -120,16 +144,16 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **846** (~92% coverage) across the evidence, durability, hardening,
-  live-wiring, chat-integration and append-first-reservation increments; the full suite runs
-  on Linux and macOS in CI.
+- Test suite now at **869** (~92% coverage) across the evidence, durability, hardening,
+  live-wiring, chat-integration, append-first-reservation and reconciliation increments;
+  the full suite runs on Linux and macOS in CI.
 
 ### Not yet built (explicitly)
-- Startup cross-store reconciliation (7B.2) — 7B.1 resolves only the reserved-but-unconsumed
-  shape; a crash *during* the mutation, evidence without matching authority, and authority
-  consumed without a reservation remain unclassified. Signed verifier verdict / terminal
-  disposition / rollback-containment (7C), trust ledger, earned autonomy. Autonomy remains
-  fixed-ceiling and human-gated.
+- Signed verifier verdict, terminal run disposition, and rollback/containment (7C); trust
+  ledger; earned autonomy. A dirty run is failed closed into `INVALIDATED` and surfaced,
+  but its *disposition* is not yet a recorded terminal fact. Pending-approval expiry stays
+  deferred (no grounded policy source for a pending lifetime — see the implementation
+  contract). Autonomy remains fixed-ceiling and human-gated.
 
 ## [0.18.0] - 2026-07-04
 

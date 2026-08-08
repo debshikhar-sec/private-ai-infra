@@ -286,14 +286,27 @@ verified. Merged today:
   crash into a later process is invalidated fail-closed at startup: the run is closed out,
   nothing is retried, and another attempt needs fresh authority. A reservation that cannot
   be appended now refuses **before** consuming anything, leaving the approval usable.
+- **Startup cross-store reconciliation (Step 7B.2)** — one pass joins the authority store
+  and the evidence chain at startup, after each has independently passed its own integrity
+  validation, and classifies every approval: nothing started (clean), reserved but never
+  consumed (invalidate), **authority consumed without a valid linked outcome (dirty —
+  invalidated and surfaced, never auto-retried and never claimed successful)**, complete
+  and signature-linked (clean), evidence with no compatible authority (fail closed —
+  evidence is retained but never becomes authority), and authority consumed with no
+  reservation (fail closed). It classifies into immutable findings *before* acting, its
+  only action is invalidation, and it can neither execute nor create anything. Ambiguous
+  evidence fails closed rather than being normalized, and a store it cannot read aborts
+  startup rather than reading as clean.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
 non-authoritative placeholder** and is *not* the signed graph and does not affect
-authorization. **Startup cross-store reconciliation (7B.2)** is **not yet built** — a crash
-*during* the mutation still leaves an outcome the runtime cannot classify on its own, so
-runtime-wide crash-safe mutation semantics are not claimed and sandbox-confined mutation
-remains the safe execution target.
+authorization. A crash *during* the mutation is now classified and failed closed, but the
+runtime still cannot determine **whether that mutation actually landed** — it records that
+the outcome is unknown and stops. Recording a verifier verdict as signed evidence and a
+human's disposition of a dirty run as a terminal fact is **7C, not yet built**, so
+runtime-wide crash-safe mutation semantics are still not claimed and sandbox-confined
+mutation remains the safe execution target.
 The **signed verifier verdict, terminal disposition, and rollback/containment (7C)**, the
 **trust ledger**, and **earned autonomy** remain future. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
