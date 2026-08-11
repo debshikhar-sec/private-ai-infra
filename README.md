@@ -308,17 +308,34 @@ verified. Merged today:
   the verifier's own `load_evidence_graph_from_sink`, not a weaker parallel check in the
   gateway. A crash-after-reservation is likewise only believed when the reservation's own
   authorization edge resolves.
+- **Signed `verification_result` (Step 7C.1)** — the verifier's verdict is now a durable,
+  tamper-evident fact rather than returned text. OpenClaw signs it with its **own** emitter
+  key (`PRIVATE_AI_EVIDENCE_KEY_OPENCLAW`) and appends it to the same chained log it
+  verifies. Only OpenClaw holds that key: the gateway cannot author a verifier conclusion,
+  and neither can the executor whose work is being judged. A signed **PASS binds to the
+  exact `apply_result` it judged** via a typed `apply_ref` — which already chains upstream to
+  `execute_validated → approval_decided` — and is **unreachable over a broken authorization
+  graph**: if the full graph is not usable the verdict is downgraded before signing. If
+  signed verification evidence is required and cannot be appended, **no verified state is
+  advertised** — the mutation may already have happened, so nothing is retried, no rollback
+  is implied, and the assurance failure is loud. The payload is deliberately minimal
+  (verdict, counts, failing/inconclusive control *ids*, `apply_ref`, a derived
+  `evidence_graph_verified`) — no prompts, audit contents, model output, diffs or key
+  material. The verifier stays *operationally* read-only and is now append-only to its own
+  assurance log.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
 non-authoritative placeholder** and is *not* the signed graph and does not affect
 authorization. A crash *during* the mutation is now classified and failed closed, but the
 runtime still cannot determine **whether that mutation actually landed** — it records that
-the outcome is unknown and stops. Recording a verifier verdict as signed evidence and a
-human's disposition of a dirty run as a terminal fact is **7C, not yet built**, so
-runtime-wide crash-safe mutation semantics are still not claimed and sandbox-confined
-mutation remains the safe execution target.
-The **signed verifier verdict, terminal disposition, and rollback/containment (7C)**, the
+the outcome is unknown and stops. The verifier's verdict *is* now recorded as signed
+evidence (7C.1), but a human's disposition of a dirty run as a terminal fact is **7C.2, not
+yet built** — and deliberately so: multiple verification records may legitimately exist, and
+none of them is treated as terminal, because "pick the latest verdict" would be a hidden
+authority rule. Runtime-wide crash-safe mutation semantics are therefore still not claimed
+and sandbox-confined mutation remains the safe execution target.
+The **terminal disposition and rollback/containment (7C.2 / 7C.3)**, the
 **trust ledger**, and **earned autonomy** remain future. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
 signed evidence is **tamper-evident, not non-repudiation** (symmetric HMAC).

@@ -23,9 +23,12 @@
 > `validate → reserve (execute_validated) → mark_used → mutate`, with at most one reservation
 > per approval and a fail-closed startup invalidation for one that outlives a crash. See
 > [step-7b1-7b2-implementation-contract.md](step-7b1-7b2-implementation-contract.md). The
-> remaining steps in this spec — **cross-store reconciliation (7B.2)** and the **signed
-> verifier verdict / terminal disposition (7C)** — are still design-only and gated behind
-> later, separately-authorized increments.
+> Cross-store reconciliation (**7B.2**, hardened in **7B.2.1**) and the **signed verifier
+> verdict (7C.1)** have since landed: OpenClaw signs its own `verification_result` with its
+> own emitter key, binds a PASS to the exact `apply_result` it judged, and cannot produce a
+> signed PASS over a broken authorization graph. **Terminal disposition (7C.2)** and
+> **rollback/containment (7C.3)** remain design-only and gated behind later,
+> separately-authorized increments.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
 > trust ledger, earned autonomy, or production key management. See §10 and §14.
@@ -184,9 +187,10 @@ linkage are documented in §6a below.
 **First-implementation minimum:** `apply_result` (executor→sink) + OpenClaw consuming it from
 the sink. `execute_validated` and `approval_decided` have since landed (gateway emit), the
 three are cross-linked into the §6a signed graph, and the durable runtime configuration now
-lands all three in one durable chain (7B.0); `assurance_verdict` still follows in a later
-self-recorded-verdict commit (7C), and crash-safe ordering/reconciliation remain future
-(7B.1/7B.2, §13). Consuming controls must treat an absent-but-required record as **fail
+lands all three in one durable chain (7B.0). The verifier's self-recorded verdict has since
+landed as `verification_result` (7C.1, emitter `openclaw`), and crash-safe ordering and
+cross-store reconciliation landed as 7B.1 / 7B.2 (+7B.2.1, §13). Terminal disposition of a
+dirty run remains future (7C.2). Consuming controls must treat an absent-but-required record as **fail
 closed**, not INCONCLUSIVE (§9).
 
 ---

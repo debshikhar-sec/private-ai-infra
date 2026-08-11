@@ -38,6 +38,7 @@ from private_ai_gateway.state import StateConfig, open_backend
 
 _GW_HEX = "aa" * 32
 _OC_HEX = "bb" * 32
+_CLAW_HEX = "cc" * 32
 HERMES = {"Authorization": f"Bearer {TOKENS['hermes']}"}
 _OWNER_TOKEN = "test-owner-break-glass-token"
 _OBJ = "Apply the reviewed fix and verify it"
@@ -47,6 +48,7 @@ def _env(tmp_path, **extra):
     env = {
         "PRIVATE_AI_EVIDENCE_KEY_GATEWAY": _GW_HEX,
         "PRIVATE_AI_EVIDENCE_KEY_OPENCODE": _OC_HEX,
+        "PRIVATE_AI_EVIDENCE_KEY_OPENCLAW": _CLAW_HEX,
         "PRIVATE_AI_STATE_BACKEND": "sqlite",
         "PRIVATE_AI_STATE_DIR": str(tmp_path),
         "PRIVATE_AI_EVIDENCE_MODE": "durable",
@@ -68,6 +70,7 @@ def wired(tmp_path, monkeypatch):
     install_demo_plane(gw)
     monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_GATEWAY", _GW_HEX)
     monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_OPENCODE", _OC_HEX)
+    monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_OPENCLAW", _CLAW_HEX)
     opened = _open(tmp_path)
     monkeypatch.setattr(gw, "AUTH_TOKEN", _OWNER_TOKEN)
     monkeypatch.setattr(gw, "APPROVAL_STORE", opened.authority_store)

@@ -68,7 +68,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">14</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">23</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="885">885</div><div class="lbl">tests</div></div>
+        <div class="stat"><div class="num g" data-count="944">944</div><div class="lbl">tests</div></div>
         <div class="stat"><div class="num g" data-count="2">2</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="92" data-suffix="%">92%</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -206,7 +206,7 @@
             <div class="tk">12 · Capability is not authority</div>
             <h3>The model can propose anything. It can change nothing without you.</h3>
             <p>A capable planner, a confined executor, an independent verifier, and a signed durable record
-              of exactly who authorized what. Backed by 885 tests on two platforms and 23 adversarial
+              of exactly who authorized what. Backed by 944 tests on two platforms and 23 adversarial
               evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -372,25 +372,29 @@
               is now exactly the verifier&rsquo;s own full signed graph — apply → reservation → approval, with
               emitter identity, uniqueness, approve-decision and plan-hash agreement — never a weaker
               gateway-side check.</li>
+            <li><strong>Signed verifier verdict</strong> — OpenClaw now signs its own PASS/FAIL with its
+              own key and appends it to the chain it verifies, so the verdict is tamper-evident rather
+              than hearsay. A signed PASS binds to the exact apply it judged and is unreachable over a
+              broken authorization graph; if the verdict cannot be recorded, no verified state is
+              advertised. The gateway never receives the verifier&rsquo;s key.</li>
           </ul>
         </article>
         <article class="card">
           <h3>🚧 Next</h3>
           <ul>
             <li><strong>Recorded terminal disposition</strong> — a dirty run is invalidated and surfaced
-              today, but the human's disposition of it is not yet a recorded terminal fact.</li>
-            <li><strong>Signed verifier verdicts</strong> — OpenClaw's PASS/FAIL recorded as signed evidence,
-              so the verdict itself is tamper-evident and independently checkable after the fact.</li>
+              today, but the human's disposition of it is not yet a recorded terminal fact. It will bind
+              to one <em>specific</em> signed verifier result; today multiple verdicts are deliberately
+              plural and none of them is terminal.</li>
+            <li><strong>Bounded rollback / containment</strong> — the runtime still cannot determine
+              whether an interrupted mutation actually landed; it records the outcome as unknown.</li>
           </ul>
         </article>
         <article class="card">
           <h3>🗺️ Later</h3>
           <ul>
-            <li>Signed OpenClaw verification verdicts</li>
-            <li>Terminal run disposition as signed evidence</li>
-            <li>Bounded rollback / containment</li>
             <li>Trust ledger &amp; earned autonomy</li>
-            <li>Local-model engineering lanes (local planning already runs via MLX)</li>
+            <li>Local-model candidates promoted beyond shadow evaluation</li>
           </ul>
         </article>
       </div>

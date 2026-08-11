@@ -242,7 +242,15 @@ reaches its verdict by reading artifacts authored by the very components it veri
   identity, record uniqueness, `decision == approve` and canonical-plan-hash agreement); the
   gateway keeps no weaker parallel definition. What is **not** built yet: the runtime still cannot
   determine *whether* a mutation interrupted mid-flight actually landed — it records that
-  the outcome is unknown and stops. Signed verifier verdicts and a terminal, recorded
+  the outcome is unknown and stops. Since 7C.1 the verifier's verdict is itself a signed,
+  durable fact: OpenClaw holds its **own** emitter key — the gateway cannot author a verifier
+  conclusion, nor can the executor being judged — and a signed PASS binds to the exact
+  `apply_result` it judged and is unreachable over a broken authorization graph. Symmetric
+  HMAC means the assurance-owned registry can verify all three emitters, which is why this
+  remains tamper-evident and **not** non-repudiation. A verdict that cannot be recorded never
+  advertises a verified state, and nothing is retried or rolled back on that path. Multiple
+  verification records may legitimately exist and **none is terminal** — binding a terminal
+  disposition to one specific verifier result is 7C.2. A terminal, recorded
   disposition of a dirty run are 7C. Sandbox-confined mutation remains the safe execution
   target until then. The signed linkage graph above is
   the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an **unused,

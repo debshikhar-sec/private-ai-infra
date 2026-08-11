@@ -156,6 +156,34 @@ All notable changes to this project are documented here. Format based on
   to the evidence sink. CI is fully deterministic and never downloads or executes a model.
   **This is not autonomous coding.**
 
+- **Signed `verification_result` (Step 7C.1)** — the verifier's verdict becomes a durable,
+  tamper-evident assurance fact instead of returned text. OpenClaw signs it with its **own**
+  emitter key (`PRIVATE_AI_EVIDENCE_KEY_OPENCLAW`, key id `openclaw-hmac-1`) and appends it
+  to the same chained log it verifies. **Only OpenClaw receives that key**: the gateway must
+  not be able to author a verifier conclusion, and neither must the executor whose work is
+  being judged — that the assurance-owned registry can *verify* all three emitters is a
+  property of symmetric HMAC, not a custody grant, so this remains **tamper-evident, not
+  non-repudiation**. Two rules make a signed PASS mean something: it binds to the exact
+  signed `apply_result` it judged through a typed `apply_ref` (which already chains upstream
+  to `execute_validated` → `approval_decided`), and it is **unreachable over a broken
+  authorization graph** — if `load_evidence_graph_from_sink(...).usable` is false the verdict
+  is downgraded to FAIL before signing. If signed verification evidence is configured as
+  required and the append fails, no verified state is advertised: the mutation may already
+  have happened, so nothing is retried, no rollback is implied, and the assurance failure is
+  surfaced loudly rather than papered over with unsigned summary text. The payload is
+  minimal and non-sensitive (verdict, control counts, failed/inconclusive control **ids**,
+  `apply_ref`, and a derived `evidence_graph_verified`) — no prompts, audit contents, model
+  output, diffs, or key material; `run_id`/`approval_id` stay in the signed envelope. The
+  verifier remains *operationally* read-only — it changes no authority, executes no tool,
+  mutates no sandbox and repairs no application state — and is now append-only to its own
+  assurance log. Multiple verification passes are legitimate and are returned in full by
+  `verification_results_for`: **no consumer may treat any of them as terminal disposition**,
+  and there is deliberately no hidden "pick latest" rule. Binding a terminal disposition to
+  one specific verifier result is Step 7C.2. `AssuranceWorker` keeps its exact external
+  `(verdict, summary)` contract; with no verifier key configured it behaves exactly as
+  before. **Not** in this step: `run_disposition`, rollback, containment, asymmetric
+  crypto, KMS/HSM.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -217,7 +245,7 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **885** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **944** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation and reconciliation increments;
   the full suite runs on Linux and macOS in CI.
 

@@ -206,9 +206,10 @@ recorded in
   7B.1 + 7B.2 make an interrupted execution *classifiable* and fail it closed, but the
   runtime records only that the outcome is unknown. Turning that into a recorded terminal
   fact needs the signed verifier verdict and human disposition below.
-- **Signed verifier verdict, terminal disposition, rollback/containment (7C)** — *not yet
-  built.* OpenClaw's verdict recorded as signed evidence, human disposition of dirty runs as
-  a terminal signed fact, and bounded rollback/containment.
+- **Terminal disposition, rollback/containment (7C.2 / 7C.3)** — *not yet built.* A human's
+  disposition of a dirty run as a terminal signed fact, and bounded rollback/containment.
+  7C.2 will bind that disposition to one **specific** verifier result; today multiple
+  verification records are deliberately plural and none is terminal.
 - **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.

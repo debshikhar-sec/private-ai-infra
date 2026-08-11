@@ -39,7 +39,9 @@ trap cleanup EXIT
 # Ephemeral per-run signing keys — generated, exported, never echoed.
 PRIVATE_AI_EVIDENCE_KEY_GATEWAY="$(openssl rand -hex 32)"
 PRIVATE_AI_EVIDENCE_KEY_OPENCODE="$(openssl rand -hex 32)"
+PRIVATE_AI_EVIDENCE_KEY_OPENCLAW="$(openssl rand -hex 32)"
 export PRIVATE_AI_EVIDENCE_KEY_GATEWAY PRIVATE_AI_EVIDENCE_KEY_OPENCODE
+export PRIVATE_AI_EVIDENCE_KEY_OPENCLAW
 export PRIVATE_AI_STATE_BACKEND=sqlite
 export PRIVATE_AI_STATE_DIR="$STATE_DIR"
 export PRIVATE_AI_EVIDENCE_MODE=durable
