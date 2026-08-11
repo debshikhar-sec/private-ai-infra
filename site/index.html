@@ -68,7 +68,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">14</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">23</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="944">944</div><div class="lbl">tests</div></div>
+        <div class="stat"><div class="num g" data-count="981">981</div><div class="lbl">tests</div></div>
         <div class="stat"><div class="num g" data-count="2">2</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="92" data-suffix="%">92%</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -206,7 +206,7 @@
             <div class="tk">12 · Capability is not authority</div>
             <h3>The model can propose anything. It can change nothing without you.</h3>
             <p>A capable planner, a confined executor, an independent verifier, and a signed durable record
-              of exactly who authorized what. Backed by 944 tests on two platforms and 23 adversarial
+              of exactly who authorized what. Backed by 981 tests on two platforms and 23 adversarial
               evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -292,7 +292,7 @@
         </article>
         <article class="card">
           <h3>🔍 OpenClaw <span class="badge l0">L0 · observe</span></h3>
-          <p>Read-only assurance. Reconciles the audit, metrics, isolation manifests, and policy across nine controls and emits a PASS/FAIL verdict — changing nothing, clearing nothing.</p>
+          <p><strong>Operationally</strong> read-only — it changes no authority, runs no tool, touches no sandbox. It reconciles the audit, metrics, isolation manifests, and policy across nine controls, then signs its own PASS/FAIL verdict into its assurance log under its own key. Append-only to its own evidence; still unable to act.</p>
         </article>
       </div>
 
@@ -377,17 +377,23 @@
               than hearsay. A signed PASS binds to the exact apply it judged and is unreachable over a
               broken authorization graph; if the verdict cannot be recorded, no verified state is
               advertised. The gateway never receives the verifier&rsquo;s key.</li>
+            <li><strong>Terminal run disposition</strong> — a human can finally <em>finish</em> a dirty run.
+              The owner names one specific basis — a chosen signed verdict, or the exact reservation for a
+              run where no verdict can legitimately exist — and the gateway re-resolves that reference,
+              seals the run, and signs a terminal <code>run_disposition</code>. The honest default asserts
+              nothing: <code>closed_unknown</code> records that the runtime cannot tell whether the mutation
+              landed. Exactly one per run under concurrency; late evidence can never supersede it.</li>
           </ul>
         </article>
         <article class="card">
           <h3>🚧 Next</h3>
           <ul>
-            <li><strong>Recorded terminal disposition</strong> — a dirty run is invalidated and surfaced
-              today, but the human's disposition of it is not yet a recorded terminal fact. It will bind
-              to one <em>specific</em> signed verifier result; today multiple verdicts are deliberately
-              plural and none of them is terminal.</li>
-            <li><strong>Bounded rollback / containment</strong> — the runtime still cannot determine
-              whether an interrupted mutation actually landed; it records the outcome as unknown.</li>
+            <li><strong>Bounded rollback / containment</strong> — a run can now be closed, but nothing can
+              be <em>undone</em>. The runtime still cannot determine whether an interrupted mutation landed,
+              and reversing a sandbox apply needs a recorded pre-image before the mutation, not just hashes
+              after it.</li>
+            <li><strong>Local-model qualification</strong> — measured first-pass evidence for the local
+              engineering model, still with zero mutation authority.</li>
           </ul>
         </article>
         <article class="card">
@@ -406,9 +412,10 @@
           are future). Autonomy is <strong>fixed-ceiling by policy</strong>: there is no self-approval and no
           earned-trust escalation, and execution stays human-gated in a confined sandbox.
           <strong>Runtime-wide crash-safe mutation semantics are still not claimed.</strong> An execution
-          interrupted mid-flight is now classified and failed closed, but the runtime records only that the
-          outcome is <em>unknown</em> — it cannot tell you whether that mutation actually landed, and turning
-          that into a recorded terminal fact needs signed verifier verdicts and disposition (7C).
+          interrupted mid-flight is classified, failed closed, independently verified under a signed verdict,
+          and can now be terminally closed by a human as <em>unknown</em> — but the runtime still cannot tell
+          you whether that mutation actually landed. Undoing one is the remaining gap: rollback and containment
+          (7C.3).
           This is a <strong>local-first, human-in-authority</strong> assurance and governance
           plane — <strong>not</strong> a fully autonomous, production-deployed, or compliance-certified system, and it
           has no users, revenue, or design partners. It is a working, tested, honestly-scoped engineering artifact.</p>

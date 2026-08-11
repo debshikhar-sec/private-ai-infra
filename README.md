@@ -323,19 +323,30 @@ verified. Merged today:
   `evidence_graph_verified`) — no prompts, audit contents, model output, diffs or key
   material. The verifier stays *operationally* read-only and is now append-only to its own
   assurance log.
+- **Terminal `run_disposition` (Step 7C.2)** — a human can finally *finish* a dirty run.
+  `POST /v1/dispositions` (owner-gated) records the closure as a gateway-signed terminal
+  fact. The caller names one **specific basis** — a chosen `verification_result`, or the
+  exact `execute_validated` reservation for a dirty run where no apply-bound verdict can
+  legitimately exist — and the server re-resolves that typed reference against the verified
+  chain, recomputing the digest and checking type, authoring emitter, and run/approval
+  binding. There is no "no basis" path and no "pick latest". The default disposition,
+  `closed_unknown`, asserts **nothing**: the runtime cannot tell whether the mutation landed
+  and the human acknowledges exactly that; the `human_asserted_*` values are named for whose
+  claim they are and are never derived by the runtime. Disposal seals the run through the
+  existing `invalidate_run` barrier — restricting only, never reopening — and a second
+  attempt is refused `already_disposed` rather than superseding the first. Reconciliation
+  reads dispositions and never derives them: the class and outcome are unchanged, and a
+  disposition that does not re-validate fails startup **closed**.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
 non-authoritative placeholder** and is *not* the signed graph and does not affect
-authorization. A crash *during* the mutation is now classified and failed closed, but the
-runtime still cannot determine **whether that mutation actually landed** — it records that
-the outcome is unknown and stops. The verifier's verdict *is* now recorded as signed
-evidence (7C.1), but a human's disposition of a dirty run as a terminal fact is **7C.2, not
-yet built** — and deliberately so: multiple verification records may legitimately exist, and
-none of them is treated as terminal, because "pick the latest verdict" would be a hidden
-authority rule. Runtime-wide crash-safe mutation semantics are therefore still not claimed
-and sandbox-confined mutation remains the safe execution target.
-The **terminal disposition and rollback/containment (7C.2 / 7C.3)**, the
+authorization. A crash *during* the mutation is classified, failed closed, independently
+verified under a signed verdict, and can now be terminally closed by a human — but the
+runtime still cannot determine **whether that mutation actually landed**, and nothing can be
+**undone**. Runtime-wide crash-safe mutation semantics are therefore still not claimed and
+sandbox-confined mutation remains the safe execution target.
+**Rollback and containment (7C.3)**, the
 **trust ledger**, and **earned autonomy** remain future. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
 signed evidence is **tamper-evident, not non-repudiation** (symmetric HMAC).

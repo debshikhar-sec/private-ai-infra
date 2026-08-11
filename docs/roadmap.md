@@ -202,14 +202,20 @@ recorded in
 - **`ApprovalRecord.evidence_refs` population** — *future.* An **unused, non-authoritative
   placeholder** today; it is *not* the signed graph (which shipped as payload-embedded
   `EvidenceRef` data). Populating it would be a convenience index over the sink records.
-- **Determining whether an interrupted mutation actually landed** — *future (needs 7C).*
-  7B.1 + 7B.2 make an interrupted execution *classifiable* and fail it closed, but the
-  runtime records only that the outcome is unknown. Turning that into a recorded terminal
-  fact needs the signed verifier verdict and human disposition below.
-- **Terminal disposition, rollback/containment (7C.2 / 7C.3)** — *not yet built.* A human's
-  disposition of a dirty run as a terminal signed fact, and bounded rollback/containment.
-  7C.2 will bind that disposition to one **specific** verifier result; today multiple
-  verification records are deliberately plural and none is terminal.
+- **Determining whether an interrupted mutation actually landed** — *still not possible, and
+  deliberately not faked.* 7B.1 + 7B.2 make an interrupted execution *classifiable* and fail
+  it closed; 7C.1 makes the verifier's judgment of it a signed fact; 7C.2 lets a human close
+  it terminally as `closed_unknown`. None of that tells you whether the mutation landed. A
+  `human_asserted_*` disposition records a **person's** claim, clearly labelled as such, and
+  never converts unknown system evidence into known fact.
+- **Terminal disposition (Step 7C.2)** — *shipped.* A human's closure of a dirty run is now a
+  gateway-signed terminal fact, bound to one **specific** basis the caller names: a chosen
+  `verification_result`, or the exact `execute_validated` reservation for a run where no
+  apply-bound verdict can legitimately exist. Multiple verdicts stay plural and none is
+  inferred — there is no "pick latest".
+- **Rollback / containment (Step 7C.3)** — *not yet built.* Nothing can be undone. Reversing
+  even a sandbox-confined apply needs a recorded pre-image captured *before* the mutation,
+  not hashes recorded after it; historical runs will not retroactively become reversible.
 - **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.

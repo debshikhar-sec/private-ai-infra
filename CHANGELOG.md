@@ -184,6 +184,41 @@ All notable changes to this project are documented here. Format based on
   before. **Not** in this step: `run_disposition`, rollback, containment, asymmetric
   crypto, KMS/HSM.
 
+- **Terminal `run_disposition` (Step 7C.2)** — a human can finally *finish* a dirty run.
+  Reconciliation could already invalidate one and surface it, and 7C.1 could verify one, but
+  nothing durable recorded that a person had looked at it and closed it, so the same anomaly
+  resurfaced at every startup. `POST /v1/dispositions` (owner-gated, alongside a read-only
+  `GET /v1/runs/<run_id>/disposition-basis`) records that closure as a gateway-signed,
+  terminal evidence fact. **The basis model is the load-bearing correction.** A
+  `verification_result` reference cannot be mandatory: the archetypal run needing disposition
+  is a Class-3 dirty run whose authority was consumed and whose mutation may have started but
+  which has **no valid `apply_result`** — and a 7C.1 verdict is apply-bound, so no legitimate
+  verdict can exist for it. Requiring one would have made exactly the runs that need human
+  closure permanently undisposable. The basis is therefore explicit and narrow: either one
+  **specifically named** `verification_result`, or the exact `execute_validated` reservation
+  that established the possibly-started execution. There is no "no basis" path, no
+  caller-chosen arbitrary record, and no "pick latest" — when several verdicts exist the
+  human selects one, and the server re-resolves that typed `EvidenceRef` against the verified
+  chain, **recomputing the digest** and checking record type, authoring emitter, and run and
+  approval binding. A client never supplies an evidence envelope; the server constructs and
+  signs the record. The disposition vocabulary is kept as small as honesty allows:
+  `closed_unknown` is the default and asserts **nothing** — a human acknowledges the runtime
+  cannot determine whether the mutation landed — while `human_asserted_applied` /
+  `human_asserted_not_applied` are named for whose claim they are and are never derived by
+  OpenClaw, by reconciliation, or by the runtime. Terminality is real, not advisory: the
+  disposal seals the run through the existing `invalidate_run` barrier (monotone and
+  restricting — nothing is reopened, restored, or granted), a run with standing authority is
+  refused rather than killed, a second attempt is refused `already_disposed` under a per-run
+  critical section rather than superseding the first, and neither a late `apply_result` nor a
+  late `verification_result` can resurrect or override it. Reconciliation reads dispositions
+  but never derives them: classification establishes the history first and is unchanged, then
+  a valid disposition retires the finding from the new `report.outstanding` while leaving its
+  class, its outcome and the run's `INVALIDATED` status exactly as they were. A disposition
+  that does not fully re-validate — tampered basis, foreign binding, wrong emitter, or two
+  records for one run — fails startup **closed**, because "unreadable" must never read as
+  "not yet disposed". **Not** in this step: rollback, containment, trust ledger, earned
+  autonomy.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -245,16 +280,17 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **944** (~92% coverage) across the evidence, durability, hardening,
-  live-wiring, chat-integration, append-first-reservation and reconciliation increments;
-  the full suite runs on Linux and macOS in CI.
+- Test suite now at **981** (~92% coverage) across the evidence, durability, hardening,
+  live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
+  signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
+  in CI.
 
 ### Not yet built (explicitly)
-- Signed verifier verdict, terminal run disposition, and rollback/containment (7C); trust
-  ledger; earned autonomy. A dirty run is failed closed into `INVALIDATED` and surfaced,
-  but its *disposition* is not yet a recorded terminal fact. Pending-approval expiry stays
-  deferred (no grounded policy source for a pending lifetime — see the implementation
-  contract). Autonomy remains fixed-ceiling and human-gated.
+- Rollback and containment (7C.3); trust ledger; earned autonomy. A dirty run can now be
+  verified, invalidated and terminally closed by a human — but nothing can be **undone**, and
+  the runtime still cannot determine whether an interrupted mutation actually landed.
+  Pending-approval expiry stays deferred (no grounded policy source for a pending lifetime —
+  see the implementation contract). Autonomy remains fixed-ceiling and human-gated.
 
 ## [0.18.0] - 2026-07-04
 

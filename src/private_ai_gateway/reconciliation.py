@@ -47,6 +47,14 @@ neither is "its execute_ref resolves". Class 2 is likewise gated on a genuinely 
 reservation (:func:`openclaw.evidence.load_execution_reservation_from_sink`), so malformed
 execution evidence is never mistaken for a clean crash-after-reservation story.
 
+Step 7C.2 adds a second, strictly separate question. Classification above establishes what
+the *history* was; a valid terminal ``run_disposition`` then answers whether a human has
+already closed that history. The two never mix: a dirty run stays class 3 and stays
+invalidated forever, but once disposed it is no longer *outstanding* and stops being
+resurfaced at every startup. No class is weakened by the presence of a disposition, and a
+disposition that does not fully re-validate fails startup closed rather than being ignored —
+"unreadable" must never read as "not yet disposed".
+
 Anything ambiguous (more than one reservation, conflicting outcomes, mismatched bindings)
 fails closed rather than being normalized — and *failing closed means acting*: a class-5
 inconsistency that can be tied to an extant authority run invalidates that run, because
@@ -55,14 +63,14 @@ Only an orphan evidence fact with no corresponding authority run is attention-on
 acting there would mean letting evidence create or select authority.
 
 The terminal safety barrier is the existing ``RunStatus.INVALIDATED``. This module adds no
-run/approval states, no schema, and no persisted findings — Step 7C's signed verdicts and
-terminal disposition remain future.
+run/approval states, no schema, and no persisted findings; the one durable thing that can
+retire a finding is a human's signed disposition, which this module only ever *reads*.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from private_ai_gateway.approvals import ApprovalStatus, RunStatus
 
@@ -91,11 +99,21 @@ class ReconciliationFinding:
     run_id: str
     approval_id: str
     reason: str
+    # Step 7C.2 — a valid terminal ``run_disposition`` exists for this run. Deliberately a
+    # separate field rather than a fourth outcome: the outcome records what the *history*
+    # was and never softens because a human later closed it. Only "is this still
+    # outstanding?" changes.
+    disposition: str = ""
+
+    @property
+    def disposed(self) -> bool:
+        return bool(self.disposition)
 
     def __str__(self) -> str:  # operator-facing, safe by construction
+        disposed = f" disposition={self.disposition}" if self.disposition else ""
         return (
             f"class={self.class_id} outcome={self.outcome} run={self.run_id or '-'} "
-            f"approval={self.approval_id or '-'} reason={self.reason}"
+            f"approval={self.approval_id or '-'}{disposed} reason={self.reason}"
         )
 
 
@@ -116,6 +134,24 @@ class ReconciliationReport:
     @property
     def is_clean(self) -> bool:
         return not self.invalidated and not self.attention
+
+    @property
+    def disposed(self) -> tuple[ReconciliationFinding, ...]:
+        """Findings whose run a human has already terminally closed (Step 7C.2)."""
+        return tuple(f for f in self.findings if f.disposed)
+
+    @property
+    def outstanding(self) -> tuple[ReconciliationFinding, ...]:
+        """Anomalies still awaiting a human — everything not clean and not yet disposed.
+
+        This, not :attr:`is_clean`, is what an operator should watch: a dirty run that was
+        genuinely dirty stays classified as dirty forever, but once disposed it stops being
+        work.
+        """
+        return tuple(
+            f for f in self.findings
+            if f.outcome != OUTCOME_CLEAN and not f.disposed
+        )
 
     def by_class(self, class_id: int) -> tuple[ReconciliationFinding, ...]:
         return tuple(f for f in self.findings if f.class_id == class_id)
@@ -357,6 +393,62 @@ def _classify(authority_store, reader, approvals, index) -> list[ReconciliationF
     return findings
 
 
+# --- terminal disposition (Step 7C.2, still no mutation) ------------------------------
+
+def _disposed_runs(authority_store, reader) -> tuple[dict, list[ReconciliationFinding]]:
+    """Every valid terminal ``run_disposition`` on the chain, keyed by ``run_id``.
+
+    Runs over the *whole* verified log rather than only the runs that produced a finding, so
+    a malformed disposition cannot hide behind a run that classified quietly. The outcomes
+    follow the same doctrine as the rest of this module:
+
+      * valid disposition for an extant, already-sealed run -> terminal; the run stops being
+        outstanding;
+      * disposition naming a run the authority store does not hold -> nothing is mutated and
+        nothing is synthesized (evidence never creates authority); any evidence-driven
+        class-5 finding for that run is simply marked disposed;
+      * disposition naming an extant run that is somehow **not** invalidated -> a cross-store
+        contradiction, handled exactly like any other class-5 inconsistency: the extant run is
+        invalidated;
+      * anything that does not re-validate (bad basis, wrong binding, wrong emitter, two
+        records for one run) -> :class:`ReconciliationError`; startup fails closed.
+    """
+    from private_ai_gateway.disposition import (
+        RUN_DISPOSITION_RECORD_TYPE,
+        DispositionError,
+        disposition_for_run,
+    )
+
+    run_ids = sorted({
+        rec.envelope.run_id or ""
+        for rec in reader.records
+        if rec.envelope.record_type == RUN_DISPOSITION_RECORD_TYPE
+    })
+    disposed: dict[str, str] = {}
+    extra: list[ReconciliationFinding] = []
+    for run_id in run_ids:
+        try:
+            validated = disposition_for_run(
+                reader.records, sink_id=reader.sink_id, run_id=run_id
+            )
+        except DispositionError as exc:
+            raise ReconciliationError(
+                f"run_disposition for run {run_id!r} did not validate ({exc.code}): "
+                f"{exc.detail}"
+            ) from exc
+        if validated is None:  # pragma: no cover - run_ids came from these very records
+            continue
+        run = authority_store.get_run(run_id) if run_id else None
+        if run is not None and run.status is not RunStatus.INVALIDATED:
+            extra.append(_class_5(
+                authority_store, run_id, validated.approval_id,
+                "a terminal run_disposition exists for a run that is not invalidated",
+            ))
+            continue
+        disposed[run_id] = validated.disposition
+    return disposed, extra
+
+
 # --- action (only after the complete scan succeeded) ----------------------------------
 
 def reconcile(authority_store, evidence_sink) -> ReconciliationReport:
@@ -377,9 +469,24 @@ def reconcile(authority_store, evidence_sink) -> ReconciliationReport:
     approvals = _authority_snapshot(authority_store)
     index = _evidence_index(evidence_sink)
     reader = _graph_reader(evidence_sink)
-    findings = tuple(_classify(authority_store, reader, approvals, index))
+    findings = list(_classify(authority_store, reader, approvals, index))
+
+    # -- phase 1b: terminal disposition, applied *over* the classification, never into it --
+    disposed, extra = _disposed_runs(authority_store, reader)
+    findings.extend(extra)
+    if disposed:
+        findings = [
+            replace(f, disposition=disposed[f.run_id])
+            if f.run_id in disposed and not f.disposition else f
+            for f in findings
+        ]
+    findings = tuple(findings)
 
     # -- phase 2: act --
+    # Driven by the classification, deliberately *not* by whether a disposition exists: a
+    # disposed run is already sealed (that is what recording the disposition did), so this is
+    # idempotent — but it means a disposition can never be the reason a dirty run escapes the
+    # terminal barrier.
     for finding in findings:
         if finding.outcome != OUTCOME_INVALIDATED or not finding.run_id:
             continue
@@ -392,6 +499,8 @@ def reconcile(authority_store, evidence_sink) -> ReconciliationReport:
             ) from exc
 
     report = ReconciliationReport(findings)
-    for finding in report.invalidated + report.attention:
+    for finding in report.outstanding:
         logger.warning("STARTUP_RECONCILIATION | %s", finding)
+    for finding in report.disposed:
+        logger.info("STARTUP_RECONCILIATION_DISPOSED | %s", finding)
     return report
