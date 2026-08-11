@@ -80,7 +80,8 @@ class VerificationEmit:
         return not self.appended
 
 
-def build_payload(report, *, apply_ref: EvidenceRef | None, graph_verified: bool) -> dict:
+def build_payload(report, *, apply_ref: EvidenceRef | None, graph_verified: bool,
+                  rollback_ref: EvidenceRef | None = None) -> dict:
     """The minimal, non-sensitive verdict payload.
 
     Control **identifiers** and counts only. Deliberately absent: raw prompts, audit log
@@ -107,6 +108,13 @@ def build_payload(report, *, apply_ref: EvidenceRef | None, graph_verified: bool
     }
     if apply_ref is not None:
         payload["apply_ref"] = apply_ref.to_mapping()
+    if rollback_ref is not None:
+        # Step 7C.3B. The verdict's *subject* is a rollback rather than an apply. This is the
+        # same record type on purpose: it is still exactly "OpenClaw's signed judgment about
+        # one thing that happened", signed with the same key by the same component. What
+        # changes is which typed reference names the subject — not the meaning of the record,
+        # and not who is entitled to author it.
+        payload["rollback_ref"] = rollback_ref.to_mapping()
     return payload
 
 
@@ -217,6 +225,117 @@ def emit_verification_result(
         True, verdict, evidence_ref=record.evidence_ref(),
         graph_verified=graph_verified, reason=downgrade,
     )
+
+
+def verify_rollback(
+    evidence_sink,
+    rollback_record,
+    *,
+    sandbox,
+    signing_key: bytes,
+    key_id: str,
+) -> "VerificationEmit":
+    """OpenClaw's own, independent verdict on a rollback (Step 7C.3B).
+
+    The executor signs *what it did*; this decides whether that amounts to a correct
+    restoration, and it decides it by **re-reading the tree** rather than by reading the
+    executor's claim. The pre-image is re-derived from disk and every entry re-hashed against
+    what is actually there now — a creation must be absent, an update or delete must match the
+    recorded bytes exactly.
+
+    A PASS is therefore unreachable over a failed, contained, or merely *claimed* rollback,
+    for the same reason a 7C.1 PASS is unreachable over a broken graph. The verdict is signed
+    with OpenClaw's own key and carries a typed ``rollback_ref`` to the exact outcome it
+    judged.
+    """
+    from openclaw.report import build_report
+
+    payload = rollback_record.payload if isinstance(rollback_record.payload, dict) else {}
+    env = rollback_record.envelope
+    findings = []
+    ok, detail = _rollback_is_restored(payload, sandbox)
+    findings.append(_finding("AC-ROLLBACK-RESTORED", ok, detail))
+
+    report = build_report(findings)
+    verdict = report.verdict
+    apply_ref = None
+    raw_apply = payload.get("apply_ref")
+    if isinstance(raw_apply, dict):
+        try:
+            apply_ref = EvidenceRef.from_mapping(raw_apply)
+        except EvidenceError:
+            apply_ref = None
+
+    body = build_payload(
+        report, apply_ref=apply_ref, graph_verified=False,
+        rollback_ref=rollback_record.evidence_ref(),
+    )
+    body["verdict"] = verdict
+    try:
+        envelope = SigningEnvelope(
+            schema_version=SCHEMA_VERSION,
+            evidence_id=new_evidence_id(),
+            sink_id=evidence_sink.sink_id,
+            run_id=env.run_id or "",
+            emitter=EMITTER_OPENCLAW,
+            emitter_key_id=key_id,
+            record_type=VERIFICATION_RESULT_RECORD_TYPE,
+            payload_hash=payload_digest(body),
+            ts=_utc_now_iso(),
+            nonce=new_evidence_id(),
+            approval_id=env.approval_id or "",
+        )
+        record = evidence_sink.append(
+            envelope, body, sign_envelope(envelope, signing_key)
+        )
+    except Exception as exc:  # noqa: BLE001 — an unrecordable verdict is an assurance failure
+        raise VerificationEmitError(
+            f"the rollback verdict could not be recorded: {exc}"
+        ) from exc
+    return VerificationEmit(
+        True, verdict, evidence_ref=record.evidence_ref(), graph_verified=False,
+        reason="" if verdict == VERDICT_PASS else detail,
+    )
+
+
+def _finding(control_id: str, ok: bool, detail: str):
+    from openclaw.checks import FAIL, PASS, Finding
+
+    return Finding(
+        control_id, "the sandbox matches the recorded pre-image",
+        PASS if ok else FAIL, "high", detail,
+    )
+
+
+def _rollback_is_restored(payload: dict, sandbox) -> tuple[bool, str]:
+    """Re-read the tree. The executor's own claim is an input, never the conclusion."""
+    from pathlib import Path
+
+    from opencode_sandbox.preimage import PreimageError, _sha256_file, load_preimage
+    from opencode_sandbox.rollback import RESTORED
+
+    if payload.get("status") != RESTORED:
+        return False, f"the executor recorded status {payload.get('status')!r}, not restored"
+    if payload.get("contained"):
+        return False, "the workspace is contained; a contained rollback is never a success"
+
+    sandbox = Path(sandbox)
+    try:
+        snapshot = load_preimage(sandbox.parent / "preimage", payload.get("snapshot_id", ""))
+    except PreimageError as exc:
+        return False, f"the pre-image could not be re-derived: {exc.code}"
+    if snapshot.digest != payload.get("snapshot_digest"):
+        return False, "the pre-image on disk is not the one the rollback outcome names"
+
+    for entry in snapshot.entries:
+        target = sandbox / entry.path
+        if not entry.existed:
+            if target.exists():
+                return False, f"{entry.path!r} exists but the pre-image says it did not"
+            continue
+        if not target.is_file() or _sha256_file(target) != entry.digest:
+            return False, f"{entry.path!r} does not match the recorded pre-image"
+    return True, f"all {len(snapshot.entries)} declared path(s) match the recorded pre-image"
 
 
 def verification_results_for(evidence_sink, *, run_id=None, approval_id=None) -> tuple:

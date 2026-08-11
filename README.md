@@ -346,20 +346,34 @@ verified. Merged today:
   and in total, atomic, and never caller-placed; an oversized or unsafe target refuses the
   **whole** snapshot, because a partial pre-image looks reversible and is not, and a capture
   that cannot complete **rejects the apply**. Signed evidence gains only
-  `{snapshot_id, snapshot_digest, entries, bytes}` — never contents. **Nothing performs a
-  rollback yet**, and **no historical run becomes reversible**.
+  `{snapshot_id, snapshot_digest, entries, bytes}` — never contents.
+- **Governed rollback and containment (Step 7C.3B)** — a sandbox apply can now be undone, as
+  a **mutation**: a new governed run, a new single-use owner approval, and a canonical plan
+  hash committing to the original run, the exact `apply_result`, and the snapshot's identity
+  and digest — so the owner approves *one specific restoration*, not "undo something".
+  `POST /v1/rollbacks` plans, `/v1/approvals` authorizes, `POST /v1/rollbacks/execute` runs it
+  under the same append-first ordering as any other write. **A failure never becomes a
+  success**: after the reservation, any failure signs a `failed` outcome, **contains** the
+  workspace with a marker asking for a human, and invalidates the rollback run — never a
+  retry, never a partial success. The executor re-hashes what it restored; OpenClaw then
+  re-reads the tree itself and signs its own verdict, so a `restored` claim over a drifted
+  tree is a FAIL. A success means only *the supported sandbox state was restored to the
+  recorded pre-image* — no external effect is claimed to be undone. Rollback is confined to
+  `PRIVATE_AI_SANDBOX_RUNTIME_DIR`, an apply with no pre-image is refused rather than
+  fabricated for, a disposed run is not reopened to be undone, and **reconciliation can
+  neither trigger nor reach a rollback**.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
 non-authoritative placeholder** and is *not* the signed graph and does not affect
 authorization. A crash *during* the mutation is classified, failed closed, independently
 verified under a signed verdict, and can now be terminally closed by a human — but the
-runtime still cannot determine **whether that mutation actually landed**, and nothing
-performs a rollback: 7C.3A makes a *future* sandbox apply reversible in principle, and 7C.3B
-is where an owner-approved, reserved, independently-verified rollback would use it. Runtime-wide crash-safe mutation semantics are therefore still not claimed and
+runtime still cannot determine **whether that mutation actually landed**. A *future* sandbox
+apply can be undone under owner authority and independently verified; a historical one has no
+pre-image and stays irreversible, and rollback never leaves the sandbox. Runtime-wide crash-safe mutation semantics are therefore still not claimed and
 sandbox-confined mutation remains the safe execution target.
-**Governed rollback and containment (7C.3B)**, the
-**trust ledger**, and **earned autonomy** remain future. Autonomy stays fixed-ceiling by
+The **trust ledger**, **earned autonomy**, and any
+rollback outside the sandbox remain future. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
 signed evidence is **tamper-evident, not non-repudiation** (symmetric HMAC).
 Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).

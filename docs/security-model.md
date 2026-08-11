@@ -262,8 +262,13 @@ reaches its verdict by reading artifacts authored by the very components it veri
   write, since the prior artifacts kept only changed *paths* and could never reconstruct
   content. Its contents stay on local disk — signed evidence carries only the snapshot's
   identity and digest — and the restore primitive is reachable from nothing in the governed
-  path. **Governed rollback and containment (7C.3B)** — an owner-approved, reserved,
-  independently-verified undo — does not exist, and no historical run is reversible. Sandbox-confined mutation remains the safe
+  path until **7C.3B**, which gives it exactly one caller: an owner-approved, reserved,
+  independently-verified rollback that is a governed mutation in its own right, with its own
+  run, its own single-use approval bound to its own plan hash, and a signed outcome. A
+  failure after the reservation contains the workspace and invalidates the rollback run; it
+  is never a success. What remains **out of scope**: any rollback outside the sandbox — git,
+  deployment, system configuration — and any reversibility for a historical apply, which has
+  no pre-image and never will. Sandbox-confined mutation remains the safe
   execution target until then. The signed linkage graph above is
   the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an **unused,
   non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned

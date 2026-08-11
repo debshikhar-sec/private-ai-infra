@@ -142,6 +142,12 @@ else:
     REQUIRE_AUTHORIZATION_EVIDENCE = False
     EVIDENCE_RUNTIME_WIRED = False
 
+# Step 7C.3B — the one directory a governed rollback may read a pre-image from. A rollback
+# request names a workspace *relative to* this root and nothing else, so no caller can point
+# a restore at a tree outside the sandbox runtime. Unset means rollback is unavailable, which
+# is the correct default: a runtime with no sandbox root has nothing it may safely restore.
+SANDBOX_RUNTIME_ROOT = os.environ.get("PRIVATE_AI_SANDBOX_RUNTIME_DIR", "")
+
 # Release both stores' connections and ownership locks on interpreter shutdown. (Process
 # death releases the flocks anyway; this makes a *clean* shutdown explicit.)
 atexit.register(_OPENED_BACKEND.close)
@@ -979,6 +985,128 @@ def v1_dispositions():
         "evidence_id": recorded.evidence_id,
         "terminal": True,
     }), 200
+
+
+@app.route("/v1/rollbacks", methods=["POST"])
+def v1_rollbacks_plan():
+    """Plan one specific sandbox rollback, owner-gated (Step 7C.3B).
+
+    Body: ``{run_id, approval_id, workspace}``. Reads only: it resolves the signed
+    ``apply_result`` for that run, re-derives the pre-image the apply recorded, and registers
+    a **new governed run** whose canonical plan hash commits to the original run, the exact
+    apply record, and the snapshot's identity and digest. The owner then approves that hash
+    through the ordinary ``/v1/approvals`` path — a rollback gets no second approval system —
+    and only then may ``/v1/rollbacks/execute`` run.
+
+    An apply that recorded no pre-image is refused ``run_not_reversible``. Nothing is
+    fabricated for a historical run.
+    """
+    from private_ai_gateway import rollback as rb
+
+    denied = _owner_only("Rollback")
+    if denied is not None:
+        return denied
+
+    body = request.get_json(silent=True) or {}
+    try:
+        plan = rb.plan_rollback(
+            APPROVAL_STORE,
+            EVIDENCE_SINK,
+            origin_run_id=str(body.get("run_id", "")).strip(),
+            origin_approval_id=str(body.get("approval_id", "")).strip(),
+            workspace=str(body.get("workspace", "")).strip(),
+            runtime_root=SANDBOX_RUNTIME_ROOT,
+            principal_id=g.principal.name,
+            policy_ceiling=autonomy_ceiling_for(g.principal) or autonomy.MAX_LEVEL,
+        )
+    except rb.RollbackError as exc:
+        return _rollback_refusal(exc, str(body.get("run_id", "")).strip())
+
+    logger.info(
+        f"ROLLBACK_PLANNED | origin_run_id={log_safe(plan.origin_run_id)} "
+        f"| rollback_run_id={log_safe(plan.rollback_run_id)} "
+        f"| snapshot={log_safe(plan.snapshot_id)}"
+    )
+    return jsonify({
+        **plan.to_mapping(),
+        "next": "approve this canonical_plan_hash for rollback_run_id via POST /v1/approvals, "
+                "then POST /v1/rollbacks/execute",
+        "scope": "the supported sandbox state only; no external effect is undone",
+    }), 200
+
+
+@app.route("/v1/rollbacks/execute", methods=["POST"])
+def v1_rollbacks_execute():
+    """Execute an approved sandbox rollback, owner-gated (Step 7C.3B).
+
+    Body: ``{rollback_run_id, approval_id, run_id, approval_id_origin, workspace}``. The
+    ordering is Step 7B.1's: validate, append the ``rollback_validated`` reservation, consume
+    the single-use approval, and only then restore. A failure is never a success — the
+    workspace is contained, the rollback run is invalidated, and the signed outcome says
+    ``failed``.
+    """
+    from private_ai_gateway import rollback as rb
+
+    denied = _owner_only("Rollback")
+    if denied is not None:
+        return denied
+
+    body = request.get_json(silent=True) or {}
+    rollback_run_id = str(body.get("rollback_run_id", "")).strip()
+    try:
+        result = rb.execute_rollback(
+            sys.modules[__name__],
+            rollback_run_id=rollback_run_id,
+            approval_id=str(body.get("approval_id", "")).strip(),
+            origin_run_id=str(body.get("run_id", "")).strip(),
+            origin_approval_id=str(body.get("approval_id_origin", "")).strip(),
+            workspace=str(body.get("workspace", "")).strip(),
+        )
+    except rb.RollbackError as exc:
+        return _rollback_refusal(exc, rollback_run_id)
+
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow" if result["restored"] else "deny",
+        reason=f"rollback_{result['status']}:{result['origin_run_id']}",
+        status=200, run_id=rollback_run_id,
+    )
+    logger.info(
+        f"ROLLBACK_{result['status'].upper()} | rollback_run_id={log_safe(rollback_run_id)} "
+        f"| contained={result['contained']}"
+    )
+    return jsonify(result), 200
+
+
+def _rollback_refusal(exc, run_id: str):
+    """One governed refusal shape for both rollback endpoints (detail stays server-side)."""
+    logger.warning(
+        f"ROLLBACK_REFUSED | run_id={log_safe(run_id)} | code={log_safe(exc.code)} "
+        f"| detail={log_safe(exc.detail)}"
+    )
+    status = _ROLLBACK_STATUS.get(exc.code, 400)
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="deny", reason=f"rollback_refused:{exc.code}", status=status, run_id=run_id,
+    )
+    return jsonify(
+        {"error": {"message": "The rollback was refused",
+                   "type": "invalid_request_error", "code": exc.code}}
+    ), status
+
+
+_ROLLBACK_STATUS = {
+    "apply_not_found": 404,
+    "workspace_missing": 404,
+    "run_not_reversible": 409,
+    "run_already_disposed": 409,
+    "already_rolled_back": 409,
+    "rollback_not_authorized": 409,
+    "rollback_evidence_unavailable": 503,
+    "rollback_reservation_failed": 503,
+}
 
 
 # HTTP status per governed disposition refusal. Everything else falls back to 400.

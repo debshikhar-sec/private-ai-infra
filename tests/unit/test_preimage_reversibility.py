@@ -370,8 +370,14 @@ def test_an_unapproved_apply_captures_nothing(tree, tmp_path, store):
 
 # --- the authority boundary ----------------------------------------------------------------
 
-def test_restore_is_reachable_from_nothing_in_the_governed_path():
-    """`restore_into` is a write primitive with no authority; 7C.3B supplies that."""
+def test_restore_is_reachable_only_through_the_governed_rollback_executor():
+    """`restore_into` is a write primitive with no authority of its own.
+
+    7C.3A shipped it reachable from nothing. 7C.3B gave it exactly one caller — the executor
+    in `opencode_sandbox.rollback`, which refuses to run without a signed reservation the
+    gateway issued under an owner approval. This pins that caller set: the gateway never
+    restores directly, and no other module reaches the primitive at all.
+    """
     repo = Path(__file__).resolve().parents[2]
     hits = sorted(
         str(p.relative_to(repo))
@@ -379,7 +385,10 @@ def test_restore_is_reachable_from_nothing_in_the_governed_path():
         for p in (repo / base).rglob("*.py")
         if "restore_into" in p.read_text(encoding="utf-8")
     )
-    assert hits == ["agents/opencode_sandbox/preimage.py"]
+    assert hits == [
+        "agents/opencode_sandbox/preimage.py",
+        "agents/opencode_sandbox/rollback.py",
+    ]
 
 
 def test_the_preimage_module_performs_no_rollback_of_its_own(tree, tmp_path, store):
