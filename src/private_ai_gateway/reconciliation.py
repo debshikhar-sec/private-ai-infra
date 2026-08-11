@@ -27,21 +27,32 @@ class  authority         evidence                       action
 2      APPROVED          reservation, no apply_result   invalidate — crash before
                                                         consumption; the mutation
                                                         provably never began
-3      USED              reservation, no *valid linked* invalidate — dirty; the
-                         apply_result                   outcome is unknown
-4      USED              reservation + valid linked      clean — complete
-                         apply_result
-5      (no compatible authority projection for evidence) fail closed — evidence
-                                                        never becomes authority
+3      USED              no usable signed graph         invalidate — dirty; the
+                                                        outcome is unknown
+4      USED              full signed graph resolves     clean — complete
+5      (no compatible authority projection for evidence) invalidate the extant
+                                                        authority run, or (nothing
+                                                        extant) attention only
 6      USED              no reservation                 fail closed — legacy,
                                                         evidence loss, or tampering
 ===== ================= ============================== ==========================
 
-Class 4 is deliberately the *only* clean terminal shape, and it requires the signed
-linkage to hold — ``approval_decided <-approval_ref- execute_validated <-execute_ref-
-apply_result`` — resolved with OpenClaw's own reference logic. "An apply_result exists" is
-never sufficient. Anything ambiguous (more than one reservation, conflicting outcomes,
-mismatched bindings) fails closed rather than being normalized.
+Class 4 is deliberately the *only* clean terminal shape, and it is defined as exactly
+OpenClaw's own full signed graph — ``apply_result -> execute_validated ->
+approval_decided``, including emitter identity, record uniqueness, ``decision == approve``
+and canonical-plan-hash agreement, via
+:func:`openclaw.evidence.load_evidence_graph_from_sink`. This module deliberately keeps no
+weaker parallel notion of "complete": "an apply_result exists" is never sufficient, and
+neither is "its execute_ref resolves". Class 2 is likewise gated on a genuinely linked
+reservation (:func:`openclaw.evidence.load_execution_reservation_from_sink`), so malformed
+execution evidence is never mistaken for a clean crash-after-reservation story.
+
+Anything ambiguous (more than one reservation, conflicting outcomes, mismatched bindings)
+fails closed rather than being normalized — and *failing closed means acting*: a class-5
+inconsistency that can be tied to an extant authority run invalidates that run, because
+reporting alone would leave an approval with incompatible execution evidence executable.
+Only an orphan evidence fact with no corresponding authority run is attention-only, since
+acting there would mean letting evidence create or select authority.
 
 The terminal safety barrier is the existing ``RunStatus.INVALIDATED``. This module adds no
 run/approval states, no schema, and no persisted findings — Step 7C's signed verdicts and
@@ -155,48 +166,63 @@ def _authority_snapshot(authority_store):
         ) from exc
 
 
-def _linked_apply_is_valid(evidence_sink, reservation, applies, *, run_id, approval_id):
-    """Is there exactly one ``apply_result`` validly bound to this reservation?
+def _graph_reader(evidence_sink):
+    """One chain-verified view of the evidence log, shared by every classification.
 
-    Reuses OpenClaw's own reference resolution (:func:`resolve_evidence_ref`) rather than a
-    weaker parallel check: the embedded ``execute_ref`` must resolve, by stable evidence
-    identity and recomputed digest, to *this* reservation, and both records must agree on
-    run and approval. Returns ``(ok, reason)``.
+    Step 7B.2.1: the reconciler asks OpenClaw's own verifier whether a signed graph holds
+    rather than maintaining a weaker parallel notion of "complete". A chain that does not
+    re-derive is an unsafe startup condition, not an absent graph — it fails closed here.
     """
-    from openclaw.sink import EvidenceError, EvidenceRef, resolve_evidence_ref
+    from openclaw.evidence import SinkGraphReader
 
-    if not applies:
-        return False, "no apply_result recorded for the reserved execution"
-    if len(applies) > 1:
-        return False, f"{len(applies)} apply_result records for one approval (ambiguous)"
-
-    apply_rec = applies[0]
     try:
-        records = tuple(evidence_sink.records)
-        sink_id = evidence_sink.sink_id
-        payload = apply_rec.payload
-        if not isinstance(payload, dict) or "execute_ref" not in payload:
-            return False, "apply_result carries no execute_ref linking it to the reservation"
-        ref = EvidenceRef.from_mapping(payload["execute_ref"])
-        resolved = resolve_evidence_ref(records, ref, sink_id=sink_id)
-    except EvidenceError as exc:
-        return False, f"apply_result execute_ref does not resolve: {exc}"
-    except Exception as exc:  # noqa: BLE001 — a malformed graph is not a clean run
-        return False, f"apply_result linkage could not be evaluated: {exc}"
-
-    if resolved.envelope.evidence_id != reservation.envelope.evidence_id:
-        return False, "apply_result links to a different execute_validated record"
-    for rec, label in ((apply_rec, "apply_result"), (resolved, "execute_validated")):
-        if (rec.envelope.run_id or "") != run_id:
-            return False, f"{label} run_id does not match the authority run"
-        if (rec.envelope.approval_id or "") != approval_id:
-            return False, f"{label} approval_id does not match the authority approval"
-    return True, ""
+        reader = SinkGraphReader(evidence_sink)
+    except Exception as exc:  # noqa: BLE001 — unverifiable != clean
+        raise ReconciliationError(
+            f"evidence chain could not be verified for reconciliation: {exc}"
+        ) from exc
+    if reader.chain_error:
+        raise ReconciliationError(
+            f"evidence chain did not verify during reconciliation: {reader.chain_error}"
+        )
+    return reader
 
 
 # --- classification (still no mutation) -----------------------------------------------
 
-def _classify(authority_store, evidence_sink, approvals, index) -> list[ReconciliationFinding]:
+def _class_5(authority_store, run_id, approval_id, reason) -> ReconciliationFinding:
+    """A class-5 inconsistency, made as fail-closed as the authority projection allows.
+
+    Step 7B.2.1 closed a real gap here: class 5 used to be *reported* and never acted on, so
+    an approval whose execution evidence was incompatible or ambiguous could leave its run
+    OPEN and executable. The rule is now:
+
+      * inconsistency tied to an **extant, non-terminal authority run** -> invalidate it;
+      * inconsistency tied to nothing the authority store knows -> ``attention_required``
+        and no mutation at all.
+
+    Evidence still never creates authority: ``run_id`` is only ever acted on when the
+    authority store already holds that run, so an evidence-supplied identifier can neither
+    synthesize a run nor cause an unrelated one to be closed.
+    """
+    run = authority_store.get_run(run_id) if run_id else None
+    if run is None:
+        return ReconciliationFinding(
+            5, OUTCOME_ATTENTION, run_id, approval_id,
+            f"{reason}; no authority run exists to close, so nothing is mutated",
+        )
+    if run.status is RunStatus.INVALIDATED:
+        return ReconciliationFinding(
+            5, OUTCOME_ATTENTION, run_id, approval_id,
+            f"{reason}; the authority run is already invalidated",
+        )
+    return ReconciliationFinding(
+        5, OUTCOME_INVALIDATED, run_id, approval_id,
+        f"{reason}; the extant authority run is invalidated so it can never execute",
+    )
+
+
+def _classify(authority_store, reader, approvals, index) -> list[ReconciliationFinding]:
     findings: list[ReconciliationFinding] = []
     known_ids = {appr.approval_id for appr in approvals}
 
@@ -214,8 +240,8 @@ def _classify(authority_store, evidence_sink, approvals, index) -> list[Reconcil
             if (r.envelope.run_id or "") != run_id
         ]
         if mismatched:
-            findings.append(ReconciliationFinding(
-                5, OUTCOME_ATTENTION, run_id, approval_id,
+            findings.append(_class_5(
+                authority_store, run_id, approval_id,
                 "evidence run_id does not match the authority approval's run_id; evidence "
                 "cannot be used to synthesize authority",
             ))
@@ -224,8 +250,8 @@ def _classify(authority_store, evidence_sink, approvals, index) -> list[Reconcil
         # More than one reservation is ambiguous authority evidence. Step 7B.1 prevents it
         # at the source; if the durable graph shows it anyway, fail closed — never pick one.
         if len(reservations) > 1:
-            findings.append(ReconciliationFinding(
-                5, OUTCOME_ATTENTION, run_id, approval_id,
+            findings.append(_class_5(
+                authority_store, run_id, approval_id,
                 f"{len(reservations)} execute_validated records for one approval "
                 f"(ambiguous authority evidence; not resolved by picking one)",
             ))
@@ -251,21 +277,33 @@ def _classify(authority_store, evidence_sink, approvals, index) -> list[Reconcil
                     1, OUTCOME_CLEAN, run_id, approval_id,
                     "approved with no execution reserved; nothing started",
                 ))
-            elif not applies:
-                findings.append(ReconciliationFinding(
-                    2, OUTCOME_INVALIDATED, run_id, approval_id,
-                    "execution reserved but authority never consumed (crash before "
-                    "mark_used); the mutation provably never started, so the run is "
-                    "invalidated and fresh authority is required",
-                ))
-            else:
+            elif applies:
                 # apply evidence without consumed authority: the stores disagree about
                 # whether authority was ever spent. Never reconcilable in this direction.
-                findings.append(ReconciliationFinding(
-                    5, OUTCOME_ATTENTION, run_id, approval_id,
+                findings.append(_class_5(
+                    authority_store, run_id, approval_id,
                     "apply evidence exists while authority was never consumed; evidence "
                     "cannot retroactively grant or confirm authority",
                 ))
+            else:
+                # Step 7B.2.1 — a reservation only proves "crashed after reserving" if it is
+                # a genuine Gateway-authored reservation whose authorization edge resolves.
+                # Malformed execution evidence is a cross-store inconsistency, not a clean
+                # crash story, so it is class 5 rather than class 2.
+                view = reader.reservation(run_id=run_id, approval_id=approval_id)
+                if view.usable:
+                    findings.append(ReconciliationFinding(
+                        2, OUTCOME_INVALIDATED, run_id, approval_id,
+                        "execution reserved but authority never consumed (crash before "
+                        "mark_used); the mutation provably never started, so the run is "
+                        "invalidated and fresh authority is required",
+                    ))
+                else:
+                    findings.append(_class_5(
+                        authority_store, run_id, approval_id,
+                        f"execution evidence for this approval is not a valid signed "
+                        f"reservation ({view.reason})",
+                    ))
         elif status is ApprovalStatus.USED:
             if not reservations:
                 findings.append(ReconciliationFinding(
@@ -275,41 +313,44 @@ def _classify(authority_store, evidence_sink, approvals, index) -> list[Reconcil
                     "evidence is synthesized",
                 ))
             else:
-                ok, why = _linked_apply_is_valid(
-                    evidence_sink, reservations[0], applies,
-                    run_id=run_id, approval_id=approval_id,
-                )
-                if ok:
+                # Step 7B.2.1 — "complete" is exactly OpenClaw's full signed graph
+                # (apply_result -> execute_validated -> approval_decided, uniqueness,
+                # emitter identity, decision == approve, canonical plan hash). Nothing
+                # weaker may be class 4.
+                view = reader.graph(run_id=run_id, approval_id=approval_id)
+                if view.usable:
                     findings.append(ReconciliationFinding(
                         4, OUTCOME_CLEAN, run_id, approval_id,
-                        "complete recorded execution: reservation and a uniquely-bound, "
-                        "signature-linked apply_result",
+                        "complete recorded execution: the full signed evidence graph "
+                        "apply_result -> execute_validated -> approval_decided resolves",
                     ))
                 else:
                     findings.append(ReconciliationFinding(
                         3, OUTCOME_INVALIDATED, run_id, approval_id,
                         f"authority consumed but the outcome is unknown — the mutation may "
-                        f"or may not have happened ({why}); the run is invalidated and is "
-                        f"never automatically retried",
+                        f"or may not have happened ({view.reason}); the run is invalidated "
+                        f"and is never automatically retried",
                     ))
         # PENDING / REJECTED / EXPIRED carry no execution authority. A reservation against
         # one is a cross-store inconsistency, not a normal shape.
         elif reservations or applies:
-            findings.append(ReconciliationFinding(
-                5, OUTCOME_ATTENTION, run_id, approval_id,
+            findings.append(_class_5(
+                authority_store, run_id, approval_id,
                 f"execution evidence exists for an approval in state "
                 f"{status.value!r}, which never granted execution authority",
             ))
 
-    # Evidence whose approval has no authority projection at all.
+    # Evidence whose approval has no authority projection at all. The run_id here comes from
+    # evidence, so it is acted on only when the authority store already holds that exact run
+    # (see :func:`_class_5`) — a truly orphaned fact mutates nothing.
     for approval_id, by_type in sorted(index.items()):
         if approval_id in known_ids:
             continue
         if not (by_type.get(RECORD_RESERVATION) or by_type.get(RECORD_APPLY)):
             continue
         any_rec = (by_type.get(RECORD_RESERVATION) or by_type.get(RECORD_APPLY))[0]
-        findings.append(ReconciliationFinding(
-            5, OUTCOME_ATTENTION, any_rec.envelope.run_id or "", approval_id,
+        findings.append(_class_5(
+            authority_store, any_rec.envelope.run_id or "", approval_id,
             "execution evidence references an approval with no authority record; the "
             "evidence is retained append-only and grants nothing",
         ))
@@ -335,7 +376,8 @@ def reconcile(authority_store, evidence_sink) -> ReconciliationReport:
     # -- phase 1: inspect + classify (no mutation) --
     approvals = _authority_snapshot(authority_store)
     index = _evidence_index(evidence_sink)
-    findings = tuple(_classify(authority_store, evidence_sink, approvals, index))
+    reader = _graph_reader(evidence_sink)
+    findings = tuple(_classify(authority_store, reader, approvals, index))
 
     # -- phase 2: act --
     for finding in findings:

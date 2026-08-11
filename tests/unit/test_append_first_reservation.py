@@ -138,6 +138,48 @@ def _types(sink):
     return [r.envelope.record_type for r in sink.records]
 
 
+# --- contention staging ---------------------------------------------------------------
+# Barrier chosen so the *falsification* path rendezvouses (with the critical section
+# removed both threads reach it within milliseconds); with the section in place the barrier
+# can only ever time out, because the loser is blocked on the lock and never arrives. The
+# timeout is therefore dead wait, and is kept short deliberately.
+_CONTENTION_TIMEOUT_SECONDS = 2.0
+
+
+def _stage_contention(monkeypatch, opened):
+    """Force two executes to contend on the validate -> reserve -> consume window.
+
+    The evaluation instant is **pinned before** the coordination and injected through the
+    store's own ``now=`` parameter. Approval expiry is still fully enforced (that rule has
+    its own tests) — it is simply evaluated at the moment the race is staged rather than at
+    whatever wall-clock time the threads happen to rendezvous.
+
+    That distinction is load-bearing: this test previously read the wall clock *after* the
+    barrier, so any real-time disturbance inside the coordination window that exceeded the
+    approval's lifetime made both threads refuse ``expired`` and reserve nothing. On this
+    host, macOS "Maintenance Sleep" suspends for up to an hour, which is exactly such a
+    disturbance and produced that signature. The race under test is about lock ordering,
+    not about elapsed time, so it must not depend on real time at all.
+    """
+    from private_ai_gateway.approvals import _now
+
+    at_boundary = threading.Barrier(2, timeout=_CONTENTION_TIMEOUT_SECONDS)
+    staged_at = _now()
+    real_validate = opened.authority_store.validate_for_execute
+
+    def contending_validate(*a, **k):
+        # Rendezvous both threads before either can validate, then let them race.
+        try:
+            at_boundary.wait()
+        except threading.BrokenBarrierError:  # pragma: no cover - only on timeout
+            pass
+        k.setdefault("now", staged_at)
+        return real_validate(*a, **k)
+
+    monkeypatch.setattr(opened.authority_store, "validate_for_execute", contending_validate)
+    return at_boundary
+
+
 # --- ordering ------------------------------------------------------------------------
 
 def test_reservation_is_appended_before_authority_is_consumed(wired, monkeypatch):
@@ -410,19 +452,7 @@ def test_concurrent_execute_produces_exactly_one_reservation(wired, monkeypatch)
     client, opened = wired
     run_id, plan_hash = _plan(client)
     approval_id = _approve(client, run_id, plan_hash)
-
-    at_boundary = threading.Barrier(2, timeout=10)
-    real_validate = opened.authority_store.validate_for_execute
-
-    def contending_validate(*a, **k):
-        # Rendezvous both threads before either can validate, then let them race.
-        try:
-            at_boundary.wait()
-        except threading.BrokenBarrierError:  # pragma: no cover - only on timeout
-            pass
-        return real_validate(*a, **k)
-
-    monkeypatch.setattr(opened.authority_store, "validate_for_execute", contending_validate)
+    _stage_contention(monkeypatch, opened)
 
     results: list[dict] = []
     results_lock = threading.Lock()
@@ -473,17 +503,7 @@ def test_concurrent_execute_facts_survive_restart(tmp_path, wired, monkeypatch):
     run_id, plan_hash = _plan(client)
     approval_id = _approve(client, run_id, plan_hash)
 
-    at_boundary = threading.Barrier(2, timeout=10)
-    real_validate = opened.authority_store.validate_for_execute
-
-    def contending_validate(*a, **k):
-        try:
-            at_boundary.wait()
-        except threading.BrokenBarrierError:  # pragma: no cover
-            pass
-        return real_validate(*a, **k)
-
-    monkeypatch.setattr(opened.authority_store, "validate_for_execute", contending_validate)
+    _stage_contention(monkeypatch, opened)
     threads = [
         threading.Thread(target=lambda: _execute(gw.app.test_client(), run_id, approval_id))
         for _ in range(2)

@@ -164,6 +164,18 @@ capability second.
   authority never becomes authority; ambiguity fails closed rather than being normalized;
   and a store that cannot be inspected aborts startup instead of reading as clean. It
   subsumes the 7B.1 class-2 resolver, so one pass sees the original cross-store shape.
+- **Reconciliation hardening (7B.2.1)** — closes two gaps found by post-merge review.
+  (1) *Failing closed means acting.* A class-5 inconsistency tied to an extant authority run
+  now invalidates that run; only an orphan evidence fact with no corresponding authority run
+  stays report-only, because acting on an evidence-supplied identifier the authority store
+  does not hold would be evidence selecting authority. (2) *Complete means the full graph.*
+  Class 4 is now exactly `openclaw.evidence.load_evidence_graph_from_sink(...).usable` —
+  `apply_result → execute_validated → approval_decided` with emitter identity, record
+  uniqueness, `decision == approve` and canonical-plan-hash agreement — instead of a weaker
+  gateway-side link check; anything short of it is dirty. Class 2 is gated the same way on
+  the reservation's own authorization edge
+  (`load_execution_reservation_from_sink`). The verifier still imports nothing from the
+  gateway.
 
 ## Next — evidence integrity (verifier-owned), in sequence
 
