@@ -377,6 +377,28 @@ def test_a_workspace_outside_the_runtime_root_is_refused(wired, tmp_path, bad):
     )
 
 
+def test_a_symlinked_workspace_pointing_outside_the_root_is_refused(wired, tmp_path):
+    """Selection is by name among real child directories, so a symlink is simply not one."""
+    client, opened, runtime = wired
+    run_id, approval_id, _, _ = _reversible_apply(opened, runtime, tmp_path)
+    outside = tmp_path / "outside_ws"
+    outside.mkdir()
+    (runtime / "sneaky").symlink_to(outside, target_is_directory=True)
+
+    resp = _plan(client, run_id, approval_id, "sneaky")
+    assert resp.status_code == 404
+    assert resp.get_json()["error"]["code"] == rb.CODE_WORKSPACE_MISSING
+
+
+def test_a_nested_workspace_path_is_refused(wired, tmp_path):
+    client, opened, runtime = wired
+    run_id, approval_id, _, _ = _reversible_apply(opened, runtime, tmp_path)
+    (runtime / "ws1" / "nested").mkdir()
+    resp = _plan(client, run_id, approval_id, "ws1/nested")
+    assert resp.status_code == 400
+    assert resp.get_json()["error"]["code"] == rb.CODE_WORKSPACE_UNCONFINED
+
+
 def test_rollback_is_unavailable_with_no_configured_runtime_root(wired, tmp_path,
                                                                  monkeypatch):
     client, opened, runtime = wired

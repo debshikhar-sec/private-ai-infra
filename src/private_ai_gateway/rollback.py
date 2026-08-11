@@ -92,28 +92,41 @@ class RollbackPlan:
 
 
 def _confined_workspace(runtime_root, workspace: str) -> Path:
-    """Resolve ``workspace`` under the configured runtime root, or refuse.
+    """Select an existing sandbox workspace **by name**, never by path.
 
-    The snapshot store a rollback reads from must not be caller-selectable outside the
-    sandbox state directory — the same rule Step 7C.3A applies to capture, applied here to
-    the read side.
+    The obvious implementation — join the caller's string to the root, resolve, and check the
+    result is still underneath — is a path built *from untrusted input*, and it is only as
+    safe as the check that follows it. This does not build one. It enumerates the immediate
+    child directories of the configured root and looks the name up among them, so the path
+    that reaches the filesystem comes from ``iterdir()`` and the caller's string is only ever
+    compared for equality.
+
+    That closes the whole class rather than one instance of it: traversal, absolute paths,
+    nesting, and a symlinked entry pointing outside the root are all excluded by
+    construction, not by a predicate someone has to keep correct.
     """
     if not runtime_root:
         raise RollbackError(
             CODE_WORKSPACE_UNCONFINED, "no sandbox runtime root is configured"
         )
-    root = Path(runtime_root).resolve()
-    if not workspace or workspace.startswith("/") or workspace.startswith("~"):
-        raise RollbackError(CODE_WORKSPACE_UNCONFINED, "workspace must be a relative name")
-    if ".." in Path(workspace).parts:
-        raise RollbackError(CODE_WORKSPACE_UNCONFINED, "workspace escapes the runtime root")
+    if not workspace or "/" in workspace or "\\" in workspace or workspace.startswith("."):
+        raise RollbackError(
+            CODE_WORKSPACE_UNCONFINED,
+            "a workspace is named, not pathed: one immediate child of the runtime root",
+        )
+    root = Path(runtime_root)
     try:
-        resolved = (root / workspace).resolve()
-    except (OSError, RuntimeError) as exc:
-        raise RollbackError(CODE_WORKSPACE_UNCONFINED, str(exc)) from exc
-    if resolved != root and root not in resolved.parents:
-        raise RollbackError(CODE_WORKSPACE_UNCONFINED, "workspace escapes the runtime root")
-    if not resolved.is_dir():
+        children = {
+            entry.name: entry
+            for entry in root.iterdir()
+            if entry.is_dir() and not entry.is_symlink()
+        }
+    except OSError as exc:
+        raise RollbackError(
+            CODE_WORKSPACE_UNCONFINED, f"the sandbox runtime root is unreadable: {exc}"
+        ) from exc
+    resolved = children.get(workspace)
+    if resolved is None:
         raise RollbackError(CODE_WORKSPACE_MISSING, "no such sandbox workspace")
     return resolved
 

@@ -337,7 +337,7 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **1048** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **1050** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
   signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
   in CI.

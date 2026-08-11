@@ -258,7 +258,9 @@ safely restore.
 
 Rollback is a **mutation**, so it goes through the same three steps as any other write.
 
-Plan it (owner token; `workspace` is a name *relative to* the runtime root):
+Plan it. `workspace` is a **name**, not a path: one immediate child directory of the runtime
+root. Anything containing a separator, or naming a symlink, is refused — selection is done by
+looking the name up among the root's real child directories, never by joining strings.
 
     curl -sS -X POST http://127.0.0.1:8081/v1/rollbacks \
       -H "Authorization: Bearer $OWNER_TOKEN" -H 'Content-Type: application/json' \
