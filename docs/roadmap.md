@@ -218,11 +218,16 @@ recorded in
   bounded, sandbox-confined **pre-image** is now captured before the first declared write, and
   byte-exact restoration is proven by test. Signed evidence carries only the snapshot's
   identity and digest, never its contents.
-- **Governed rollback / containment (Step 7C.3B)** — *not yet built.* Nothing performs a
-  rollback: the primitive exists and is reachable from nothing in the governed path, because
-  a rollback is itself a mutation and needs its own approval, reservation, signed outcome and
-  independent verification. Historical runs stay irreversible — no pre-image is fabricated
-  for a run that predates one.
+- **Governed rollback / containment (Step 7C.3B)** — *shipped, sandbox-confined.* A rollback
+  is itself a mutation, so it gets its own governed run, its own single-use owner approval
+  bound to its own canonical plan hash, its own reservation, its own signed outcome, and an
+  independent OpenClaw verdict that re-reads the tree. A failure after the reservation signs a
+  `failed` outcome, contains the workspace, and invalidates the rollback run. Historical runs
+  stay irreversible — no pre-image is fabricated for a run that predates one — and nothing
+  outside the sandbox is ever touched.
+- **Rollback outside the sandbox** — *future, and not casually.* Git operations, deployment
+  rollback and system-configuration rollback are all out of scope: their pre-images are not
+  files this runtime owns.
 - **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.

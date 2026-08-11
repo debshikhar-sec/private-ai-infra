@@ -246,6 +246,36 @@ All notable changes to this project are documented here. Format based on
   happens in this step**, and **no historical run becomes reversible**: a run that predates
   its snapshot has no pre-image and never will.
 
+- **Governed rollback and containment (Step 7C.3B)** — the runtime can now *undo* a sandbox
+  apply, and it does so as a **mutation**, not a repair. A rollback is a new governed run with
+  its own `run_id`, its own single-use owner approval, and its own canonical plan hash — so
+  there is no second approval system and no way for an agent to grant itself an undo. The
+  plan hash commits to the original run, the exact signed `apply_result` being reversed, and
+  the pre-image snapshot's identity **and digest**, so an owner approves one specific
+  restoration of one specific tree to one specific recorded state, never "undo something".
+  `POST /v1/rollbacks` plans it, the ordinary `/v1/approvals` authorizes it, and
+  `POST /v1/rollbacks/execute` runs it under Step 7B.1's ordering: validate → append the
+  signed `rollback_validated` reservation → consume the approval → restore. Two new record
+  types and no more: `rollback_validated` (gateway) and `rollback_result` (opencode);
+  `apply_result` is deliberately not overloaded, and the verifier's judgment reuses the
+  existing `verification_result` with a typed `rollback_ref` because it is the same thing it
+  always was — OpenClaw's signed verdict about one thing that happened. **A rollback failure
+  never becomes a success**: a refusal before the reservation spends nothing and touches
+  nothing, while any failure after it signs a `failed` outcome, **contains** the workspace
+  with a marker naming the reason and asking for a human, and invalidates the rollback run.
+  Nothing is retried and nothing is partially reported as restored. The executor re-hashes
+  every restored path against the pre-image before claiming success, and OpenClaw then
+  **re-reads the tree itself** rather than reading the executor's claim, so a `restored`
+  record over a drifted tree is a FAIL. A successful rollback says exactly one thing: *the
+  supported sandbox state was restored to the recorded pre-image* — there is no external
+  mutation in this scope, so no external effect is claimed to be undone. Rollback is confined
+  to workspaces under `PRIVATE_AI_SANDBOX_RUNTIME_DIR` (unset means rollback is unavailable,
+  the correct default); an apply with no pre-image is refused `run_not_reversible` rather than
+  fabricated for; a terminally disposed run is not reopened to be undone; and reconciliation
+  can neither trigger nor reach a rollback (asserted structurally). **Not** in this step: git
+  operations, deployment rollback, system-configuration rollback, production external
+  rollback, trust ledger, earned autonomy.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -307,16 +337,16 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **1013** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **1048** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
   signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
   in CI.
 
 ### Not yet built (explicitly)
-- Governed rollback and containment (7C.3B); trust ledger; earned autonomy. A *future*
-  sandbox apply can now be reversed byte-for-byte in principle (7C.3A), but nothing performs
-  a rollback, no historical run is reversible, and the runtime still cannot determine whether
-  an interrupted mutation actually landed.
+- Trust ledger; earned autonomy; production external rollback. A *future* sandbox apply can
+  now be reversed under owner authority and independently verified, but a historical apply
+  has no pre-image and stays irreversible, rollback never leaves the sandbox, and the runtime
+  still cannot determine whether an interrupted mutation actually landed.
   Pending-approval expiry stays deferred (no grounded policy source for a pending lifetime —
   see the implementation contract). Autonomy remains fixed-ceiling and human-gated.
 

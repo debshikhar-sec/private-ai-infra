@@ -28,8 +28,10 @@
 > own emitter key, binds a PASS to the exact `apply_result` it judged, and cannot produce a
 > signed PASS over a broken authorization graph. **Terminal disposition (7C.2)** has also
 > landed: a `run_disposition` record, emitted by the gateway under owner authority, bound to
-> one *specific* basis the human names. **Rollback/containment (7C.3)** remains design-only
-> and gated behind a later, separately-authorized increment.
+> one *specific* basis the human names. **Rollback/containment (7C.3)** has landed too, in
+> two parts: a bounded pre-image captured before the mutation (7C.3A) and an owner-approved,
+> reserved, independently-verified sandbox rollback (7C.3B). Rollback outside the sandbox —
+> git, deployment, system configuration — remains out of scope.
 
 > **Scope discipline.** This is the *evidence-integrity* increment. It does **not** build a
 > trust ledger, earned autonomy, or production key management. See §10 and §14.
@@ -184,7 +186,9 @@ linkage are documented in §6a below.
 | `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true, approval_ref}` (emitted after `validate_for_execute` + `mark_used`, before mutation) | **Built** (component-level gateway authorization evidence emit; backward-compatible no-sink default; `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation). The payload now also carries `approval_ref` — a signed `EvidenceRef` to the `approval_decided` record (§6a). Not yet full fail-closed pre-apply gating (§9b). |
 | `apply_result` | `opencode` | `{status, declared_files, changed_files, violations, committed, execute_ref}` | **Built (MVP core).** Replaces the self-attested `apply_report.json` and closes T1/T4. Retains its existing outcome fields and now also carries `execute_ref` — a signed `EvidenceRef` to the `execute_validated` record (§6a). When no `execute_ref` is threaded, the record is byte-identical to before (default/no-linkage compatibility). |
 | `assurance_verdict` | `openclaw` | `{verdict: PASS\|FAIL, counts, notes}` | **Optional** in first implementation; useful for a self-recorded, chained verdict. |
-| `verification_result` | `openclaw` | `{verdict, control_counts, failed_control_ids, inconclusive_control_ids, apply_ref, evidence_graph_verified}` | **Built (7C.1).** The verifier signs its own verdict with its own emitter key. A signed PASS binds to the exact `apply_result` it judged and is unreachable over a broken graph. Deliberately **plural and non-terminal** — several may exist for one run. |
+| `verification_result` | `openclaw` | `{verdict, control_counts, failed_control_ids, inconclusive_control_ids, apply_ref, evidence_graph_verified}`, plus `rollback_ref` since 7C.3B | **Built (7C.1).** The verifier signs its own verdict with its own emitter key. A signed PASS binds to the exact `apply_result` it judged and is unreachable over a broken graph. Deliberately **plural and non-terminal** — several may exist for one run. 7C.3B reuses the type rather than adding one: the record still means "OpenClaw's signed judgment about one thing that happened"; only the typed reference naming the subject changes. |
+| `rollback_validated` | `gateway` | `{canonical_plan_hash, validated, origin_run_id, origin_approval_id, snapshot_id, snapshot_digest, apply_ref}` | **Built (7C.3B).** The rollback's own reservation, appended before its single-use approval is consumed. Its envelope `run_id` is the *rollback* run — a distinct governed run from the one being reversed. |
+| `rollback_result` | `opencode` | `{status, origin_run_id, restored_files, snapshot_id, snapshot_digest, contained, rollback_ref, apply_ref, detail}` | **Built (7C.3B).** What the executor did, signed by the executor. Only `restored` is a success, and it requires a post-restore re-hash against the pre-image. A failure sets `contained` and never reports partial success. Whether the restoration was *correct* is OpenClaw's separate signed verdict. |
 | `run_disposition` | `gateway` | `{disposition, basis_type, basis_ref, human_actor}` | **Built (7C.2).** The human's terminal closure of a run, signed by the authority plane. `basis_type` is exactly one of `verification_result` or `execute_validated`, and `basis_ref` is a typed `EvidenceRef` the server re-resolves (recomputed digest, type, authoring emitter, run/approval binding). At most one per run; a second attempt is refused `already_disposed`. `closed_unknown` asserts nothing about whether the mutation landed. |
 
 **First-implementation minimum:** `apply_result` (executor→sink) + OpenClaw consuming it from
@@ -193,8 +197,8 @@ three are cross-linked into the §6a signed graph, and the durable runtime confi
 lands all three in one durable chain (7B.0). The verifier's self-recorded verdict has since
 landed as `verification_result` (7C.1, emitter `openclaw`), and crash-safe ordering and
 cross-store reconciliation landed as 7B.1 / 7B.2 (+7B.2.1, §13). Terminal disposition of a
-dirty run landed as `run_disposition` (7C.2, emitter `gateway`); rollback and containment
-(7C.3) remain future. Consuming controls must treat an absent-but-required record as **fail
+dirty run landed as `run_disposition` (7C.2, emitter `gateway`), and sandbox-confined
+rollback as `rollback_validated`/`rollback_result` (7C.3B). Consuming controls must treat an absent-but-required record as **fail
 closed**, not INCONCLUSIVE (§9).
 
 ---

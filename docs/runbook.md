@@ -245,6 +245,65 @@ validate. A disposition that later fails to re-validate (tampered basis, wrong e
 records for one run) **fails the next startup closed** rather than reverting the run to
 "outstanding".
 
+## Rolling back a sandbox apply (Step 7C.3B)
+
+Only an apply that recorded a **pre-image** can be rolled back. Historical applies cannot,
+and are refused `run_not_reversible` rather than fabricated for. Rollback also never leaves
+the sandbox: it needs a runtime root, and reads nothing outside it.
+
+    export PRIVATE_AI_SANDBOX_RUNTIME_DIR=~/private-ai-sandbox-runtime
+
+Unset, rollback is unavailable — the correct default for a runtime with no sandbox it may
+safely restore.
+
+Rollback is a **mutation**, so it goes through the same three steps as any other write.
+
+Plan it (owner token; `workspace` is a name *relative to* the runtime root):
+
+    curl -sS -X POST http://127.0.0.1:8081/v1/rollbacks \
+      -H "Authorization: Bearer $OWNER_TOKEN" -H 'Content-Type: application/json' \
+      -d '{"run_id":"'"$RUN_ID"'","approval_id":"'"$APPROVAL_ID"'","workspace":"run_2026…"}'
+
+You get a `rollback_run_id`, a `canonical_plan_hash` covering the original run, the exact
+`apply_result` and the snapshot's identity and digest, and the list of paths that would be
+restored. Read that list: approving the hash approves **that** restoration and nothing else.
+
+Approve it through the ordinary approvals endpoint — a rollback gets no second approval
+system:
+
+    curl -sS -X POST http://127.0.0.1:8081/v1/approvals \
+      -H "Authorization: Bearer $OWNER_TOKEN" -H 'Content-Type: application/json' \
+      -d '{"run_id":"'"$ROLLBACK_RUN_ID"'","canonical_plan_hash":"'"$HASH"'",
+           "decision":"approve","reason":"reviewed the restoration"}'
+
+Execute it:
+
+    curl -sS -X POST http://127.0.0.1:8081/v1/rollbacks/execute \
+      -H "Authorization: Bearer $OWNER_TOKEN" -H 'Content-Type: application/json' \
+      -d '{"rollback_run_id":"'"$ROLLBACK_RUN_ID"'","approval_id":"'"$RB_APPROVAL"'",
+           "run_id":"'"$RUN_ID"'","approval_id_origin":"'"$APPROVAL_ID"'",
+           "workspace":"run_2026…"}'
+
+What a success means, exactly: *the supported sandbox state was restored to the recorded
+pre-image.* It does **not** mean an external effect was undone — there is no external
+mutation in this scope.
+
+If `contained` comes back true, the rollback **failed** and the workspace is now marked
+unusable by a `.contained.json` file naming the reason. Nothing was retried, the rollback run
+is invalidated, and the sandbox is left exactly as it is for you to inspect. Do not delete
+the marker to "unstick" it — the workspace is in an unknown state, which is why it is marked.
+
+Expected refusals (all fail closed):
+
+- a non-owner caller → `403 owner_required`;
+- an apply with no recorded pre-image → `409 run_not_reversible`;
+- a workspace outside the runtime root → `400 workspace_unconfined`;
+- a snapshot that no longer re-derives, or is not the one the signed apply evidence names →
+  `400 snapshot_unusable`, refused **before** any authority is spent;
+- a terminally disposed run → `409 run_already_disposed`; a closed run is not reopened;
+- a run already rolled back → `409 already_rolled_back`;
+- a missing, wrong, or already-used approval → `409 rollback_not_authorized`.
+
 ## Strategy Benchmark
 
 Run:
