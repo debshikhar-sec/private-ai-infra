@@ -53,6 +53,7 @@ class CodeActWorker:
         run_id: str = "",
         approval_id: str | None = None,
         execute_ref=None,
+        capture_preimage: bool = False,
     ):
         self.peer = peer
         self.approval = approval
@@ -85,6 +86,12 @@ class CodeActWorker:
         # under. Threaded in from the internal session boundary — never an external request
         # field — and, when present, bound into the signed ``apply_result`` as ``execute_ref``.
         self.execute_ref = execute_ref
+        # Step 7C.3A: opt in to capturing the sandbox pre-image before the apply. Off by
+        # default so the emitted record stays byte-identical for callers that have not asked
+        # for reversibility; on, the snapshot lands beside the sandbox inside this run's own
+        # runtime directory, and a capture failure rejects the apply rather than silently
+        # producing an irreversible one. It grants no ability to *use* the snapshot.
+        self.capture_preimage = capture_preimage
         self._name: str | None = None
         # my task id -> the verification sub-task id I'm waiting on
         self._awaiting: dict[str, str] = {}
@@ -116,7 +123,9 @@ class CodeActWorker:
 
         proposal = act.load_proposal(str(self.proposal_path))
         report = act.apply_proposal(
-            proposal, str(self.target), sandbox, approval=self.approval, commit_to=None
+            proposal, str(self.target), sandbox, approval=self.approval, commit_to=None,
+            preimage_store=(sandbox.parent / "preimage") if self.capture_preimage else None,
+            run_id=self.run_id, approval_id=self.approval_id or "",
         )
         report_path = sandbox.parent / "apply_report.json"
         report_path.write_text(report.to_json(), encoding="utf-8")

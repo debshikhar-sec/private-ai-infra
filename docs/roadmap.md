@@ -213,9 +213,16 @@ recorded in
   `verification_result`, or the exact `execute_validated` reservation for a run where no
   apply-bound verdict can legitimately exist. Multiple verdicts stay plural and none is
   inferred — there is no "pick latest".
-- **Rollback / containment (Step 7C.3)** — *not yet built.* Nothing can be undone. Reversing
-  even a sandbox-confined apply needs a recorded pre-image captured *before* the mutation,
-  not hashes recorded after it; historical runs will not retroactively become reversible.
+- **Reversibility foundation (Step 7C.3A)** — *shipped.* The audit was negative: the shipped
+  apply artifacts keep only `changed_files` as bare paths and cannot reverse anything. A
+  bounded, sandbox-confined **pre-image** is now captured before the first declared write, and
+  byte-exact restoration is proven by test. Signed evidence carries only the snapshot's
+  identity and digest, never its contents.
+- **Governed rollback / containment (Step 7C.3B)** — *not yet built.* Nothing performs a
+  rollback: the primitive exists and is reachable from nothing in the governed path, because
+  a rollback is itself a mutation and needs its own approval, reservation, signed outcome and
+  independent verification. Historical runs stay irreversible — no pre-image is fabricated
+  for a run that predates one.
 - **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.

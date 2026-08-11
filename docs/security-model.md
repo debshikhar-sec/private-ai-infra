@@ -257,8 +257,13 @@ reaches its verdict by reading artifacts authored by the very components it veri
   checking type, emitter and run/approval binding) and constructs the record itself; there is
   no "no basis" path and no "pick latest". `closed_unknown` asserts nothing about the
   mutation; disposal seals the run and never reopens it; a disposition that does not
-  re-validate fails startup closed. What **rollback and containment (7C.3)** would add is
-  the ability to *undo* — which does not exist. Sandbox-confined mutation remains the safe
+  re-validate fails startup closed. Step **7C.3A** adds the missing prerequisite for undoing
+  anything: a bounded, sandbox-confined **pre-image** captured before the first declared
+  write, since the prior artifacts kept only changed *paths* and could never reconstruct
+  content. Its contents stay on local disk — signed evidence carries only the snapshot's
+  identity and digest — and the restore primitive is reachable from nothing in the governed
+  path. **Governed rollback and containment (7C.3B)** — an owner-approved, reserved,
+  independently-verified undo — does not exist, and no historical run is reversible. Sandbox-confined mutation remains the safe
   execution target until then. The signed linkage graph above is
   the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an **unused,
   non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned
