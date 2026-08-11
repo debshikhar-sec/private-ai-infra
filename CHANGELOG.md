@@ -133,7 +133,38 @@ All notable changes to this project are documented here. Format based on
   previous contract as a thin wrapper. Both walks now share a single definition of the
   authorization edge, so there is one place where "a valid authorization edge" is decided.
 
+- **Local engineering: shadow track (C) and candidate adapter (D)** — capability
+  infrastructure that grants **zero** additional operational authority.
+  `agents/hermes/shadow_engineering.py` runs one flow — objective → governed strategy plan →
+  local `engineering` candidate → strict deterministic validation → deterministic teacher
+  comparison → evaluation trace — and `agents/opencode_sandbox/candidate.py` is the strict
+  boundary that decides whether a generated response is even a candidate. Model calls go
+  through the gateway's normal governed path as a new `shadow-engineer` principal capped at
+  **L1 (suggest-only)** with no skills and no tools, so it cannot route work to an executor
+  or call a tool; the harness refuses to construct if handed an owner token, imports no
+  apply path (asserted structurally and behaviourally), acquires no approval, and leaves the
+  evaluated tree byte-identical. The adapter is deliberately stricter than the proposal
+  parser it targets — JSON only (prose around JSON is refused, never salvaged), known fields
+  only at both levels (an invented `command`/`exec`/`shell` field is a refusal, not an
+  ignored extra), declared paths only, absolute-path and traversal refusal, bounded size —
+  and what survives is built through the **existing** `ChangeProposal` schema and run
+  through the sandbox's own `validate`, so there is no second patch format. A valid
+  candidate is still only a candidate: applying one continues to require the existing
+  owner-issued, hash-bound approval. Evaluation traces are local, git-ignored JSON that
+  record identity (alias, **resolved** model, policy hash, principal, declared autonomy) but
+  never raw model text, the verbatim objective, or credentials — and are **never** written
+  to the evidence sink. CI is fully deterministic and never downloads or executes a model.
+  **This is not autonomous coding.**
+
 ### Fixed
+- **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
+  complete `new_content` for files the model had never seen, so it produced a plausible
+  *rewrite* rather than an edit. The first real local trial passed every structural check
+  (valid JSON, exact scope, clean validation) while silently dropping two public parameters,
+  their defaults, the type annotations and the module docstring. The in-scope files are now
+  read (bounded, read-only) into the prompt with an explicit instruction to preserve
+  everything the objective does not ask to change.
+
 - **Reconciliation hardening (Step 7B.2.1)** — two correctness gaps found by independent
   post-merge review of Step 7B.2.
   - *Class 5 reported but never acted.* `reconcile` mutates authority only for

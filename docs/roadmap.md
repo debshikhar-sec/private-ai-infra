@@ -176,6 +176,21 @@ capability second.
   the reservation's own authorization edge
   (`load_execution_reservation_from_sink`). The verifier still imports nothing from the
   gateway.
+- **Local engineering: shadow track (C) + candidate adapter (D)** — capability
+  infrastructure that grants **zero** additional operational authority. One flow:
+  objective → governed strategy plan → local `engineering` candidate → strict deterministic
+  validation → deterministic teacher comparison → evaluation trace. Model calls go through
+  the gateway's normal governed path as a new `shadow-engineer` principal capped at **L1
+  (suggest-only)** with no skills and no tools; the harness refuses to construct if handed
+  an owner token. The adapter (`opencode_sandbox/candidate.py`) is deliberately stricter
+  than the proposal parser it targets — JSON only (prose around JSON is refused, never
+  salvaged), known fields only (an invented `command`/`exec` field is a refusal, not an
+  ignored extra), declared paths only, bounded size — and what survives is built through the
+  **existing** `ChangeProposal` schema and run through the sandbox's own `validate`.
+  A candidate remains a candidate: applying one still needs the existing owner-issued,
+  hash-bound approval. Evaluation traces are local, git-ignored JSON and are **never**
+  written to the evidence sink. CI is fully deterministic and never downloads or executes a
+  model. This is **not** autonomous coding.
 
 ## Next — evidence integrity (verifier-owned), in sequence
 

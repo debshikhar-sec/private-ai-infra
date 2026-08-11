@@ -88,6 +88,16 @@ allowed_skills = ["code.apply", "assurance.verify"]  # holds assurance.verify to
 allowed_tools = ["docs.search", "text.wordcount"]
 
 [[principals]]
+name = "shadow-engineer"
+key_sha256 = "84bb1eea1145dd815abaf122e061e2f59bdf719bb3976f85f50206f08121374a"
+allowed_models = ["engineering", "strategy"]
+max_output_tokens = 2048
+requests_per_minute = 60
+max_autonomy_level = "L1"          # suggest-only: may draft a candidate, may never act
+allowed_skills = []                # holds no skill: it cannot route work to an executor
+allowed_tools = []                 # and no tool: it produces data, nothing else
+
+[[principals]]
 name = "openclaw"
 key_sha256 = "336c61d94b0accc95bb400d220a146b908f26816470bf99968da50eed9f41fcc"
 allowed_models = []                # verification needs evidence, not generation

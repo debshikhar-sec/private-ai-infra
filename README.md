@@ -324,6 +324,45 @@ policy — no self-approval, no earned-trust escalation; execution stays human-g
 signed evidence is **tamper-evident, not non-repudiation** (symmetric HMAC).
 Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).
 
+### Local engineering — shadow track (capability, not authority)
+
+The local model is being moved toward routine implementation work **before** it is given any
+new authority, and the two are kept strictly apart. One flow, and it applies nothing:
+
+```text
+objective → governed strategy plan → local `engineering` candidate
+          → strict deterministic validation → deterministic teacher comparison
+          → evaluation trace
+```
+
+Model calls go through the gateway's normal governed path as a `shadow-engineer` principal
+capped at **L1 (suggest-only)** holding **no skills and no tools**, so it cannot route work
+to an executor or call a tool. The harness ([`agents/hermes/shadow_engineering.py`](agents/hermes/shadow_engineering.py))
+refuses to construct if handed an owner token, imports no apply path, acquires no approval,
+and leaves the evaluated tree byte-identical — all asserted by tests, structurally and
+behaviourally.
+
+The candidate adapter ([`agents/opencode_sandbox/candidate.py`](agents/opencode_sandbox/candidate.py))
+is deliberately **stricter** than the proposal parser it feeds, because it reads untrusted
+generated text rather than a curated file: JSON only (prose around the JSON is refused, never
+salvaged), known fields only at both levels (an invented `command`/`exec` field is a refusal,
+not an ignored extra), declared paths only, absolute-path and traversal refusal, bounded
+size. What survives is built through the **existing** `ChangeProposal` schema and run through
+the sandbox's own `validate` — there is no second patch format. A valid candidate is still
+only a candidate: applying one requires the same owner-issued, hash-bound approval as
+anything else.
+
+Evaluation traces are local, git-ignored JSON. They record *identity* — alias, **resolved**
+model, policy hash, principal, declared autonomy — so a model-build swap is visible, and they
+deliberately store no raw model text, no verbatim objective, and no credentials. **A trace is
+not evidence** and is never written to the evidence sink. CI is fully deterministic and never
+downloads or executes a model.
+
+**This is not autonomous coding.** It is measurement: how often could the local model have
+written the change? On the first live trial the answer was instructive — see
+[the contract](docs/step-7b1-7b2-implementation-contract.md) for what it got right, what it
+silently dropped, and which of those were harness defects rather than model failures.
+
 ## See it enforce (no GIF)
 
 With a policy active, the `hermes` token resolves to a principal capped at **L1 (suggest),

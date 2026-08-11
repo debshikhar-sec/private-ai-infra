@@ -43,3 +43,6 @@ agents/opencode_runtime/
 agents/opencode_sandbox/runtime/
 agents/hermes/memory/
 agents/openclaw/runtime/
+# Track C shadow-engineering evaluation traces: runtime artifacts, never repo content.
+runtime/shadow-engineering/
+runtime/

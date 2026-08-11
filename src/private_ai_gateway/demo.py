@@ -27,6 +27,9 @@ TOKENS = {
     "hermes": "demo-hermes",
     "opencode": "demo-opencode",
     "openclaw": "demo-openclaw",
+    # Track C: shadow engineering. Capped at L1 with no skills and no tools, so it may
+    # generate a candidate and never route, execute, or apply one.
+    "shadow-engineer": "demo-shadow-engineer",
 }
 
 _LEAKED_EXAMPLE_KEY = "AKIAIOSFODNN7EXAMPLE"  # AWS's documented example key  # nosec B105

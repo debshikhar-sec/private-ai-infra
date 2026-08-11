@@ -371,7 +371,77 @@ asymmetric crypto, KMS/HSM, multi-node, tenancy — until 7B is complete and eva
 
 ---
 
-## Part III — Track C / Track D: local-model shadow engineering (parallel after 7B.1)
+## Part III — Track C / Track D: local-model shadow engineering · **SHIPPED**
+
+Shipped as `agents/hermes/shadow_engineering.py` (Track C) and
+`agents/opencode_sandbox/candidate.py` (Track D). The specification below is retained; what
+follows records what was actually built and where it differs.
+
+**What shipped.** One flow — objective → governed strategy plan → local engineering
+candidate → strict deterministic validation → deterministic teacher comparison →
+evaluation trace. Model calls go through the gateway's normal governed path as a new
+`shadow-engineer` principal capped at **L1 (suggest-only)** holding **no skills and no
+tools**, so it cannot route work to an executor or call a tool even if it tried. The
+harness refuses to construct if handed an owner token.
+
+**Track D is stricter than the schema it targets.** `apply.parse_proposal` reads a proposal
+an operator curated, so tolerant defaults are fine there. `candidate.parse_candidate` reads
+*untrusted generated text*, where every tolerance is scope to smuggle: JSON only (prose
+around JSON is refused, never salvaged), known fields only at both levels (so an invented
+`command`/`exec`/`shell` field is a refusal, not an ignored extra), declared paths only,
+bounded size. What survives is built through the **existing** `ChangeProposal` schema and
+run through `apply.validate` — no second patch format, no parallel confinement rules.
+
+**The teacher is deterministic, not a model.** A rule-based comparison of declared scope
+against the objective's expected files, emitting stable reason codes. CI therefore needs no
+second model to grade the first, and reruns are reproducible.
+
+**Differences from the sketch above, and why.**
+
+- The trace stores `objective_hash`, not `objective`, and stores **no** `local_output`. Raw
+  generated text is unbounded, may echo prompt content, and nothing downstream reads it —
+  storing it would be the one place this track could leak. `model_id` became a structured
+  `ModelIdentity` (alias + **resolved** model + principal + declared autonomy) so a route
+  change is visible rather than hidden behind a stable alias.
+- Storage is a git-ignored `runtime/shadow-engineering/*.json`, one file per trace.
+- `GatewayClient.complete_with_identity()` was added so a caller can record what the
+  gateway actually served; `complete()` keeps its exact previous contract.
+
+**Authority proof.** No approval is acquired, no owner token is held, no apply path is
+imported or called (asserted structurally *and* behaviourally), and a full shadow run
+leaves the evaluated tree byte-identical. The hard bounds still hold:
+
+### First live trial — measured, not assumed
+
+One real shadow run against the locally-cached
+`mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit`, through the running gateway as the
+L1-capped `shadow-engineer` principal (strategy plan served by
+`mlx-community/Qwen3.6-27B-OptiQ-4bit`). Nothing was downloaded and nothing was applied.
+Task: add `reset()` to a small `Counter` class and make `increment()` return the new value.
+
+| Attempt | Adapter | Result |
+|---|---|---|
+| 1 — prompt without file contents | **accepted** | Structurally perfect, scope exact, validation clean — and a **silent regression**: it dropped the module docstring, both public parameters (`start`, `by`) and every type annotation. It had never been shown the file, so it produced a plausible *rewrite*, not an edit. |
+| 2 — file contents added | **refused** (`not_json`) | The code was now exactly right, but `new_content` was emitted as a **Python triple-quoted string** instead of an escaped JSON string. |
+| 3 — prompt states the JSON string encoding | **accepted** | Correct and complete: docstring, `start: int = 0`, `by: int = 1` all preserved, `increment` correctly retyped `-> int`, `reset() -> None` added. Acceptable with **zero** edits. |
+
+Both failures were **harness defects, not model failures** — the model was never shown the
+file, and was never told how to encode the string — and both are fixed. Attempt 1 is the one
+that matters for doctrine: it passed *every* structural check while being semantically
+wrong. The adapter validates **form and scope, never behavioural preservation**, and the
+teacher's `matches_reference` verdict means only that the declared file set matched. That is
+precisely why this track applies nothing and why human approval remains mandatory.
+
+Honest scope of the claim: one small, well-specified, single-file task. The model's
+*reasoning* was sound throughout; its *format discipline* was the fragile part. Attempt 3's
+failure mode is locked in as a deterministic refusal test so it cannot silently start being
+salvaged.
+
+```text
+NO external mutation · NO autonomous merge · NO autonomous deployment
+```
+
+### The original specification (retained for reference)
 
 These tracks may run in parallel with 7B.2 once 7B.1 has merged, provided no
 architecture dependency is discovered. They grant NO new authority.
