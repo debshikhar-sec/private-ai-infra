@@ -219,6 +219,33 @@ All notable changes to this project are documented here. Format based on
   "not yet disposed". **Not** in this step: rollback, containment, trust ledger, earned
   autonomy.
 
+- **Reversibility foundation (Step 7C.3A)** — the pre-image, captured before mutation. An
+  audit of the existing artifacts came first and is kept executable as two tests: today
+  `_apply_and_verify` hashes the whole tree before *and* after the edits but keeps only the
+  derived **set difference**, so `ApplyReport.changed_files` — and therefore the signed
+  `apply_result` — carries bare paths with no hashes, no content, and no way to tell a create
+  from a delete. The sandbox is copied and then mutated in place, so it holds the post-state.
+  **The existing artifacts cannot reverse anything**, and no amount of reading them harder
+  makes them reversible: hashes recorded after the fact cannot reconstruct content. New
+  `agents/opencode_sandbox/preimage.py` records the one thing that can — the prior state of
+  exactly the declared targets, captured from the sandbox after the copy and before the first
+  declared write. An addition records `existed: false` (reversing a create means deleting it);
+  an update or delete retains the prior bytes as content-addressed blobs; a manifest digest
+  covers the whole thing. The boundaries are the point: sandbox-confined with the apply's own
+  confinement rules (absolute paths, `..`, symlinks and non-regular files all fail closed);
+  never caller-placed (the caller supplies a store *base*, the snapshot id is generated);
+  bounded per entry and in total, with an oversized target refusing the **whole** snapshot
+  rather than capturing part of it, because a partial pre-image looks reversible and is not;
+  atomic, built under a temporary name and renamed into place; and **never in signed
+  evidence** — `apply_result` gains only `{snapshot_id, snapshot_digest, entries, bytes}`, and
+  only when a snapshot was actually taken, so an apply without a store emits a byte-identical
+  record. A capture that cannot complete **rejects the apply** rather than quietly producing
+  an irreversible one. `restore_into` is the reversibility primitive and is deliberately
+  reachable from nothing in the governed path — no approval, no reservation, no signed
+  outcome, no caller outside its own module and tests (asserted structurally). **No rollback
+  happens in this step**, and **no historical run becomes reversible**: a run that predates
+  its snapshot has no pre-image and never will.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -280,15 +307,16 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **981** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **1013** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
   signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
   in CI.
 
 ### Not yet built (explicitly)
-- Rollback and containment (7C.3); trust ledger; earned autonomy. A dirty run can now be
-  verified, invalidated and terminally closed by a human — but nothing can be **undone**, and
-  the runtime still cannot determine whether an interrupted mutation actually landed.
+- Governed rollback and containment (7C.3B); trust ledger; earned autonomy. A *future*
+  sandbox apply can now be reversed byte-for-byte in principle (7C.3A), but nothing performs
+  a rollback, no historical run is reversible, and the runtime still cannot determine whether
+  an interrupted mutation actually landed.
   Pending-approval expiry stays deferred (no grounded policy source for a pending lifetime —
   see the implementation contract). Autonomy remains fixed-ceiling and human-gated.
 

@@ -337,16 +337,28 @@ verified. Merged today:
   attempt is refused `already_disposed` rather than superseding the first. Reconciliation
   reads dispositions and never derives them: the class and outcome are unchanged, and a
   disposition that does not re-validate fails startup **closed**.
+- **Reversibility foundation (Step 7C.3A)** — an audit first, and it was negative: the shipped
+  apply artifacts retain only `changed_files` as bare paths, so they cannot reverse anything,
+  and hashes recorded after the fact never could. `agents/opencode_sandbox/preimage.py` now
+  captures the **pre-image** of exactly the declared targets, from the sandbox, after the copy
+  and before the first declared write — `existed: false` for a creation, prior bytes for an
+  update or delete, and a manifest digest over both. It is sandbox-confined, bounded per entry
+  and in total, atomic, and never caller-placed; an oversized or unsafe target refuses the
+  **whole** snapshot, because a partial pre-image looks reversible and is not, and a capture
+  that cannot complete **rejects the apply**. Signed evidence gains only
+  `{snapshot_id, snapshot_digest, entries, bytes}` — never contents. **Nothing performs a
+  rollback yet**, and **no historical run becomes reversible**.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
 non-authoritative placeholder** and is *not* the signed graph and does not affect
 authorization. A crash *during* the mutation is classified, failed closed, independently
 verified under a signed verdict, and can now be terminally closed by a human — but the
-runtime still cannot determine **whether that mutation actually landed**, and nothing can be
-**undone**. Runtime-wide crash-safe mutation semantics are therefore still not claimed and
+runtime still cannot determine **whether that mutation actually landed**, and nothing
+performs a rollback: 7C.3A makes a *future* sandbox apply reversible in principle, and 7C.3B
+is where an owner-approved, reserved, independently-verified rollback would use it. Runtime-wide crash-safe mutation semantics are therefore still not claimed and
 sandbox-confined mutation remains the safe execution target.
-**Rollback and containment (7C.3)**, the
+**Governed rollback and containment (7C.3B)**, the
 **trust ledger**, and **earned autonomy** remain future. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
 signed evidence is **tamper-evident, not non-repudiation** (symmetric HMAC).

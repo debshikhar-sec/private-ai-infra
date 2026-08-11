@@ -202,6 +202,9 @@ class ApplyReport:
     sandbox: str | None = None
     rationale: str = ""
     detail: str = ""
+    # Step 7C.3A — identity and digests of the pre-image captured before the mutation, or
+    # None when no snapshot store was supplied. Never contents: see ``preimage.py``.
+    preimage: dict | None = None
     generated_at: str = field(default_factory=_utc_now_iso)
 
     @property
@@ -220,8 +223,13 @@ class ApplyReport:
         return json.dumps(self.to_dict(), indent=2) + "\n"
 
     def to_record(self) -> dict:
-        """Compact, JSON-only hand-off for memory/evidence — no internal types."""
-        return {
+        """Compact, JSON-only hand-off for memory/evidence — no internal types.
+
+        ``preimage`` appears only when a snapshot was actually captured, so an apply with no
+        snapshot store produces a record byte-identical to the pre-7C.3A one — a run without
+        a pre-image must not look like one whose pre-image is merely empty.
+        """
+        record = {
             "component": "opencode-act",
             "status": self.status,
             "autonomy_level": self.autonomy_level,
@@ -234,6 +242,9 @@ class ApplyReport:
             "generated_at": self.generated_at,
             "detail": self.detail,
         }
+        if self.preimage is not None:
+            record["preimage"] = dict(self.preimage)
+        return record
 
     def to_text(self) -> str:
         lines = [
@@ -298,12 +309,22 @@ def apply_proposal(
     *,
     approval: Approval | None = None,
     commit_to: str | Path | None = None,
+    preimage_store: str | Path | None = None,
+    run_id: str = "",
+    approval_id: str = "",
 ) -> ApplyReport:
     """Gate, confine, apply, and verify a proposal. ``src_root`` is never written to.
 
     Always applies into ``sandbox_root`` (a copy). If ``commit_to`` is given, the same
     verified change is mirrored onto that real target — which still requires the approval
     the authority gate already demanded.
+
+    Step 7C.3A: with ``preimage_store`` set, the sandbox's prior state for exactly the
+    declared targets is captured *before* the first declared write, and the snapshot's
+    identity and digests (never its contents) are recorded on the report. If that capture
+    fails the apply is **rejected** rather than proceeding: a caller that asked for
+    reversibility must not silently receive an irreversible apply. Without the parameter,
+    behaviour and the emitted record are unchanged.
     """
     src_root = Path(src_root)
     sandbox_root = Path(sandbox_root)
@@ -351,6 +372,30 @@ def apply_proposal(
 
     # 3) confined apply into a sandbox copy, then 4) verify via manifests
     shutil.copytree(src_root, sandbox_root)
+
+    # 3a) reversibility (7C.3A): the pre-image is captured from the sandbox itself, after the
+    # copy and before any declared write, so what is recorded is exactly the state a rollback
+    # would restore — and the capture reads nothing outside the sandbox.
+    snapshot = None
+    if preimage_store is not None:
+        from opencode_sandbox.preimage import PreimageError, capture_preimage
+
+        try:
+            snapshot = capture_preimage(
+                proposal, sandbox_root, preimage_store,
+                run_id=run_id, approval_id=approval_id,
+            )
+        except PreimageError as exc:
+            return ApplyReport(
+                status=REJECTED,
+                violations=[f"pre-image capture refused ({exc.code}): {exc.detail}"],
+                sandbox=str(sandbox_root),
+                detail="rejected before any declared write: the pre-image required for "
+                       "reversibility could not be captured.",
+                **base,
+            )
+        base["preimage"] = snapshot.evidence()
+
     changed, unexpected, noops = _apply_and_verify(sandbox_root, proposal.edits, declared_set)
     if unexpected:
         return ApplyReport(
