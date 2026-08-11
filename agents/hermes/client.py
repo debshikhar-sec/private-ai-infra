@@ -41,6 +41,18 @@ class GatewayClient:
 
     def complete(self, messages: list[dict], *, max_tokens: int | None = None) -> str:
         """POST a chat completion and return the assistant's text content."""
+        return self.complete_with_identity(messages, max_tokens=max_tokens)[0]
+
+    def complete_with_identity(
+        self, messages: list[dict], *, max_tokens: int | None = None
+    ) -> tuple[str, str]:
+        """As :meth:`complete`, but also return the model the gateway actually served.
+
+        The served identity is the *resolved* backend model, not the requested alias, so a
+        caller recording what generated something sees a route change rather than a stable
+        alias hiding one. Added for the shadow-engineering track; :meth:`complete` keeps its
+        exact previous contract.
+        """
         body: dict = {
             "model": self.model,
             "messages": messages,
@@ -73,6 +85,7 @@ class GatewayClient:
             raise GatewayError(f"cannot reach gateway at {self.base_url}: {exc}") from exc
 
         try:
-            return payload["choices"][0]["message"]["content"]
+            content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise GatewayError(f"unexpected gateway response shape: {payload!r}") from exc
+        return content, str(payload.get("model", ""))
