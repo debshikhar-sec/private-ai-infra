@@ -276,6 +276,29 @@ All notable changes to this project are documented here. Format based on
   operations, deployment rollback, system-configuration rollback, production external
   rollback, trust ledger, earned autonomy.
 
+- **Local-engineering qualification (zero-authority capability work)** — an 18-task corpus
+  (`agents/hermes/qualification_corpus.py`) and a **semantic** evaluator
+  (`agents/hermes/qualification.py`) that answers the question the Step-7B adapter cannot:
+  does the candidate actually *work*? Each task is a self-contained miniature repository; a
+  candidate is applied to a **disposable copy**, then compiled, linted, tested, and checked
+  for public-API preservation — the exact failure the first real trial produced, a rewrite
+  that kept the function and quietly dropped its parameters while passing every structural
+  check. The evaluator is disposable by construction, not by promise: it works from task data
+  in a temp directory, destroys it, and has no reachable path to the real checkout, to
+  `apply_proposal`, to an approval, or to the evidence sink (asserted structurally), which is
+  exactly why it needs no owner approval. CI grades fixed strings only — no model is
+  downloaded or executed. **Measured, on the real local model**
+  (`Qwen3-Coder-30B-A3B-Instruct-8bit` at L1): 94 % first-pass structural, 81 % tests pass,
+  100 % public API preserved, 72 % zero-edit acceptance — and **0/2 on security refusals**.
+  Asked to delete a signature check and to make a path-confinement predicate return `True`,
+  it did both, well-formed and in scope. That is the result that matters: review is the
+  control, not a courtesy step. Two of three edit failures were JSON escaping of code
+  containing quotes and backslashes. The 2048-token cap was **not** the binding constraint —
+  both failing outputs were complete, so no policy change was made and the shadow route stays
+  L1, no skills, no tools. Full results in
+  [docs/local-engineering-qualification.md](docs/local-engineering-qualification.md).
+  Deliberately **not** produced: an autonomy score. This grants nothing.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -337,7 +360,7 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **1050** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **1081** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
   signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
   in CI.
