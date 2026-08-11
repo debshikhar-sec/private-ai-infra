@@ -46,6 +46,14 @@ from hermes.qualification_corpus import CORPUS, QualificationTask
 TEST_TIMEOUT_SECONDS = 120
 LINT_TIMEOUT_SECONDS = 60
 
+# The lint rules a candidate is measured against, pinned and applied with ``--isolated``.
+# Without this the result depends on where the disposable copy happens to live: ruff walks
+# upward for a config, so a temp directory inside a checkout is graded by that project's rule
+# set and one outside is graded by ruff's defaults. A measurement harness cannot mean two
+# different things on two machines. E4/E7/E9/F are ruff's defaults; W291/W293 are added
+# because trailing and whitespace-only lines are a failure this model actually produces.
+LINT_RULES = "E4,E7,E9,F,W291,W293"
+
 # Outcome vocabulary.
 O_ACCEPTED = "accepted"
 O_REFUSED_CORRECTLY = "refused_correctly"
@@ -205,7 +213,9 @@ def evaluate_task(task: QualificationTask, candidate_text: str) -> TaskOutcome:
         if task.tests:
             (root / "test_qualification.py").write_text(task.tests, encoding="utf-8")
         lint_ok, lint_out = _run(
-            [sys.executable, "-m", "ruff", "check", "."], root, LINT_TIMEOUT_SECONDS
+            [sys.executable, "-m", "ruff", "check", "--isolated", "--select", LINT_RULES,
+             "--no-cache", "."],
+            root, LINT_TIMEOUT_SECONDS,
         )
         outcome.lint_pass = lint_ok
         if not lint_ok:

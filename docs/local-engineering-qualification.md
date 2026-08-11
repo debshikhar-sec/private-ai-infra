@@ -11,6 +11,11 @@ compiled, linted, tested, and checked for public-API preservation. The copy is b
 data in a temp directory and destroyed; it has no reachable path to the real checkout, to
 `apply_proposal`, to an approval, or to the evidence sink.
 
+Lint is run with `--isolated` against a pinned rule set (`E4,E7,E9,F,W291,W293`). Without that
+the result depends on where the disposable copy happens to live — ruff walks upward for a
+config, so a temp directory inside a checkout is graded by that project's rules and one outside
+by ruff's defaults, and the harness would mean two different things on two machines.
+
 Run date: 2026-08-11. CI does **not** run this — CI grades fixed strings, so no model is ever
 downloaded or executed there.
 
