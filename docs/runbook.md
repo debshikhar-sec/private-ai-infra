@@ -198,6 +198,53 @@ is deleted on exit — the keys are never printed, written to disk, or committed
 demos, captures, and verification sessions; use the exported configuration above for any
 state you intend to keep.
 
+## Closing a dirty run (Step 7C.2)
+
+Startup reconciliation invalidates a run whose authority was consumed without a valid linked
+outcome and reports it as **outstanding**. It stays outstanding until a human closes it — the
+runtime will never close one for you, and nothing is retried.
+
+List what you may cite as the basis (owner token required):
+
+    curl -sS "http://127.0.0.1:8081/v1/runs/$RUN_ID/disposition-basis" \
+      -H "Authorization: Bearer $OWNER_TOKEN" | python3 -m json.tool
+
+You get the run's `execute_validated` reservation and every `verification_result` OpenClaw
+recorded for it, each with the typed `basis_ref` to pass back. Nothing is recommended: if
+several verdicts exist, choosing one is your decision, not the runtime's.
+
+Then record the closure:
+
+    curl -sS -X POST http://127.0.0.1:8081/v1/dispositions \
+      -H "Authorization: Bearer $OWNER_TOKEN" -H 'Content-Type: application/json' \
+      -d '{"run_id":"'"$RUN_ID"'","approval_id":"'"$APPROVAL_ID"'",
+           "disposition":"closed_unknown","basis_type":"execute_validated",
+           "basis_ref":{ … the object from the listing … }}'
+
+Choosing the disposition:
+
+- `closed_unknown` — **the default, and the honest one.** The runtime cannot tell whether the
+  mutation landed; you are acknowledging that and closing the run anyway.
+- `human_asserted_applied` / `human_asserted_not_applied` — only when *you* went and looked.
+  These record **your** claim, are labelled as such in the signed record, and are never
+  derived by the runtime, by reconciliation, or by OpenClaw.
+
+Expected refusals (all fail closed, by design):
+
+- a non-owner caller → `403 owner_required` (planner, executor and verifier principals
+  included);
+- a run that still has a pending or approved approval → `409 run_not_terminal`; disposal
+  closes finished history and is not a kill switch for a live run;
+- a basis from another run or approval, of the wrong record type, dangling, or with a forged
+  digest → `400` with the specific `basis_*` code; the server re-resolves and re-hashes every
+  reference and never accepts a caller-supplied evidence envelope;
+- a second disposition → `409 already_disposed`; the first is never superseded.
+
+Disposal seals the run: no fresh approval can be created against it and no execute can
+validate. A disposition that later fails to re-validate (tampered basis, wrong emitter, two
+records for one run) **fails the next startup closed** rather than reverting the run to
+"outstanding".
+
 ## Strategy Benchmark
 
 Run:

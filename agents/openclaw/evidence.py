@@ -654,6 +654,23 @@ class SinkGraphReader:
         self._sink_id = getattr(evidence_sink, "sink_id", "")
         self._records = tuple(getattr(evidence_sink, "records", ()))
 
+    @property
+    def records(self) -> tuple:
+        """The verified record tuple, for consumers that walk edges this class does not.
+
+        Step 7C.2: reading a *gateway-plane* record type (``run_disposition``) is not the
+        verifier's job, but re-verifying the chain a second time to reach it would be. This
+        exposes the already-verified snapshot so one verification still backs every read;
+        it is empty whenever :attr:`chain_error` is set, so a caller cannot mistake an
+        unverified log for an empty one without checking.
+        """
+        return self._records
+
+    @property
+    def sink_id(self) -> str:
+        """The verified sink's identity, needed to resolve a portable ``EvidenceRef``."""
+        return self._sink_id
+
     # -- the shared authorization edge -------------------------------------------------
     def _approval_edge(self, exec_rec):
         """``execute_validated → approval_decided`` with every cross-record invariant.

@@ -249,10 +249,17 @@ reaches its verdict by reading artifacts authored by the very components it veri
   HMAC means the assurance-owned registry can verify all three emitters, which is why this
   remains tamper-evident and **not** non-repudiation. A verdict that cannot be recorded never
   advertises a verified state, and nothing is retried or rolled back on that path. Multiple
-  verification records may legitimately exist and **none is terminal** — binding a terminal
-  disposition to one specific verifier result is 7C.2. A terminal, recorded
-  disposition of a dirty run are 7C. Sandbox-confined mutation remains the safe execution
-  target until then. The signed linkage graph above is
+  verification records may legitimately exist and **none is terminal**. Since 7C.2 a human
+  can terminally close such a run: `run_disposition` is gateway-signed, owner-gated, and
+  bound to one **specific** basis the caller names — a chosen verdict, or the exact
+  `execute_validated` reservation for a dirty run where no apply-bound verdict can
+  legitimately exist. The server re-resolves that reference (recomputing the digest and
+  checking type, emitter and run/approval binding) and constructs the record itself; there is
+  no "no basis" path and no "pick latest". `closed_unknown` asserts nothing about the
+  mutation; disposal seals the run and never reopens it; a disposition that does not
+  re-validate fails startup closed. What **rollback and containment (7C.3)** would add is
+  the ability to *undo* — which does not exist. Sandbox-confined mutation remains the safe
+  execution target until then. The signed linkage graph above is
   the canonical linkage; the `ApprovalRecord.evidence_refs` field remains an **unused,
   non-authoritative placeholder** and is *not* the graph. No trust ledger, no earned
   autonomy. Autonomy remains fixed-ceiling by policy.

@@ -812,6 +812,186 @@ def v1_approvals():
     return jsonify(resp), 200
 
 
+def _owner_only(code_path: str):
+    """403 unless the caller is the owner; ``None`` when the request may proceed.
+
+    Same shape as the ``/v1/approvals`` gate, including the ``gateway_authz_denials_total``
+    increment — OpenClaw's AC-METRICS-RECONCILE reads a 403 deny in the audit with no
+    matching counter as a dropped metric, and would fail the *next* legitimate run.
+    """
+    principal = getattr(g, "principal", None)
+    if principal is OWNER_PRINCIPAL:
+        return None
+    METRICS.inc("gateway_authz_denials_total", {"reason": "owner_required"})
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""),
+        principal=(principal.name if principal else None),
+        method=request.method, path=request.path, model=None,
+        decision="deny", reason="owner_required", status=403,
+    )
+    return jsonify(
+        {"error": {"message": f"{code_path} requires the owner identity",
+                   "type": "permission_error", "code": "owner_required"}}
+    ), 403
+
+
+@app.route("/v1/runs/<run_id>/disposition-basis", methods=["GET"])
+def v1_disposition_basis(run_id: str):
+    """The bases a human may cite when disposing this run (Step 7C.2), owner-gated.
+
+    Read-only. Lists the run's signed ``execute_validated`` reservation and every
+    ``verification_result`` OpenClaw recorded for it, each with the typed ``EvidenceRef`` that
+    ``POST /v1/dispositions`` expects. It deliberately does **not** recommend one: when a run
+    carries several verdicts the human picks, and naming a specific record is the whole point.
+    """
+    from private_ai_gateway import disposition as disp
+
+    denied = _owner_only("Disposition")
+    if denied is not None:
+        return denied
+    if EVIDENCE_SINK is None:
+        return jsonify(
+            {"error": {"message": "No evidence sink is configured",
+                       "type": "server_error", "code": disp.CODE_EVIDENCE_UNAVAILABLE}}
+        ), 503
+    if APPROVAL_STORE.get_run(run_id) is None:
+        return jsonify(
+            {"error": {"message": f"Unknown run '{run_id}'",
+                       "type": "invalid_request_error", "code": disp.CODE_RUN_NOT_FOUND}}
+        ), 404
+
+    from openclaw.evidence import SinkGraphReader
+
+    reader = SinkGraphReader(EVIDENCE_SINK)
+    if reader.chain_error:
+        logger.warning(f"DISPOSITION_BASIS_CHAIN | detail={log_safe(reader.chain_error)}")
+        return jsonify(
+            {"error": {"message": "The evidence chain did not verify",
+                       "type": "server_error", "code": disp.CODE_EVIDENCE_UNAVAILABLE}}
+        ), 503
+
+    bases = []
+    for rec in reader.records:
+        env = rec.envelope
+        if (env.run_id or "") != run_id or env.record_type not in disp.BASIS_TYPES:
+            continue
+        entry = {
+            "basis_type": env.record_type,
+            "approval_id": env.approval_id or "",
+            "basis_ref": rec.evidence_ref().to_mapping(),
+        }
+        if env.record_type == disp.BASIS_VERIFICATION_RESULT and isinstance(rec.payload, dict):
+            entry["verdict"] = rec.payload.get("verdict", "")
+        bases.append(entry)
+
+    try:
+        existing = disp.disposition_for_run(
+            reader.records, sink_id=reader.sink_id, run_id=run_id
+        )
+    except disp.DispositionError as exc:
+        logger.warning(f"DISPOSITION_INVALID | run_id={log_safe(run_id)} "
+                       f"| detail={log_safe(exc.detail)}")
+        return jsonify(
+            {"error": {"message": "The recorded disposition for this run did not validate",
+                       "type": "server_error", "code": exc.code}}
+        ), 409
+
+    return jsonify({
+        "run_id": run_id,
+        "run_status": APPROVAL_STORE.get_run(run_id).status.value,
+        "bases": bases,
+        "disposition": existing.disposition if existing else None,
+    }), 200
+
+
+@app.route("/v1/dispositions", methods=["POST"])
+def v1_dispositions():
+    """Owner-gated terminal disposition of an invalidated run (Step 7C.2).
+
+    Body: ``{run_id, approval_id, disposition, basis_type, basis_ref}``. The caller names a
+    *basis* — one specific ``verification_result`` it read, or the ``execute_validated``
+    reservation for a dirty run where no verdict can legitimately exist — and the server
+    re-resolves that reference against the verified chain before constructing and signing the
+    record itself. A client never supplies an evidence envelope, and there is no "latest
+    verdict" fallback.
+
+    This closes a run; it never reopens one. The run must already be invalidated, no authority
+    state is touched, and a run that is already disposed is refused with ``already_disposed``
+    rather than being superseded.
+    """
+    from private_ai_gateway import disposition as disp
+
+    denied = _owner_only("Disposition")
+    if denied is not None:
+        return denied
+
+    body = request.get_json(silent=True) or {}
+    run_id = str(body.get("run_id", "")).strip()
+    approval_id = str(body.get("approval_id", "")).strip()
+
+    try:
+        recorded = disp.dispose_run(
+            APPROVAL_STORE,
+            EVIDENCE_SINK,
+            run_id=run_id,
+            approval_id=approval_id,
+            disposition=str(body.get("disposition", "")).strip(),
+            basis_type=str(body.get("basis_type", "")).strip(),
+            basis_ref=body.get("basis_ref"),
+            human_actor=g.principal.name,
+            signing_key=EVIDENCE_KEY,
+            key_id=EVIDENCE_KEY_ID,
+        )
+    except disp.DispositionError as exc:
+        # The specific reason stays server-side (CWE-209); the client gets the governed code.
+        logger.warning(
+            f"DISPOSITION_REFUSED | run_id={log_safe(run_id)} | code={log_safe(exc.code)} "
+            f"| detail={log_safe(exc.detail)}"
+        )
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny", reason=f"disposition_refused:{exc.code}",
+            status=_DISPOSITION_STATUS.get(exc.code, 400), run_id=run_id,
+        )
+        return jsonify(
+            {"error": {"message": "The disposition was refused",
+                       "type": "invalid_request_error", "code": exc.code}}
+        ), _DISPOSITION_STATUS.get(exc.code, 400)
+
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"run_disposed:{recorded.disposition}",
+        status=200, run_id=run_id,
+    )
+    logger.info(
+        f"RUN_DISPOSED | run_id={log_safe(run_id)} "
+        f"| disposition={log_safe(recorded.disposition)} "
+        f"| basis={log_safe(recorded.basis_type)} | by={log_safe(recorded.human_actor)}"
+    )
+    return jsonify({
+        "run_id": recorded.run_id,
+        "approval_id": recorded.approval_id,
+        "disposition": recorded.disposition,
+        "basis_type": recorded.basis_type,
+        "human_actor": recorded.human_actor,
+        "evidence_id": recorded.evidence_id,
+        "terminal": True,
+    }), 200
+
+
+# HTTP status per governed disposition refusal. Everything else falls back to 400.
+_DISPOSITION_STATUS = {
+    "run_not_found": 404,
+    "approval_not_found": 404,
+    "run_not_terminal": 409,
+    "already_disposed": 409,
+    "ambiguous_disposition": 409,
+    "disposition_evidence_unavailable": 503,
+}
+
+
 # -----------------------------
 # A2A (Agent2Agent) — agent card discovery + governed delegation
 # -----------------------------
