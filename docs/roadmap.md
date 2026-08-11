@@ -228,6 +228,12 @@ recorded in
 - **Rollback outside the sandbox** — *future, and not casually.* Git operations, deployment
   rollback and system-configuration rollback are all out of scope: their pre-images are not
   files this runtime owns.
+- **Local engineering qualification** — *shipped, zero authority.* An 18-task corpus and a
+  disposable semantic evaluator that runs the candidate rather than only shape-checking it.
+  Measured: 94 % first-pass structural, 81 % tests pass, 72 % zero-edit — and **0/2 on
+  refusing control-weakening changes**, which is why review stays a control rather than a
+  formality. See [local-engineering-qualification.md](local-engineering-qualification.md).
+  No autonomy score, no grant.
 - **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.

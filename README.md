@@ -373,7 +373,12 @@ apply can be undone under owner authority and independently verified; a historic
 pre-image and stays irreversible, and rollback never leaves the sandbox. Runtime-wide crash-safe mutation semantics are therefore still not claimed and
 sandbox-confined mutation remains the safe execution target.
 The **trust ledger**, **earned autonomy**, and any
-rollback outside the sandbox remain future. Autonomy stays fixed-ceiling by
+rollback outside the sandbox remain future. The local engineering model is now **measured**
+rather than estimated — 94 % first-pass structural, 81 % tests-pass, 72 % zero-edit, and
+**0/2 on refusing control-weakening changes** — so it is a usable first-pass author for
+right-sized edits and is kept away from anything security-adjacent; see
+[docs/local-engineering-qualification.md](docs/local-engineering-qualification.md). It still
+holds no apply, commit, merge, or deploy authority. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
 signed evidence is **tamper-evident, not non-repudiation** (symmetric HMAC).
 Design: [docs/evidence-sink-design.md](docs/evidence-sink-design.md).
