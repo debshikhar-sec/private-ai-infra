@@ -10,8 +10,15 @@ isolation — but it is exactly the shape a later process split preserves.
 Key custody (symmetric-HMAC MVP — tamper-evident, not non-repudiable):
 
   * each emitter's signing key comes from its own environment variable
-    (``PRIVATE_AI_EVIDENCE_KEY_GATEWAY`` / ``PRIVATE_AI_EVIDENCE_KEY_OPENCODE``),
-    hex-encoded, at least :data:`MIN_KEY_BYTES` bytes;
+    (``PRIVATE_AI_EVIDENCE_KEY_GATEWAY`` / ``PRIVATE_AI_EVIDENCE_KEY_OPENCODE`` /
+    ``PRIVATE_AI_EVIDENCE_KEY_OPENCLAW``), hex-encoded, at least :data:`MIN_KEY_BYTES`
+    bytes;
+  * since Step 7C.1 the verifier signs its **own** verdict, so it holds a third emitter
+    key. Only OpenClaw ever receives it: the gateway must not be able to author a verifier
+    conclusion, and neither must the executor whose work is being judged. That the
+    assurance-owned registry can *verify* all three is a property of symmetric HMAC, not a
+    custody grant — which is exactly why this remains tamper-evident, **not**
+    non-repudiation;
   * :func:`emitter_signing_key` hands one emitter its own key and key id — nothing else;
   * :func:`load_registry` assembles the full verification registry (with symmetric HMAC the
     verification key *is* the signing key) — only assurance construction calls this;
@@ -26,7 +33,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from openclaw.sink import EMITTER_GATEWAY, EMITTER_OPENCODE, EmitterKeyRegistry
+from openclaw.sink import (
+    EMITTER_GATEWAY,
+    EMITTER_OPENCLAW,
+    EMITTER_OPENCODE,
+    EmitterKeyRegistry,
+)
 from openclaw.sink_sqlite import SqliteEvidenceSink
 
 # The durable runtime chain's sink identity. Matches the identity the gateway's state
@@ -37,12 +49,17 @@ DURABLE_SINK_ID = "gateway-evidence"
 EMITTER_KEY_ENV = {
     EMITTER_GATEWAY: "PRIVATE_AI_EVIDENCE_KEY_GATEWAY",
     EMITTER_OPENCODE: "PRIVATE_AI_EVIDENCE_KEY_OPENCODE",
+    # Step 7C.1 — OpenClaw signs its own verdict. Only OpenClaw ever receives this key:
+    # the gateway must not be able to author a verifier conclusion, and neither must the
+    # executor whose work is being judged.
+    EMITTER_OPENCLAW: "PRIVATE_AI_EVIDENCE_KEY_OPENCLAW",
 }
 
 # Stable key identities for the HMAC MVP (rotation is a later, production step).
 EMITTER_KEY_IDS = {
     EMITTER_GATEWAY: "gateway-hmac-1",
     EMITTER_OPENCODE: "opencode-hmac-1",
+    EMITTER_OPENCLAW: "openclaw-hmac-1",
 }
 
 # Minimum decoded key length. 16 bytes (32 hex chars) is the floor; 32 bytes recommended.

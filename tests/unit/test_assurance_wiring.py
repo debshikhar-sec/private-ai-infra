@@ -44,6 +44,7 @@ from private_ai_gateway.state import StateConfig, StateError, open_backend
 # Ephemeral in-test key material (hex for env vars, bytes for direct assertions).
 _GW_HEX = "aa" * 32
 _OC_HEX = "bb" * 32
+_CLAW_HEX = "cc" * 32
 _GW_KEY = bytes.fromhex(_GW_HEX)
 _OC_KEY = bytes.fromhex(_OC_HEX)
 
@@ -56,6 +57,7 @@ def _env(tmp_path=None, **extra):
     env = {
         "PRIVATE_AI_EVIDENCE_KEY_GATEWAY": _GW_HEX,
         "PRIVATE_AI_EVIDENCE_KEY_OPENCODE": _OC_HEX,
+        "PRIVATE_AI_EVIDENCE_KEY_OPENCLAW": _CLAW_HEX,
     }
     if tmp_path is not None:
         env.update(
@@ -271,6 +273,7 @@ def wired(tmp_path, monkeypatch, client):
     """The durable-evidence runtime exactly as app startup configures it."""
     monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_GATEWAY", _GW_HEX)
     monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_OPENCODE", _OC_HEX)
+    monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_OPENCLAW", _CLAW_HEX)
     opened = _open(tmp_path)
     monkeypatch.setattr(gw, "AUTH_TOKEN", _OWNER_TOKEN)
     monkeypatch.setattr(gw, "APPROVAL_STORE", opened.authority_store)
@@ -381,6 +384,7 @@ def test_unwired_injected_sink_keeps_gateway_only_emit(tmp_path, monkeypatch, cl
     # the gateway emits its two records; no apply_result is forced through the executor.
     monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_GATEWAY", _GW_HEX)
     monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_OPENCODE", _OC_HEX)
+    monkeypatch.setenv("PRIVATE_AI_EVIDENCE_KEY_OPENCLAW", _CLAW_HEX)
     opened = _open(tmp_path)
     monkeypatch.setattr(gw, "AUTH_TOKEN", _OWNER_TOKEN)
     monkeypatch.setattr(gw, "EVIDENCE_SINK", opened.evidence_sink)

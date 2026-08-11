@@ -16,7 +16,7 @@ from pathlib import Path
 
 from interop import AgentPeer
 
-from openclaw import checks, evidence
+from openclaw import checks, evidence, verification
 from openclaw.report import build_report
 
 SKILL = "assurance.verify"
@@ -38,6 +38,9 @@ class AssuranceWorker:
         approval_id: str | None = None,
         require_signed_apply_evidence: bool = False,
         require_signed_linkage: bool = False,
+        verification_signing_key: bytes | None = None,
+        verification_key_id: str = "",
+        require_signed_verification: bool = False,
     ):
         self.peer = peer
         self.audit_limit = audit_limit
@@ -53,6 +56,15 @@ class AssuranceWorker:
         # Step 7B.0: under the wired durable-evidence runtime the apply must also resolve
         # up the signed graph (apply_result -> execute_validated -> approval_decided).
         self.require_signed_linkage = require_signed_linkage
+        # Step 7C.1: OpenClaw signs its own verdict with its own emitter key. Absent, the
+        # worker behaves exactly as before (unsigned summary only). Present, the verdict
+        # becomes a durable assurance fact; `require_signed_verification` makes an
+        # unrecordable verdict an assurance failure rather than a quiet degradation.
+        self.verification_signing_key = verification_signing_key
+        self.verification_key_id = verification_key_id
+        self.require_signed_verification = require_signed_verification
+        # Populated by the most recent verify() so a caller can inspect what was recorded.
+        self.last_verification: verification.VerificationEmit | None = None
 
     def poll(self) -> list[dict]:
         """Handle every submitted ``assurance.verify`` task; return the reports."""
@@ -108,11 +120,46 @@ class AssuranceWorker:
             )
         )
         report = build_report(findings)
+
+        # Step 7C.1 — the detailed report exists just long enough to derive a minimal
+        # payload, sign it as OpenClaw, and append it. The external contract below is
+        # unchanged: this still returns (verdict, summary).
+        emit = self._record_verdict(report)
+
         counts = report.counts()
+        verdict = emit.advertised_verdict
         summary = (
-            f"{report.verdict}: {counts.get('pass', 0)} pass / "
+            f"{verdict}: {counts.get('pass', 0)} pass / "
             f"{counts.get('fail', 0)} fail / "
             f"{counts.get('inconclusive', 0)} inconclusive over "
             f"{len(audit.events)} audited decisions"
         )
-        return report.verdict, summary
+        if emit.reason:
+            summary += f" ({emit.reason})"
+        return verdict, summary
+
+    def _record_verdict(self, report):
+        """Record the verdict as signed assurance evidence, if OpenClaw holds its key.
+
+        With no key the worker behaves exactly as before and advertises the report's own
+        verdict. With one, the signed record becomes the durable fact — and if signed
+        evidence is *required* but unrecordable, the failure is surfaced loudly rather than
+        letting unsigned summary text stand in for a verdict nothing supports.
+        """
+        if self.verification_signing_key is None:
+            emit = verification.VerificationEmit(
+                False, report.verdict, reason="no verification signing key configured"
+            )
+            self.last_verification = emit
+            return emit
+        emit = verification.emit_verification_result(
+            self.evidence_sink,
+            report,
+            run_id=self.run_id,
+            approval_id=self.approval_id,
+            signing_key=self.verification_signing_key,
+            key_id=self.verification_key_id,
+            required=self.require_signed_verification,
+        )
+        self.last_verification = emit
+        return emit

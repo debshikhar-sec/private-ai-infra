@@ -173,8 +173,9 @@ chain end to end:
     export PRIVATE_AI_EVIDENCE_MODE=durable
     export PRIVATE_AI_EVIDENCE_KEY_GATEWAY=$(openssl rand -hex 32)
     export PRIVATE_AI_EVIDENCE_KEY_OPENCODE=$(openssl rand -hex 32)
+    export PRIVATE_AI_EVIDENCE_KEY_OPENCLAW=$(openssl rand -hex 32)
 
-Keep the two key values stable across restarts (store them in your shell profile or a
+Keep the three key values stable across restarts (store them in your shell profile or a
 secrets manager, never in the repo): the chain re-verifies against them on every startup.
 In this mode signed authorization/apply evidence is required fail-closed
 (`REQUIRE_AUTHORIZATION_EVIDENCE` is forced on), and OpenClaw refuses a PASS without a
