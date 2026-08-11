@@ -232,7 +232,15 @@ reaches its verdict by reading artifacts authored by the very components it veri
   that has no compatible authority projection (evidence is retained append-only and never
   becomes authority), and leaves complete, signature-linked runs alone. Ambiguous evidence
   fails closed rather than being normalized, and a store that cannot be inspected aborts
-  startup instead of reading as clean. What is **not** built yet: the runtime still cannot
+  startup instead of reading as clean. Since 7B.2.1 that fail-closed posture also *acts*:
+  an inconsistency that can be tied to an extant authority run invalidates that run, so an
+  approval carrying incompatible, ambiguous or unauthorized execution evidence can never
+  still execute — only an orphan evidence fact with no corresponding authority run is
+  report-only, because acting on an identifier the authority store does not hold would let
+  evidence select authority. "Complete" is likewise defined as exactly the verifier's own
+  full signed graph (`apply_result → execute_validated → approval_decided`, with emitter
+  identity, record uniqueness, `decision == approve` and canonical-plan-hash agreement); the
+  gateway keeps no weaker parallel definition. What is **not** built yet: the runtime still cannot
   determine *whether* a mutation interrupted mid-flight actually landed — it records that
   the outcome is unknown and stops. Signed verifier verdicts and a terminal, recorded
   disposition of a dirty run are 7C. Sandbox-confined mutation remains the safe execution

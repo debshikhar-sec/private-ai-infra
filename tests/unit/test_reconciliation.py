@@ -148,6 +148,60 @@ def _types(sink):
     return [r.envelope.record_type for r in sink.records]
 
 
+def _find(sink, record_type, approval_id):
+    return next(r for r in sink.records
+                if r.envelope.record_type == record_type
+                and r.envelope.approval_id == approval_id)
+
+
+def _craft_used_execution(
+    client, opened, *, decision="approve", decided_plan_hash=None, duplicate_decided=False,
+    patch_exec=None, exec_env=None, apply=True, mark_used=True, tag="g",
+):
+    """Build the class-4 shape by hand: USED authority + a full signed evidence graph.
+
+    Authority is created through the store (so the gateway emits no competing
+    ``approval_decided``) and every evidence record is crafted, which lets each test break
+    exactly one edge of ``apply_result -> execute_validated -> approval_decided`` while
+    leaving the rest valid. ``patch_exec`` mutates the reservation payload; ``exec_env``
+    overrides the reservation's envelope binding or emitter. Returns ``(run_id, approval_id)``.
+    """
+    run_id, plan_hash = _plan(client)
+    store = opened.authority_store
+    approval_id = store.create_pending_approval(run_id).approval_id
+    store.decide_approval(approval_id, decision="approve", approver="owner", reason="ok")
+
+    decided_payload = {"decision": decision, "approver": "owner",
+                       "canonical_plan_hash": decided_plan_hash or plan_hash}
+    decided = _append(opened.evidence_sink, record_type="approval_decided", run_id=run_id,
+                      approval_id=approval_id, payload=decided_payload, nonce=f"n-ad-{tag}")
+    if duplicate_decided:
+        _append(opened.evidence_sink, record_type="approval_decided", run_id=run_id,
+                approval_id=approval_id, payload=decided_payload, nonce=f"n-ad2-{tag}")
+
+    exec_payload = {
+        "canonical_plan_hash": plan_hash,
+        "validated": True,
+        "approval_ref": decided.evidence_ref().to_mapping(),
+    }
+    if patch_exec is not None:
+        patch_exec(exec_payload)
+    kwargs = {"record_type": "execute_validated", "run_id": run_id,
+              "approval_id": approval_id, "payload": exec_payload, "nonce": f"n-ex-{tag}"}
+    kwargs.update(exec_env or {})
+    reservation = _append(opened.evidence_sink, **kwargs)
+
+    if apply:
+        _append(opened.evidence_sink, record_type="apply_result", run_id=run_id,
+                approval_id=approval_id, emitter=EMITTER_OPENCODE, key=_OC_KEY,
+                nonce=f"n-ap-{tag}",
+                payload={"applied": True,
+                         "execute_ref": reservation.evidence_ref().to_mapping()})
+    if mark_used:
+        store.mark_used(approval_id)
+    return run_id, approval_id
+
+
 # --- Class 1: approved, nothing started ----------------------------------------------
 
 def test_class_1_approved_with_no_reservation_is_clean(tmp_path, wired):
@@ -323,6 +377,110 @@ def test_class_4_requires_real_signed_linkage_not_mere_presence(tmp_path, wired)
     assert "execute_ref" in finding.reason or "linkage" in finding.reason
 
 
+# --- Class 4 requires the FULL OpenClaw signed graph (Step 7B.2.1) ---------------------
+# Class 4 is now exactly "USED authority + load_evidence_graph_from_sink().usable". Each
+# case below breaks one edge or invariant of
+# ``apply_result -> execute_validated -> approval_decided`` and must make class 4 impossible.
+
+def test_crafted_full_graph_is_class_4(tmp_path, wired):
+    """The control: with every edge intact, the crafted shape *is* class 4."""
+    from openclaw.evidence import load_evidence_graph_from_sink
+
+    client, opened = wired
+    run_id, approval_id = _craft_used_execution(client, opened, tag="ok")
+    view = load_evidence_graph_from_sink(
+        opened.evidence_sink, run_id=run_id, approval_id=approval_id
+    )
+    assert view.usable, view.reason
+    finding = next(f for f in reconcile(opened.authority_store, opened.evidence_sink).findings
+                   if f.approval_id == approval_id)
+    assert (finding.class_id, finding.outcome) == (4, OUTCOME_CLEAN)
+
+
+def _dangling_ref(payload):
+    payload["approval_ref"]["evidence_id"] = "ev-" + "0" * 32
+
+
+def _wrong_ref_type(payload):
+    payload["approval_ref"]["record_type"] = "apply_result"
+
+
+_BROKEN_GRAPHS = {
+    "missing_approval_ref": dict(patch_exec=lambda p: p.pop("approval_ref")),
+    "dangling_approval_ref": dict(patch_exec=_dangling_ref),
+    "approval_ref_wrong_type": dict(patch_exec=_wrong_ref_type),
+    "decision_is_not_approve": dict(decision="deny"),
+    "canonical_plan_hash_mismatch": dict(decided_plan_hash="sha256:not-the-planned-hash"),
+    "duplicate_approval_decided": dict(duplicate_decided=True),
+    "wrong_reservation_emitter": dict(
+        exec_env={"emitter": EMITTER_OPENCODE, "key": _OC_KEY}),
+    "wrong_reservation_run_id": dict(exec_env={"run_id": "run-not-this-one"}),
+    "wrong_reservation_approval_id": dict(exec_env={"approval_id": "appr-not-this-one"}),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_BROKEN_GRAPHS))
+def test_a_broken_signed_graph_can_never_be_class_4(case, tmp_path, wired):
+    from openclaw.evidence import load_evidence_graph_from_sink
+
+    client, opened = wired
+    run_id, approval_id = _craft_used_execution(
+        client, opened, tag=case[:6], **_BROKEN_GRAPHS[case]
+    )
+    view = load_evidence_graph_from_sink(
+        opened.evidence_sink, run_id=run_id, approval_id=approval_id
+    )
+    assert not view.usable, f"{case}: verifier accepted a broken graph"
+
+    finding = next(f for f in reconcile(opened.authority_store, opened.evidence_sink).findings
+                   if f.approval_id == approval_id)
+    assert finding.class_id != 4, f"{case}: reconciler called a broken graph complete"
+    assert finding.outcome != OUTCOME_CLEAN
+    # Authority was consumed, so the outcome is unknown and the run must be closed.
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+
+
+# --- Class 2 reservation-only graph sanity (Step 7B.2.1) ------------------------------
+
+def test_class_2_requires_a_genuinely_linked_reservation(tmp_path, wired):
+    """A reservation with a broken authorization edge is not a clean crash-after-reserve."""
+    from openclaw.evidence import load_execution_reservation_from_sink
+
+    client, opened = wired
+    run_id, approval_id = _craft_used_execution(
+        client, opened, tag="r2", patch_exec=lambda p: p.pop("approval_ref"),
+        apply=False, mark_used=False,
+    )
+    view = load_execution_reservation_from_sink(
+        opened.evidence_sink, run_id=run_id, approval_id=approval_id
+    )
+    assert not view.usable and "approval_ref" in view.reason
+
+    finding = next(f for f in reconcile(opened.authority_store, opened.evidence_sink).findings
+                   if f.approval_id == approval_id)
+    assert finding.class_id == 5           # not class 2: this is not a clean crash story
+    assert finding.outcome == OUTCOME_INVALIDATED
+    assert "not a valid signed reservation" in finding.reason
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+
+
+def test_class_2_accepts_a_fully_linked_reservation(tmp_path, wired):
+    from openclaw.evidence import load_execution_reservation_from_sink
+
+    client, opened = wired
+    run_id, approval_id = _craft_used_execution(
+        client, opened, tag="r2ok", apply=False, mark_used=False,
+    )
+    view = load_execution_reservation_from_sink(
+        opened.evidence_sink, run_id=run_id, approval_id=approval_id
+    )
+    assert view.usable, view.reason
+
+    finding = next(f for f in reconcile(opened.authority_store, opened.evidence_sink).findings
+                   if f.approval_id == approval_id)
+    assert (finding.class_id, finding.outcome) == (2, OUTCOME_INVALIDATED)
+
+
 # --- Class 5: evidence with no compatible authority projection ------------------------
 
 def test_class_5_orphan_evidence_never_creates_authority(tmp_path, wired):
@@ -343,8 +501,12 @@ def test_class_5_orphan_evidence_never_creates_authority(tmp_path, wired):
     assert any(r.envelope.approval_id == "appr-orphan" for r in opened.evidence_sink.records)
 
 
-def test_class_5_mismatched_run_binding_fails_closed(tmp_path, wired):
-    """Evidence claiming a different run than its authority approval is never reconciled."""
+def test_class_5_mismatched_run_binding_invalidates_the_extant_run(tmp_path, wired):
+    """Evidence claiming a different run than its authority approval is never reconciled.
+
+    Step 7B.2.1: reporting it is not enough — the extant authority run must be closed, or an
+    approval with incompatible execution evidence stays executable.
+    """
     client, opened = wired
     run_id, plan_hash = _plan(client)
     approval_id = _approve(client, run_id, plan_hash)
@@ -353,13 +515,19 @@ def test_class_5_mismatched_run_binding_fails_closed(tmp_path, wired):
 
     report = reconcile(opened.authority_store, opened.evidence_sink)
     finding = next(f for f in report.findings if f.approval_id == approval_id)
-    assert (finding.class_id, finding.outcome) == (5, OUTCOME_ATTENTION)
+    assert (finding.class_id, finding.outcome) == (5, OUTCOME_INVALIDATED)
     assert "run_id" in finding.reason
-    # Fail closed means: not silently treated as a clean class-1 approval.
+    # Fail closed means: not silently treated as a clean class-1 approval ...
     assert finding.outcome != OUTCOME_CLEAN
+    # ... and the run can never execute afterwards.
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+    refusal = _execute(client, run_id, approval_id)
+    assert refusal.get("applied") is not True
+    assert refusal.get("refused") is True
+    assert refusal.get("refusal_reason") == "invalidated"
 
 
-def test_class_5_apply_evidence_without_consumed_authority_fails_closed(tmp_path, wired):
+def test_class_5_apply_evidence_without_consumed_authority_invalidates_the_run(tmp_path, wired):
     client, opened = wired
     run_id, plan_hash = _plan(client)
     approval_id = _approve(client, run_id, plan_hash)
@@ -370,10 +538,99 @@ def test_class_5_apply_evidence_without_consumed_authority_fails_closed(tmp_path
 
     report = reconcile(opened.authority_store, opened.evidence_sink)
     finding = next(f for f in report.findings if f.approval_id == approval_id)
-    assert (finding.class_id, finding.outcome) == (5, OUTCOME_ATTENTION)
+    assert (finding.class_id, finding.outcome) == (5, OUTCOME_INVALIDATED)
     assert "cannot retroactively grant" in finding.reason
-    # The approval was never consumed by reconciliation — evidence grants nothing.
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+    # The approval was never *consumed* by reconciliation — evidence grants nothing. It is
+    # closed (invalidated), which is the opposite of being granted authority.
     assert opened.authority_store.get_approval(approval_id).used_at is None
+    assert opened.authority_store.get_approval(approval_id).approval_status is (
+        ApprovalStatus.INVALIDATED
+    )
+
+
+def test_class_5_evidence_against_pending_authority_invalidates_the_run(tmp_path, wired):
+    """PENDING never granted execution authority; execution evidence against it is dirty."""
+    client, opened = wired
+    body = client.post(
+        "/v1/orchestrate", headers=HERMES, json={"objective": _OBJ, "phase": "plan"}
+    ).get_json()
+    run_id = body["run_id"]
+    pending = opened.authority_store.create_pending_approval(run_id)
+    assert pending.approval_status is ApprovalStatus.PENDING
+    _append(opened.evidence_sink, record_type="execute_validated", run_id=run_id,
+            approval_id=pending.approval_id, nonce="n-pending")
+
+    report = reconcile(opened.authority_store, opened.evidence_sink)
+    finding = next(f for f in report.findings if f.approval_id == pending.approval_id)
+    assert (finding.class_id, finding.outcome) == (5, OUTCOME_INVALIDATED)
+    assert "pending" in finding.reason
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+
+
+def test_class_5_evidence_against_rejected_authority_invalidates_the_run(tmp_path, wired):
+    client, opened = wired
+    run_id, plan_hash = _plan(client)
+    rejected = client.post(
+        "/v1/approvals", headers={"Authorization": f"Bearer {_OWNER_TOKEN}"},
+        json={"run_id": run_id, "canonical_plan_hash": plan_hash,
+              "decision": "reject", "reason": "not this one"},
+    ).get_json()["approval_id"]
+    assert opened.authority_store.get_approval(rejected).approval_status is (
+        ApprovalStatus.REJECTED
+    )
+    _append(opened.evidence_sink, record_type="execute_validated", run_id=run_id,
+            approval_id=rejected, nonce="n-rejected")
+
+    report = reconcile(opened.authority_store, opened.evidence_sink)
+    finding = next(f for f in report.findings if f.approval_id == rejected)
+    assert (finding.class_id, finding.outcome) == (5, OUTCOME_INVALIDATED)
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+
+
+def test_class_5_orphan_approval_naming_an_extant_run_closes_that_run(tmp_path, wired):
+    """Explicitly handled: the evidence names an approval we never issued, for a real run.
+
+    The run id is acted on only because the authority store already holds it — an arbitrary
+    identifier supplied by evidence still mutates nothing (see the orphan test above).
+    """
+    client, opened = wired
+    run_id, plan_hash = _plan(client)
+    _approve(client, run_id, plan_hash)
+    _append(opened.evidence_sink, record_type="execute_validated", run_id=run_id,
+            approval_id="appr-never-issued", nonce="n-forged")
+
+    report = reconcile(opened.authority_store, opened.evidence_sink)
+    finding = next(f for f in report.findings if f.approval_id == "appr-never-issued")
+    assert (finding.class_id, finding.outcome) == (5, OUTCOME_INVALIDATED)
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+    # Still no authority synthesized for the approval the evidence invented.
+    assert opened.authority_store.get_approval("appr-never-issued") is None
+
+
+def test_class_5_repair_is_idempotent_across_repeated_restarts(tmp_path, wired):
+    client, opened = wired
+    run_id, plan_hash = _plan(client)
+    approval_id = _approve(client, run_id, plan_hash)
+    for i in (1, 2):
+        _append(opened.evidence_sink, record_type="execute_validated", run_id=run_id,
+                approval_id=approval_id, nonce=f"n-idem-{i}")
+    opened.close()
+
+    first = _open(tmp_path)
+    baseline = _types(first.evidence_sink)
+    assert first.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+    first.close()
+    for _ in range(2):
+        again = _open(tmp_path)
+        try:
+            assert again.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
+            assert _types(again.evidence_sink) == baseline      # nothing added or removed
+            report = reconcile(again.authority_store, again.evidence_sink)
+            assert report.invalidated == ()                     # already resolved
+            again.evidence_sink.verify_chain()
+        finally:
+            again.close()
 
 
 # --- Class 6: authority consumed with no reservation ----------------------------------
@@ -451,13 +708,15 @@ def test_duplicate_reservations_fail_closed_and_are_never_normalized(tmp_path, w
 
     report = reconcile(opened.authority_store, opened.evidence_sink)
     finding = next(f for f in report.findings if f.approval_id == approval_id)
-    assert (finding.class_id, finding.outcome) == (5, OUTCOME_ATTENTION)
+    assert (finding.class_id, finding.outcome) == (5, OUTCOME_INVALIDATED)
     assert "ambiguous" in finding.reason
     # Not resolved by picking one, and both records are still present.
     reservations = [r for r in opened.evidence_sink.records
                     if r.envelope.record_type == "execute_validated"
                     and r.envelope.approval_id == approval_id]
     assert len(reservations) == 2
+    # Step 7B.2.1: the ambiguity also closes the extant run rather than only reporting it.
+    assert opened.authority_store.get_run(run_id).status is RunStatus.INVALIDATED
 
 
 def test_multiple_apply_results_are_not_treated_as_complete(tmp_path, monkeypatch, wired):

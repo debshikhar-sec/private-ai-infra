@@ -125,7 +125,49 @@ All notable changes to this project are documented here. Format based on
   added to both authority stores; no raw SQL or connection is exposed to the reconciler.
   No schema change, no new run/approval states, and no persisted findings.
 
+- **Verifier-owned signed-graph reader** (`agents/openclaw/evidence.py`) — `SinkGraphReader`
+  verifies a sink's chain once and then answers many signed-graph questions about it, and
+  `load_execution_reservation_from_sink(...)` / `ReservationView` expose the reservation-only
+  walk `execute_validated → approval_decided` for callers that must judge a reservation
+  before (or without) an `apply_result`. `load_evidence_graph_from_sink` keeps its exact
+  previous contract as a thin wrapper. Both walks now share a single definition of the
+  authorization edge, so there is one place where "a valid authorization edge" is decided.
+
 ### Fixed
+- **Reconciliation hardening (Step 7B.2.1)** — two correctness gaps found by independent
+  post-merge review of Step 7B.2.
+  - *Class 5 reported but never acted.* `reconcile` mutates authority only for
+    `invalidated` findings, and several class-5 conditions emitted `attention_required` —
+    so an approval whose execution evidence was incompatible (mismatched `run_id`),
+    ambiguous (more than one `execute_validated`), unauthorized (evidence against a
+    PENDING/REJECTED/EXPIRED approval) or inconsistent (an `apply_result` while authority
+    was never consumed) could leave its run **open and still executable**. A class-5
+    inconsistency that ties to an **extant authority run** now invalidates that run; only a
+    truly orphaned evidence fact — whose `run_id` the authority store does not hold — stays
+    attention-only. The run id is acted on solely when the authority store already contains
+    it, so evidence still can neither create authority nor select an unrelated run to close.
+  - *Class 4 relied on a weaker parallel check.* Completion was established from
+    `apply_result → execute_validated` alone, never `execute_validated → approval_decided`,
+    the referenced decision being `approve`, canonical-plan-hash agreement, or
+    `approval_decided` uniqueness. Class 4 is now exactly **USED authority + OpenClaw's own
+    `load_evidence_graph_from_sink(...).usable`**; anything short of the full signed graph is
+    class 3 (invalidate, outcome unknown, never retried). Class 2 is gated the same way on
+    the reservation's own authorization edge, so malformed execution evidence is no longer
+    reported as a clean crash-after-reservation. No schema migration, no new authority state,
+    and no new evidence record type.
+
+- **Pre-existing concurrency-test flake (test-harness only)** — the Step 7B.1 reservation
+  contention tests staged their race behind a `threading.Barrier` and then read the **wall
+  clock** to evaluate approval expiry. Any real-time disturbance inside that coordination
+  window longer than the approval's 300-second lifetime therefore made *both* threads refuse
+  `expired` and reserve nothing — on the development host, macOS "Maintenance Sleep"
+  suspends for up to an hour and produced exactly that signature. The race under test is
+  about lock ordering, not elapsed time, so the evaluation instant is now pinned before the
+  coordination and injected through the store's existing `now=` parameter, and the barrier
+  timeout drops from 10s to 2s (with the critical section in place the barrier can only ever
+  time out, since the loser is blocked on the lock and never arrives). Expiry behaviour,
+  the production TTL, and every assertion are unchanged; the two tests also stop costing 20
+  seconds of suite time.
 - **Denial accounting gap** — `POST /v1/approvals` recorded a 403 `owner_required` decision
   in the audit without incrementing `gateway_authz_denials_total`. Because OpenClaw's
   `AC-METRICS-RECONCILE` control treats an audited 403 denial with no matching counter as a
@@ -144,7 +186,7 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **869** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **885** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation and reconciliation increments;
   the full suite runs on Linux and macOS in CI.
 

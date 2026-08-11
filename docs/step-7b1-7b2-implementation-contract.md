@@ -229,9 +229,9 @@ Classes:
 |-------|-----------------|----------------|------------|
 | 1 | APPROVED | no reservation | no-op (clean) |
 | 2 | APPROVED | reservation present | **invalidate** — the mutation provably never started (this *is* the 7B.1 C2 rule, subsumed here) |
-| 3 | USED | reservation present, no `apply_result` | dirty run: invalidate (`RunStatus.INVALIDATED`), surface disposition, fail closed |
-| 4 | USED | full chain (reservation + `apply_result`) | complete (clean) |
-| 5 | no matching approval | evidence records exist | fail closed: surface for human disposition — evidence never regrants authority |
+| 3 | USED | no **usable full signed graph** | dirty run: invalidate (`RunStatus.INVALIDATED`), surface disposition, fail closed |
+| 4 | USED | full signed graph resolves (7B.2.1) | complete (clean) |
+| 5 | evidence incompatible with the authority projection | evidence records exist | fail closed: **invalidate the extant authority run** if the inconsistency ties to one (7B.2.1); attention-only when nothing extant — evidence never regrants *or selects* authority |
 | 6 | USED | no reservation | pre-7B.1 legacy or tampering: fail closed, human disposition |
 
 ### Binding decisions
@@ -282,6 +282,82 @@ Classes:
 neutralizing the linkage check makes class 3 collapse into class 4 (4 tests fail);
 resolving ambiguity by picking the first reservation fails the duplicate test; and
 returning an empty index on an unreadable chain fails the unreadable-input test.
+
+---
+
+## Part II-A — Step 7B.2.1: reconciliation hardening · **SHIPPED**
+
+Independent post-merge review found two ratified correctness defects in the 7B.2 pass. Both
+are closed; the rows above already reflect the corrected semantics.
+
+**Defect 1 — class 5 reported but never acted.** `reconcile` mutates authority only for
+`OUTCOME_INVALIDATED`, and several class-5 conditions emitted `OUTCOME_ATTENTION`. An
+approval whose execution evidence was incompatible (mismatched `run_id`), ambiguous (>1
+`execute_validated`), unauthorized (evidence against PENDING/REJECTED/EXPIRED), or
+inconsistent (an `apply_result` while authority was never consumed) could therefore leave its
+run **OPEN and executable**. Not sufficiently fail-closed.
+
+*Rule now:* a class-5 inconsistency that can be safely tied to an **extant authority run**
+invalidates that run (`_class_5`). Only a truly orphaned evidence fact — one whose `run_id`
+the authority store does not hold — stays `attention_required` with no mutation. The run id
+is acted on **only** when the authority store already contains it, so an evidence-supplied
+identifier can neither synthesize a run nor cause an unrelated one to be closed; an orphan
+approval naming a real extant run *is* handled and tested explicitly. Evidence is never
+deleted, never repaired, and ambiguity is still never resolved by picking a record.
+
+**Defect 2 — class 4 used a weaker parallel notion of "complete".** The gateway-side helper
+validated only `apply_result → execute_validated`. It never established
+`execute_validated → approval_decided`, the referenced decision being `approve`, canonical
+plan hash agreement, or `approval_decided` uniqueness — all of which OpenClaw's own
+`load_evidence_graph_from_sink` already verifies.
+
+*Rule now:* **class 4 ⇔ USED authority + `load_evidence_graph_from_sink(...).usable`.**
+Anything short of the full graph is class 3 — invalidate, outcome unknown, never retried.
+The gateway keeps no second definition of "complete".
+
+**Reservation-only graph sanity (class 2).** A reservation only proves *crash-after-reserve*
+if it is genuinely Gateway-authored and correctly linked to its `approval_decided`. Class 2
+is therefore gated on `load_execution_reservation_from_sink(...).usable`; a reservation with
+a broken authorization edge is class 5 (invalidate the extant run) rather than a clean crash
+story. Both run through one small verifier-owned addition — `SinkGraphReader`, which verifies
+the chain once and shares the single definition of the authorization edge between both walks
+— so no second graph framework exists and OpenClaw still imports nothing from the gateway.
+
+### Falsification (7B.2.1)
+
+| Guarantee | Bypass applied | Result |
+|---|---|---|
+| Class 4 = full signed graph | `view.usable` → `view.linkage_present` | 7 of the 9 broken-graph cases fail |
+| Class 5 acts on an extant run | `_class_5` never resolves a run | 9 tests fail |
+| Class 2 needs a linked reservation | reservation view unchecked | `test_class_2_requires_a_genuinely_linked_reservation` fails |
+
+(The two broken-graph cases that survive bypass 1 — a reservation bound to the wrong
+`run_id` or `approval_id` — are already caught earlier by the class-5 binding checks, so
+class 4 remains impossible for them by a different route.)
+
+No schema migration, no new authority state, and no new evidence record type were needed.
+
+### A pre-existing test-harness flake, fixed alongside (not a production defect)
+
+The 7B.1 contention tests staged their race behind a `threading.Barrier` and then evaluated
+approval expiry against the **wall clock**. Any real-time disturbance inside that
+coordination window exceeding the approval's 300-second lifetime made *both* threads refuse
+`expired` with zero reservations. The development host's macOS "Maintenance Sleep" suspends
+for up to an hour, which is exactly such a disturbance.
+
+Proven, not assumed: injecting a +3600s clock advance at the same point reproduces
+`reasons=['expired','expired'] applied=0 reservations=0` — the observed signature — while
+the unmodified control yields `['None','replay'] applied=1 reservations=1`. The failure also
+reproduces on pristine `5fd3f61` with the Step 7B.2.1 changes stashed, so it predates this
+work.
+
+**Production behaviour is correct**: an approval whose lifetime genuinely elapsed *must* be
+refused. The defect is that a test about *lock ordering* depended on real time. The fix pins
+the evaluation instant before the coordination and injects it through the store's existing
+`now=` parameter, and shortens the barrier timeout from 10s to 2s (with the critical section
+in place the barrier can only ever time out, because the loser is blocked on the lock and
+never arrives). The production TTL is unchanged, expiry behaviour is unchanged, and no
+assertion was weakened.
 
 ### Explicit 7C exclusion (both steps)
 

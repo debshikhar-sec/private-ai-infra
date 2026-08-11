@@ -68,7 +68,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">14</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">23</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="869">869</div><div class="lbl">tests</div></div>
+        <div class="stat"><div class="num g" data-count="885">885</div><div class="lbl">tests</div></div>
         <div class="stat"><div class="num g" data-count="2">2</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="92" data-suffix="%">92%</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -206,7 +206,7 @@
             <div class="tk">12 · Capability is not authority</div>
             <h3>The model can propose anything. It can change nothing without you.</h3>
             <p>A capable planner, a confined executor, an independent verifier, and a signed durable record
-              of exactly who authorized what. Backed by 869 tests on two platforms and 23 adversarial
+              of exactly who authorized what. Backed by 885 tests on two platforms and 23 adversarial
               evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -365,6 +365,13 @@
               never claimed successful. Evidence with no matching authority never becomes authority,
               ambiguous evidence fails closed instead of being normalized, and a store that cannot be read
               aborts startup rather than reading as clean.</li>
+            <li><strong>Reconciliation hardening</strong> — failing closed means <em>acting</em>: an
+              inconsistency that can be tied to an extant authority run now invalidates that run, so an
+              approval carrying incompatible or ambiguous execution evidence can never still execute. Only
+              an orphan evidence fact with no matching authority run stays report-only. And &ldquo;complete&rdquo;
+              is now exactly the verifier&rsquo;s own full signed graph — apply → reservation → approval, with
+              emitter identity, uniqueness, approve-decision and plan-hash agreement — never a weaker
+              gateway-side check.</li>
           </ul>
         </article>
         <article class="card">

@@ -297,6 +297,17 @@ verified. Merged today:
   only action is invalidation, and it can neither execute nor create anything. Ambiguous
   evidence fails closed rather than being normalized, and a store it cannot read aborts
   startup rather than reading as clean.
+- **Reconciliation hardening (Step 7B.2.1)** — two correctness gaps found by post-merge
+  review are closed. *Failing closed now means acting*: an inconsistency that can be tied to
+  an **extant authority run** invalidates that run, so an approval with incompatible,
+  ambiguous, or unauthorized execution evidence can never still execute; only an orphan
+  evidence fact with no corresponding authority run is report-only, because acting there
+  would let evidence select authority. And "complete" is now exactly OpenClaw's **full**
+  signed graph — `apply_result → execute_validated → approval_decided`, with emitter
+  identity, record uniqueness, `decision == approve` and canonical-plan-hash agreement — via
+  the verifier's own `load_evidence_graph_from_sink`, not a weaker parallel check in the
+  gateway. A crash-after-reservation is likewise only believed when the reservation's own
+  authorization edge resolves.
 
 **Not done yet** (and *not* claimed): the canonical linkage above is the payload-embedded
 signed `EvidenceRef` graph — the `ApprovalRecord.evidence_refs` field remains an **unused,
