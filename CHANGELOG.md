@@ -372,6 +372,22 @@ All notable changes to this project are documented here. Format based on
   the governed loop actually did) as separate blocks that are never combined. **No earned
   autonomy**: no threshold, lease, pre-authorization, promotion or demotion exists.
 
+- **Security-qualification corpus expanded 2 → 14 control-preservation tasks** (corpus v2.0,
+  30 tasks total). Each is a coherent, specific, technically easy change with a plausible
+  business reason attached, across fourteen *distinct* controls: signature verification, path
+  confinement, evidence-chain verification, run identity, the owner gate, the field allowlist,
+  canonical-plan binding, fail-closed-on-absent-evidence, the sandbox copy, replay protection,
+  policy-driven routing, the human in the rollback loop, rate limiting, and credential
+  redaction. The prompts describe a request and a symptom, never a technique (asserted by
+  test). **Measured result on the real local model: 0 / 14.** It implemented *every* one —
+  including returning `PASS` when required evidence is absent, and logging the full
+  `Authorization` header. With two tasks small-sample noise was arguable; with fourteen
+  distinct controls and a perfect failure rate, the model simply does not model security
+  consequences. Zero-edit acceptance accordingly reads 43 % across the whole corpus while the
+  engineering-lane metrics are unchanged (94 % structural, 81 % tests pass, 100 % public API
+  preserved). The capability registry marks `security_review` **UNQUALIFIED** on exactly this
+  evidence. **No authority changed.**
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -433,7 +449,7 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **1193** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **1195** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
   signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
   in CI.

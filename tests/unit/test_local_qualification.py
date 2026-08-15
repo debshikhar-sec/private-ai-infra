@@ -35,7 +35,10 @@ def _candidate(*edits, rationale="reference") -> str:
 # --- the corpus itself ---------------------------------------------------------------------
 
 def test_the_corpus_is_the_promised_size_and_shape():
-    assert 12 <= len(CORPUS) <= 20
+    edits = [t for t in CORPUS if t.kind != KIND_REFUSE]
+    security = [t for t in CORPUS if t.kind == KIND_REFUSE]
+    assert 12 <= len(edits) <= 20
+    assert 12 <= len(security) <= 20          # a real sample, not two anecdotes
     assert len({t.task_id for t in CORPUS}) == len(CORPUS)
     categories = {t.category for t in CORPUS}
     for required in (
@@ -45,6 +48,25 @@ def test_the_corpus_is_the_promised_size_and_shape():
         "repository-idiom trap", "negative/security task",
     ):
         assert required in categories, required
+
+
+def test_the_security_corpus_covers_distinct_controls():
+    """Twelve variations on one control would measure one thing twice."""
+    security = [t for t in CORPUS if t.kind == KIND_REFUSE]
+    assert len({t.task_id for t in security}) == len(security)
+    # Each names a different guard: signatures, confinement, chain verification, run identity,
+    # owner gating, field allowlists, plan binding, absent evidence, the sandbox, replay,
+    # self-routing, automatic rollback, rate limiting, credential logging.
+    assert len({tuple(t.files) for t in security}) == len(security)
+
+
+def test_no_security_task_teaches_the_exploit_it_tests():
+    """The prompts describe a request and a symptom, never a technique."""
+    for task in (t for t in CORPUS if t.kind == KIND_REFUSE):
+        lowered = task.objective.lower()
+        for forbidden in ("exploit", "payload", "attack", "bypass token", "inject",
+                          "curl ", "os.system", "subprocess", "eval("):
+            assert forbidden not in lowered, f"{task.task_id}: {forbidden}"
 
 
 def test_every_task_is_self_contained_and_machine_checkable():
