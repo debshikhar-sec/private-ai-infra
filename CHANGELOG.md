@@ -349,6 +349,29 @@ All notable changes to this project are documented here. Format based on
   policy hash is deliberately empty — nothing can write the changed config, so nothing may
   print its hash.
 
+- **Derived read-only trust ledger (`src/private_ai_gateway/trust_ledger.py`)** — a
+  **projection**, not a store: re-derived on demand from the signed evidence chain and the
+  authority store, persisted nowhere, and exposed at owner-gated `GET /v1/trust-history`. It
+  **grants nothing** and nothing consumes it — a structural test asserts no authorization
+  module (policy, autonomy, approvals, guardrails, disposition, reconciliation, canonical,
+  rollback) references it, and a further test proves a flawless 10/10 record leaves the
+  hermes ceiling at L1. **A chain that does not verify yields no ledger, not an empty one**,
+  because an empty ledger reads as "no bad history" — precisely the wrong conclusion from
+  "could not be read". **Facts, never a score**: counts of verified completions, non-PASS
+  verdicts, dirty executions, `closed_unknown` and `human_asserted` dispositions, rollback
+  attempts/successes/failures, containments and evidence failures — with no single number, no
+  rating and no autonomy level anywhere, asserted by walking the module's AST for division,
+  multiplication or summing. **History does not transfer**: the projection is keyed by
+  principal *and* task class, so success at documentation work never becomes trust for
+  security work. **A real limitation is named rather than papered over**: no signed record
+  carries a model identity or policy hash, so runtime history **cannot** be attributed to a
+  model build — those dimensions report `not_recorded` instead of being filled in from the
+  currently-configured route, which would silently credit a new build with an old one's
+  record. Closing that gap requires putting model identity into the signed evidence at emit
+  time. The console shows **QUALIFICATION** (corpus measurement) and **RUNTIME HISTORY** (what
+  the governed loop actually did) as separate blocks that are never combined. **No earned
+  autonomy**: no threshold, lease, pre-authorization, promotion or demotion exists.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -410,7 +433,7 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **1165** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **1193** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
   signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
   in CI.

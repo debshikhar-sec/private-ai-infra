@@ -931,6 +931,40 @@ def v1_models_routing():
     }), 200
 
 
+@app.route("/v1/trust-history", methods=["GET"])
+def v1_trust_history():
+    """Derived trust history, owner-gated and read-only. It grants nothing.
+
+    Two blocks that are never combined: **QUALIFICATION** (how a model did on a corpus we
+    built) and **RUNTIME HISTORY** (what the governed loop actually did). Presenting corpus
+    results as production history would be the most flattering possible lie.
+
+    An unverifiable evidence chain yields **no ledger** rather than an empty one — an empty
+    ledger reads as "no bad history", which is the opposite of what "could not be read" means.
+    """
+    from private_ai_gateway import trust_ledger as tl
+
+    denied = _owner_only("Trust history")
+    if denied is not None:
+        return denied
+
+    ledger = None
+    error = ""
+    try:
+        ledger = tl.derive_ledger(APPROVAL_STORE, EVIDENCE_SINK)
+    except tl.TrustLedgerError as exc:
+        error = str(exc)
+        logger.warning(f"TRUST_LEDGER_UNAVAILABLE | detail={log_safe(error)}")
+
+    view = tl.build_view(_capability_registry(), ledger)
+    return jsonify({
+        **view.to_mapping(),
+        "ledger": ledger.to_mapping() if ledger is not None else None,
+        "ledger_error": error,
+        "grants": "nothing",
+    }), 200
+
+
 @app.route("/v1/models/route-proposal", methods=["POST"])
 def v1_models_route_proposal():
     """Compute a route-change **proposal**. Nothing is applied, ever, on this path.
