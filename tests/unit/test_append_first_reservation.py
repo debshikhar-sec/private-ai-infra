@@ -212,8 +212,10 @@ def test_full_chain_and_shape_after_successful_execute(wired):
     approval_id = _approve(client, run_id, plan_hash)
     out = _execute(client, run_id, approval_id)
     assert out["applied"] is True
+    # `candidate_attributed` leads the chain: the model that produced the candidate is
+    # recorded when it produces it, which is necessarily before anyone approves it.
     assert _types(opened.evidence_sink) == [
-        "approval_decided", "execute_validated", "apply_result",
+        "candidate_attributed", "approval_decided", "execute_validated", "apply_result",
     ]
     opened.evidence_sink.verify_chain()
 
@@ -388,7 +390,7 @@ def test_c4_shape_is_used_plus_complete_chain(tmp_path, wired):
             ApprovalStatus.USED
         )
         assert _types(reopened.evidence_sink) == [
-            "approval_decided", "execute_validated", "apply_result",
+            "candidate_attributed", "approval_decided", "execute_validated", "apply_result",
         ]
         # A complete run is class 4 — left alone by reconciliation.
         assert reopened.authority_store.get_run(run_id).status is not RunStatus.INVALIDATED

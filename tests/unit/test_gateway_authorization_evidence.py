@@ -27,6 +27,18 @@ _OWNER_TOKEN = "test-owner-break-glass-token"
 _TEST_KEY = b"0123456789abcdef0123456789abcdef"
 _TEST_KEY_ID = "gw-test-1"
 
+#: The exact payload contract for ``execute_validated``. Pinned as a set so a new field is a
+#: deliberate edit here rather than something that slips into signed evidence unnoticed.
+#: ``attribution``/``attribution_recorded`` name the model that generated the candidate; both
+#: are server-derived and carry no secret, prompt, or free text.
+_EXECUTE_VALIDATED_KEYS = {
+    "canonical_plan_hash",
+    "validated",
+    "approval_ref",
+    "attribution",
+    "attribution_recorded",
+}
+
 
 # --- harness (mirrors tests/unit/test_orchestration_chat.py; kept self-contained) -------
 @pytest.fixture
@@ -203,7 +215,7 @@ def test_payload_has_no_secrets_or_tokens(client, owner_token, monkeypatch):
     # Exactly the authorization-fact fields plus the signed approval link (Step 6B) — no
     # tokens, prompts, bodies, or plan text. The approval_ref is a portable EvidenceRef, which
     # itself carries only identity/digest/type/locator — never secrets.
-    assert set(payload.keys()) == {"canonical_plan_hash", "validated", "approval_ref"}
+    assert set(payload.keys()) == _EXECUTE_VALIDATED_KEYS
     assert set(payload["approval_ref"].keys()) == {
         "evidence_id", "evidence_digest", "record_type", "sink_id"
     }
@@ -357,13 +369,16 @@ def test_no_evidence_refs_populated_yet(client, owner_token, monkeypatch):
 def test_execute_emits_single_execute_validated_alongside_approval_decided(
     client, owner_token, monkeypatch
 ):
-    # Since Step 5b the approve also emits an `approval_decided` record into the same sink.
-    # The Step 5 guarantee is unchanged: the execute step emits exactly one `execute_validated`.
+    # Since Step 5b the approve also emits an `approval_decided` record into the same sink,
+    # and the plan phase now emits a `candidate_attributed` record naming the model that
+    # produced the candidate. The Step 5 guarantee is unchanged: the execute step emits
+    # exactly one `execute_validated`.
     sink = _install_sink(monkeypatch)
     run_id, plan_hash = _plan_and_hash(client)
     _execute(client, run_id, _approve(client, run_id, plan_hash))
     types = {r.envelope.record_type for r in sink.records}
-    assert types == {"approval_decided", "execute_validated"}
+    assert types == {"candidate_attributed", "approval_decided", "execute_validated"}
+    assert len(_gateway_records(sink)) == 1
     assert len(_gateway_records(sink)) == 1  # exactly one execute_validated
 
 
@@ -419,4 +434,4 @@ def test_execute_validated_record_is_v2_with_evidence_id(client, owner_token, mo
     assert re.match(r"^ev-[0-9a-f]{32}$", rec.envelope.evidence_id)
     # Stable EvidenceRef derivable; payload is the Step 6B contract (adds approval_ref).
     assert rec.evidence_ref().record_type == "execute_validated"
-    assert set(rec.payload.keys()) == {"canonical_plan_hash", "validated", "approval_ref"}
+    assert set(rec.payload.keys()) == _EXECUTE_VALIDATED_KEYS

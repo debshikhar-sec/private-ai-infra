@@ -18,14 +18,18 @@ Three rules shape it, and each exists because the obvious alternative is a trap.
     become trust for security work, so the projection is keyed by principal *and* task class,
     never by principal alone.
 
-**What this cannot do yet, stated plainly.** The signed records carry no model identity and no
-policy hash: ``approval_decided`` holds a decision and a canonical plan hash,
-``apply_result`` holds an outcome, and nothing anywhere names *which model build served the
-run*. So runtime history **cannot** be attributed to a model fingerprint today, and this module
-refuses to guess — :data:`NOT_RECORDED` is carried explicitly in those dimensions rather than
-being filled in from the currently-configured route, which would silently credit a new build
-with an old one's record. Closing that gap means putting the model identity into the signed
-evidence at emit time, and that is a change to the evidence schema, not to this file.
+**Model attribution, and its limit.** Runs recorded since
+:mod:`private_ai_gateway.attribution` shipped carry a signed ``candidate_attributed`` record
+naming the model build that produced the candidate and the policy hash in force at the time.
+Those runs are keyed by fingerprint and policy hash, so history genuinely belongs to a build.
+
+Runs from before that — and runs on a deployment with no evidence sink — carry no such record,
+and this module refuses to guess: :data:`NOT_RECORDED` is carried explicitly rather than filled
+in from the currently-configured route, which would silently credit a new build with an old
+one's record. Attribution is read back from what was signed at generation time and is never
+recomputed from the live route map, so re-pointing an alias cannot move history onto a model
+that never ran. Each entry reports exactly which of its own dimensions are unattributable, so
+"we did not record this" never reads as "this model has no history".
 
 **The authority firewall.** Nothing in the authorization path may consume any of this. Not the
 policy decision point, not the autonomy ceiling, not approval validation, not skill or tool
@@ -87,11 +91,20 @@ class TrustFacts:
 
 @dataclass(frozen=True)
 class TrustEntry:
-    """One key and its facts, plus which dimensions could not be attributed."""
+    """One key and its facts, plus which of *this entry's* dimensions were never recorded."""
 
     key: TrustKey
     facts: TrustFacts
     unattributable: tuple[str, ...] = UNATTRIBUTABLE_DIMENSIONS
+
+    @staticmethod
+    def unattributable_for(key: TrustKey) -> tuple[str, ...]:
+        """Report only the dimensions this key actually lacks — never a blanket disclaimer."""
+        return tuple(
+            dim
+            for dim in UNATTRIBUTABLE_DIMENSIONS
+            if getattr(key, dim, NOT_RECORDED) == NOT_RECORDED
+        )
 
     def to_mapping(self) -> dict:
         return {
@@ -122,9 +135,9 @@ class TrustLedger:
 _NOTES = (
     "Runtime history only. Qualification-corpus results are a separate measurement and are "
     "never counted here.",
-    "No signed record carries a model identity or policy hash, so runtime history cannot be "
-    "attributed to a model build. Those dimensions are reported as not_recorded rather than "
-    "inferred from the currently-configured route.",
+    "Model attribution is read back from the signed candidate_attributed record written when "
+    "the candidate was generated — never recomputed from the current route map. Runs with no "
+    "such record report not_recorded rather than being credited to whatever is routed now.",
     "Facts only — deliberately no trust score and no autonomy level.",
 )
 
@@ -137,6 +150,7 @@ def derive_ledger(authority_store, evidence_sink) -> TrustLedger:
     """
     from openclaw.evidence import SinkGraphReader
 
+    from private_ai_gateway.attribution import CANDIDATE_ATTRIBUTED_RECORD_TYPE
     from private_ai_gateway.disposition import (
         DISPOSITION_CLOSED_UNKNOWN,
         RUN_DISPOSITION_RECORD_TYPE,
@@ -156,6 +170,24 @@ def derive_ledger(authority_store, evidence_sink) -> TrustLedger:
     except Exception as exc:  # noqa: BLE001 — unreadable authority is not clean authority
         raise TrustLedgerError(f"the authority store could not be read: {exc}") from exc
 
+    # Attribution recorded at generation time, keyed by run. Read back from the signed chain,
+    # never recomputed from the live route map — see the module docstring.
+    attributed: dict[str, tuple[str, str]] = {}
+    for rec in reader.records:
+        if rec.envelope.record_type != CANDIDATE_ATTRIBUTED_RECORD_TYPE:
+            continue
+        payload = rec.payload if isinstance(rec.payload, dict) else {}
+        fingerprint = payload.get("model_fingerprint") or ""
+        if not fingerprint or rec.envelope.run_id in attributed:
+            # Two attribution records for one run means the generation point ran twice and
+            # neither can be preferred; fall back to unattributed rather than pick.
+            attributed[rec.envelope.run_id] = (NOT_RECORDED, NOT_RECORDED)
+            continue
+        attributed[rec.envelope.run_id] = (
+            fingerprint,
+            payload.get("policy_hash") or NOT_RECORDED,
+        )
+
     runs = {}
     for appr in approvals:
         run = authority_store.get_run(appr.run_id)
@@ -166,19 +198,27 @@ def derive_ledger(authority_store, evidence_sink) -> TrustLedger:
 
     cells: dict[TrustKey, TrustFacts] = {}
 
+    def key_for(appr, principal: str) -> TrustKey:
+        fingerprint, policy_hash = attributed.get(
+            appr.run_id, (NOT_RECORDED, NOT_RECORDED)
+        )
+        return TrustKey(
+            principal=principal,
+            task_class=appr.task_class or "unclassified",
+            model_fingerprint=fingerprint,
+            policy_hash=policy_hash,
+        )
+
     def facts_for(approval_id: str) -> TrustFacts | None:
         entry = runs.get(approval_id)
         if entry is None:
             return None
-        appr, principal = entry
-        key = TrustKey(principal=principal, task_class=appr.task_class or "unclassified")
-        return cells.setdefault(key, TrustFacts())
+        return cells.setdefault(key_for(*entry), TrustFacts())
 
     # One pass per approval for the shape of its history, then one pass over the records for
     # the outcomes. Both read the same verified snapshot.
     for appr, principal in runs.values():
-        key = TrustKey(principal=principal, task_class=appr.task_class or "unclassified")
-        cells.setdefault(key, TrustFacts()).runs += 1
+        cells.setdefault(key_for(appr, principal), TrustFacts()).runs += 1
 
     for rec in reader.records:
         env = rec.envelope
@@ -212,9 +252,10 @@ def derive_ledger(authority_store, evidence_sink) -> TrustLedger:
                 facts.contained += 1
 
     entries = tuple(
-        TrustEntry(key=key, facts=facts)
+        TrustEntry(key=key, facts=facts, unattributable=TrustEntry.unattributable_for(key))
         for key, facts in sorted(
-            cells.items(), key=lambda kv: (kv[0].principal, kv[0].task_class)
+            cells.items(),
+            key=lambda kv: (kv[0].principal, kv[0].task_class, kv[0].model_fingerprint),
         )
     )
     return TrustLedger(

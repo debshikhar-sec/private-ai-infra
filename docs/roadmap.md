@@ -240,10 +240,15 @@ recorded in
   behind an owner-gated read-only endpoint. Capability informs routing; it never informs
   authority, and a structural test keeps it that way.
 - **Trust ledger** — *shipped read-only, grants nothing.* A derived projection over the
-  signed chain: facts by principal and task class, no score, no threshold, nothing consuming
-  it. A chain that does not verify yields no ledger rather than an empty one. **Blocked
-  dimension:** no signed record names the model that served a run, so runtime history cannot
-  be attributed to a model build — that is the concrete prerequisite for model-aware trust.
+  signed chain: facts by principal, task class, model build and policy hash — no score, no
+  threshold, nothing consuming it. A chain that does not verify yields no ledger rather than
+  an empty one.
+- **Signed model attribution** — *shipped.* The plan phase appends a signed
+  `candidate_attributed` record naming the model build (fingerprint, not alias), the policy
+  hash and a digest of the candidate. `execute_validated` carries that attribution **read
+  back from the record**, never recomputed from the live route map — so re-pointing an alias
+  between plan and execute cannot re-credit a run to a build that never saw it. Runs with no
+  such record stay `model_not_recorded` rather than being backfilled.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.
 - **Hermes local training / eval-trace capture** — *future.* No training pipeline exists

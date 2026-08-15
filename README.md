@@ -585,9 +585,11 @@ docs/                     # architecture, security & threat model, orchestration
   Durable, exclusively-owned stores, startup cross-store reconciliation, terminal human
   disposition, sandbox pre-image capture with governed rollback, and a read-only derived
   trust history are all **shipped**. `ApprovalRecord.evidence_refs` population and **earned
-  autonomy** remain **future**, and no signed record yet names the model that served a run,
-  so runtime history cannot be attributed to a model build. This is a governed,
-  human-in-authority system — **not** fully autonomous.
+  autonomy** remains **future**. Runtime history is now attributed to a **model build**: the
+  plan phase signs which model produced the candidate, and execution evidence carries that
+  recorded attribution rather than re-reading the route map, so a route change cannot move a
+  run's history onto a model that never saw it. This is a governed, human-in-authority
+  system — **not** fully autonomous.
 
 ## License
 

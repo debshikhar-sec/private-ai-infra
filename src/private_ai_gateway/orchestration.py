@@ -204,6 +204,50 @@ def _register_plan_run(gw, run_id: str, objective: str, result: dict) -> None:
     )
     result["canonical_plan_hash"] = digest
     result["canonical_plan"] = plan.mapping
+    _emit_candidate_attributed(gw, run_id=run_id, proposal=proposal)
+
+
+def _emit_candidate_attributed(gw, *, run_id: str, proposal: dict) -> None:
+    """Record which model produced this candidate, at the moment it produced it.
+
+    This is the only point at which the serving model's identity is *resolved*; every later
+    reader reads this record back instead of re-asking the route map, so a route change
+    cannot retroactively re-credit a run (see :mod:`private_ai_gateway.attribution`).
+
+    Best-effort by design, and deliberately not gated on
+    ``REQUIRE_AUTHORIZATION_EVIDENCE``: attribution is a *descriptive* fact that grants
+    nothing, so failing to record it must not deny a plan that the authority model already
+    permits. A run with no attribution record is honestly unattributed, which the evidence
+    then says in as many words.
+    """
+    from hermes.session import PLAN_MODEL
+
+    from private_ai_gateway import attribution as attrib
+
+    if getattr(gw, "EVIDENCE_SINK", None) is None:
+        return
+    try:
+        recorded = attrib.attribute_candidate(
+            gw,
+            route_alias=PLAN_MODEL,
+            task_class=_PLAN_TASK_CLASS,
+            proposal=proposal,
+            policy_hash=_policy_hash(gw),
+        )
+    except (attrib.AttributionError, OrchestrationUnavailable) as exc:
+        logger.warning(
+            f"CANDIDATE_ATTRIBUTION_UNAVAILABLE | run_id={log_safe(run_id)} "
+            f"| detail={log_safe(str(exc))}"
+        )
+        return
+    _emit_gateway_evidence(
+        gw,
+        run_id=run_id,
+        approval_id="",
+        record_type=attrib.CANDIDATE_ATTRIBUTED_RECORD_TYPE,
+        payload=recorded.to_payload(),
+        log_label="CANDIDATE_ATTRIBUTED",
+    )
 
 
 # --- D2b: execute enforcement (approval-bound; no inline-approver authority) ----
@@ -410,10 +454,20 @@ def _emit_execute_validated(
       * ref unresolvable and evidence required -> fail closed (deny; refuse before the apply).
       * ref unresolvable and best-effort -> proceed on the old ``{canonical_plan_hash,
         validated}`` payload rather than fabricate a reference.
+
+    It also carries the run's **model attribution**, read back from the signed
+    ``candidate_attributed`` record written when the candidate was generated — never
+    recomputed from the route map, which may have been re-pointed since. A run with no such
+    record carries the explicit ``model_not_recorded`` shape instead of being backfilled.
     """
+    from private_ai_gateway import attribution as attrib
+
     sink = getattr(gw, "EVIDENCE_SINK", None)
     require = bool(getattr(gw, "REQUIRE_AUTHORIZATION_EVIDENCE", False))
     payload = {"canonical_plan_hash": canonical_plan_hash, "validated": True}
+    recorded, was_recorded = attrib.attribution_for_evidence(sink, run_id=run_id)
+    payload["attribution"] = recorded
+    payload["attribution_recorded"] = was_recorded
     if sink is not None:
         approval_ref = _resolve_approval_ref(
             sink, run_id=run_id, approval_id=approval_id, canonical_plan_hash=canonical_plan_hash

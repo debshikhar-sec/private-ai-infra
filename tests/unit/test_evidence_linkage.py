@@ -166,12 +166,24 @@ def test_approval_decided_payload_keys_unchanged():
     assert set(rec.payload.keys()) == {"decision", "approver", "canonical_plan_hash"}
 
 
-def test_execute_validated_payload_keys_are_exactly_three():
+def test_execute_validated_payload_keys_are_the_pinned_contract():
+    """The authorization fact, the signed approval link, and the run's model attribution.
+
+    Nothing else may enter a signed payload without an explicit edit here.
+    """
     sink = _sink()
     _emit_approval(sink)
     _emit_execute(sink)
     rec = next(r for r in sink.records if r.envelope.record_type == "execute_validated")
-    assert set(rec.payload.keys()) == {"canonical_plan_hash", "validated", "approval_ref"}
+    assert set(rec.payload.keys()) == {
+        "canonical_plan_hash", "validated", "approval_ref",
+        "attribution", "attribution_recorded",
+    }
+    # No `candidate_attributed` record exists in this sink, so attribution is honestly absent
+    # rather than filled in from whatever the route map currently says.
+    assert rec.payload["attribution_recorded"] is False
+    assert rec.payload["attribution"]["model_fingerprint"] == "model_not_recorded"
+    assert rec.payload["attribution"]["policy_hash"] == "policy_not_recorded"
     assert set(rec.payload["approval_ref"].keys()) == {
         "evidence_id", "evidence_digest", "record_type", "sink_id"
     }
