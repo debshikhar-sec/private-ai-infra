@@ -41,11 +41,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import platform
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger("AuditTrail")
 
 # --- task lanes -----------------------------------------------------------------------
 # Deliberately few, and grounded in work this project actually does. A lane exists when
@@ -285,6 +288,21 @@ def detect_total_memory_bytes(sysconf=os.sysconf, names=None) -> int | None:
     return pages * page_size
 
 
+def _probe_true(probe) -> bool:
+    """Run a capability probe; a probe that raises means "not available", never a crash.
+
+    Written as a named helper rather than an inline ``except: pass`` so the intent is
+    explicit: a backend whose import blows up is simply a backend this host does not have,
+    and the registry must degrade to a smaller capability picture rather than take the
+    gateway down.
+    """
+    try:
+        return bool(probe())
+    except Exception as exc:  # noqa: BLE001 — any probe failure is "absent"
+        logger.debug("backend probe failed, treating as unavailable: %s", exc)
+        return False
+
+
 def snapshot_host(
     *,
     active_backend: str = "",
@@ -307,11 +325,8 @@ def snapshot_host(
     cache = cache if cache is not None else ModelCache()
 
     available = ["demo"]
-    try:
-        if mlx_available():
-            available.append("mlx")
-    except Exception:  # noqa: BLE001 — a probe failure means "not available", never a crash
-        pass
+    if _probe_true(mlx_available):
+        available.append("mlx")
     if upstream_configured:
         available.append("openai")
 

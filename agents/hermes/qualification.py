@@ -482,8 +482,8 @@ def _identity_for(alias: str, resolved_model: str, base_url: str, token: str) ->
             backend = (json.loads(response.read()).get("backend") or {}).get(
                 "mode", backend
             )
-    except Exception:  # noqa: BLE001 — an unreachable probe means the default, never a crash
-        pass
+    except Exception as exc:  # noqa: BLE001 — an unreachable probe keeps the default
+        print(f"note: backend probe failed, assuming {backend!r}: {exc}")
     identity = reg.identify_model(
         alias, resolved_model, backend=backend, cache=reg.ModelCache()
     )

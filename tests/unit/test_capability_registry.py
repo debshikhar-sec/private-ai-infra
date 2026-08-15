@@ -44,11 +44,18 @@ def cache(tmp_path):
 
 
 def _install(cache: reg.ModelCache, model_id: str, *, revision="abc123", size=1024):
+    """Install a fake cached model.
+
+    The blob is created **sparse** via ``truncate``: ``st_size`` reports the full apparent
+    size, which is all the fit calculation reads, without allocating a byte. Materializing a
+    60 GB blob to test DOES_NOT_FIT is how a fixture kills a CI runner.
+    """
     entry = cache.root / ("models--" + model_id.replace("/", "--"))
-    (entry / "refs").mkdir(parents=True)
+    (entry / "refs").mkdir(parents=True, exist_ok=True)
     (entry / "refs" / "main").write_text(revision, encoding="utf-8")
-    (entry / "blobs").mkdir()
-    (entry / "blobs" / "weights").write_bytes(b"x" * size)
+    (entry / "blobs").mkdir(exist_ok=True)
+    with open(entry / "blobs" / "weights", "wb") as fh:
+        fh.truncate(size)
     return entry
 
 
