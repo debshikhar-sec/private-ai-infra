@@ -636,6 +636,252 @@ class CapabilityRegistry:
         }
 
 
+# --- deterministic controls (never model-routed) --------------------------------------------
+# Things people reach for a model selector for, out of habit, that must never have one. Each
+# of these is a *deterministic* control: it either holds or it does not, and a model's opinion
+# about that is not evidence. Listed here so the console renders them from one source rather
+# than a hand-maintained HTML list that could quietly grow a dropdown.
+DETERMINISTIC_CONTROLS = (
+    ("pytest", "the test suite decides whether code works"),
+    ("ruff", "lint rules are fixed and pinned, not negotiated"),
+    ("schema validation", "a record either matches the schema or it does not"),
+    ("proposal validation", "confinement and scope are checked in code, not judged"),
+    ("gateway policy enforcement", "identity, ceilings, grants — enforced before any token"),
+    ("OpenClaw assurance", "controls are re-derived from signed evidence, not asked about"),
+)
+
+# --- recommendation reason codes ---------------------------------------------------------------
+R_QUALIFIED_FOR_TASK = "QUALIFIED_FOR_TASK"
+R_ADVISORY_ONLY = "ADVISORY_ONLY_FOR_TASK"
+R_LOCAL_MODEL_AVAILABLE = "LOCAL_MODEL_AVAILABLE"
+R_HOST_COMPATIBLE = "HOST_COMPATIBLE"
+R_HOST_MARGINAL = "HOST_FIT_MARGINAL"
+R_HOST_FIT_UNKNOWN = "HOST_FIT_UNKNOWN"
+R_HOST_INCOMPATIBLE = "HOST_INCOMPATIBLE"
+R_NOT_EVALUATED = "NOT_EVALUATED"
+R_SECURITY_UNQUALIFIED = "SECURITY_UNQUALIFIED"
+R_MODEL_NOT_INSTALLED = "MODEL_NOT_INSTALLED"
+R_MODEL_AVAILABILITY_UNKNOWN = "MODEL_AVAILABILITY_UNKNOWN"
+R_BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE"
+R_NOT_POLICY_ELIGIBLE = "NOT_POLICY_ELIGIBLE"
+
+# Ranking, most preferred first. Purely ordinal — there is no score, nothing is summed, and
+# nothing is weighted, so two runs on the same inputs always produce the same order.
+_QUALIFICATION_RANK = {QUALIFIED: 0, ADVISORY_ONLY: 1, NOT_EVALUATED: 2,
+                       UNQUALIFIED: 3, UNAVAILABLE: 4}
+_FIT_RANK = {FIT_FITS: 0, FIT_MARGINAL: 1, FIT_UNKNOWN: 2, FIT_DOES_NOT_FIT: 3}
+
+
+@dataclass(frozen=True)
+class Recommendation:
+    """One candidate for one lane, with every reason it was or was not put forward."""
+
+    route_alias: str
+    resolved_model: str
+    fingerprint: str
+    qualification: str
+    availability: str
+    fit: str
+    eligible: bool
+    reasons: tuple[str, ...] = ()
+
+    def to_mapping(self) -> dict:
+        body = asdict(self)
+        body["reasons"] = list(self.reasons)
+        return body
+
+
+def recommend(
+    registry: CapabilityRegistry,
+    lane: str,
+    *,
+    policy_eligible: set[str] | None = None,
+) -> tuple[Recommendation, ...]:
+    """Rank the models that could serve one lane, deterministically and explainably.
+
+    **No model chooses the model.** This is ordinal comparison over four facts that are each
+    independently checkable — qualification state, availability, hardware fit, and existing
+    policy eligibility — and every candidate carries the reason codes that produced its
+    standing, including the ones that ruled it out.
+
+    A recommendation grants nothing. It is a suggestion about *routing*; authority is a
+    separate axis that nothing here touches. In particular, a model that is
+    :data:`UNQUALIFIED` for a lane is never eligible for it — most sharply in
+    ``security_review``, where the only thing that can change that verdict is a new
+    measurement, not a preference.
+    """
+    out: list[Recommendation] = []
+    for model in registry.models:
+        qual = model.lanes.get(lane)
+        state = qual.state if qual else NOT_EVALUATED
+        reasons: list[str] = []
+        eligible = True
+
+        if policy_eligible is not None and model.identity.route_alias not in policy_eligible:
+            reasons.append(R_NOT_POLICY_ELIGIBLE)
+            eligible = False
+
+        if state == QUALIFIED:
+            reasons.append(R_QUALIFIED_FOR_TASK)
+        elif state == ADVISORY_ONLY:
+            reasons.append(R_ADVISORY_ONLY)
+        elif state == UNQUALIFIED:
+            reasons.append(
+                R_SECURITY_UNQUALIFIED if lane == LANE_SECURITY_REVIEW else R_NOT_EVALUATED
+            )
+            eligible = False
+        elif state == UNAVAILABLE:
+            reasons.append(R_BACKEND_UNAVAILABLE)
+            eligible = False
+        else:
+            reasons.append(R_NOT_EVALUATED)
+            if lane == LANE_SECURITY_REVIEW:
+                # Never route security review to something that has not been measured on
+                # refusals. "We have not checked" is not a weaker yes; for this lane it is a
+                # no, because the failure mode is implementing the change you were asked to
+                # refuse.
+                eligible = False
+
+        if lane == LANE_SECURITY_REVIEW and state == ADVISORY_ONLY:
+            eligible = False
+
+        if model.availability == AVAIL_INSTALLED:
+            reasons.append(R_LOCAL_MODEL_AVAILABLE)
+        elif model.availability == AVAIL_NOT_INSTALLED:
+            reasons.append(R_MODEL_NOT_INSTALLED)
+            eligible = False
+        elif model.availability == AVAIL_UNKNOWN:
+            reasons.append(R_MODEL_AVAILABILITY_UNKNOWN)
+            eligible = False
+        else:
+            reasons.append(R_BACKEND_UNAVAILABLE)
+            eligible = False
+
+        verdict = model.fit.verdict
+        if verdict == FIT_FITS:
+            reasons.append(R_HOST_COMPATIBLE)
+        elif verdict == FIT_MARGINAL:
+            reasons.append(R_HOST_MARGINAL)
+        elif verdict == FIT_UNKNOWN:
+            reasons.append(R_HOST_FIT_UNKNOWN)
+        else:
+            reasons.append(R_HOST_INCOMPATIBLE)
+            eligible = False
+
+        out.append(Recommendation(
+            route_alias=model.identity.route_alias,
+            resolved_model=model.identity.resolved_model,
+            fingerprint=model.identity.fingerprint,
+            qualification=state,
+            availability=model.availability,
+            fit=verdict,
+            eligible=eligible,
+            reasons=tuple(dict.fromkeys(reasons)),
+        ))
+
+    out.sort(key=lambda r: (
+        not r.eligible,
+        _QUALIFICATION_RANK.get(r.qualification, 9),
+        _FIT_RANK.get(r.fit, 9),
+        r.route_alias,
+    ))
+    return tuple(out)
+
+
+# --- route change proposals ----------------------------------------------------------------------
+@dataclass(frozen=True)
+class RouteProposal:
+    """A proposed route change, computed and displayed — never applied.
+
+    Selecting a model in a browser produces one of these and nothing else. It carries the
+    before/after picture and the prospective configuration identity so a human can see exactly
+    what would change, and it deliberately carries **no** autonomy, skill, tool or approval
+    field: a route change is a change of *which model answers*, never of what the caller is
+    allowed to do.
+    """
+
+    lane: str
+    route_alias: str
+    current: dict = field(default_factory=dict)
+    proposed: dict = field(default_factory=dict)
+    current_policy_hash: str = ""
+    prospective_policy_hash: str = ""
+    activation: str = ""
+    warnings: tuple[str, ...] = ()
+
+    def to_mapping(self) -> dict:
+        body = asdict(self)
+        body["warnings"] = list(self.warnings)
+        return body
+
+
+def propose_route(
+    registry: CapabilityRegistry,
+    *,
+    lane: str,
+    route_alias: str,
+    activation: str,
+) -> RouteProposal:
+    """Build the before/after picture for pointing ``lane`` at ``route_alias``.
+
+    Read-only. It computes what the change *would* mean — including the warnings that make it
+    a bad idea — and returns it for a human to look at. It writes no config, touches no policy,
+    and grants nothing.
+    """
+    target = registry.by_alias(route_alias)
+    current = registry.by_alias(registry.default_alias)
+    warnings: list[str] = []
+    proposed: dict = {}
+
+    if target is None:
+        warnings.append(f"no route named {route_alias!r} exists in the active policy")
+    else:
+        qual = target.lanes.get(lane)
+        state = qual.state if qual else NOT_EVALUATED
+        proposed = {
+            "route_alias": target.identity.route_alias,
+            "resolved_model": target.identity.resolved_model,
+            "fingerprint": target.identity.fingerprint,
+            "quantization": target.identity.quantization,
+            "revision": target.identity.revision,
+            "qualification": state,
+            "qualification_reason": qual.reason if qual else "",
+            "availability": target.availability,
+            "fit": target.fit.verdict,
+        }
+        if state == UNQUALIFIED:
+            warnings.append(
+                f"this model is UNQUALIFIED for {LANE_LABELS.get(lane, lane)}; only a new "
+                f"qualification measurement can change that"
+            )
+        if state == NOT_EVALUATED:
+            warnings.append("this model has never been measured on this lane")
+        if target.availability != AVAIL_INSTALLED:
+            warnings.append("this model is not available on this host")
+        if target.fit.verdict == FIT_DOES_NOT_FIT:
+            warnings.append("this model does not fit in this machine's memory")
+        elif target.fit.verdict == FIT_UNKNOWN:
+            warnings.append("this machine's fit for this model is unknown, not confirmed")
+
+    return RouteProposal(
+        lane=lane,
+        route_alias=route_alias,
+        current={
+            "route_alias": current.identity.route_alias,
+            "resolved_model": current.identity.resolved_model,
+            "fingerprint": current.identity.fingerprint,
+        } if current else {},
+        proposed=proposed,
+        current_policy_hash=registry.policy_hash,
+        # Deliberately empty: the prospective hash is only computable once a mechanism exists
+        # that can produce the exact bytes of the changed config. Printing a plausible-looking
+        # hash for a file nothing can write would be the worst kind of fabrication here.
+        prospective_policy_hash="",
+        activation=activation,
+        warnings=tuple(warnings),
+    )
+
+
 def build_registry(
     routes: dict[str, str],
     *,

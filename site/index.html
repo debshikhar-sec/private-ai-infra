@@ -68,7 +68,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">14</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">23</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="1081">1081</div><div class="lbl">tests</div></div>
+        <div class="stat"><div class="num g" data-count="1165">1165</div><div class="lbl">tests</div></div>
         <div class="stat"><div class="num g" data-count="2">2</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="92" data-suffix="%">92%</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -82,7 +82,8 @@
         <h2 class="section-title" id="demo-h">Watch the boundary hold</h2>
         <p class="section-sub">A principal capped at <strong>L1</strong> with models <code>["strategy"]</code> is
           refused the instant it asks for more — autonomy it lacks, or a model it was never granted. Then OpenClaw,
-          an independent read-only verifier, re-derives that the controls held.</p>
+          an independent verifier that is <em>operationally</em> read-only — it changes no authority and runs
+          no tool — re-derives that the controls held and signs its own verdict.</p>
       </div>
       <div class="demo-frame reveal" style="margin-top:1.5rem">
         <img src="assets/enforce.gif" width="1320" height="820"
@@ -206,7 +207,7 @@
             <div class="tk">12 · Capability is not authority</div>
             <h3>The model can propose anything. It can change nothing without you.</h3>
             <p>A capable planner, a confined executor, an independent verifier, and a signed durable record
-              of exactly who authorized what. Backed by 1081 tests on two platforms and 23 adversarial
+              of exactly who authorized what. Backed by 1165 tests on two platforms and 23 adversarial
               evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -397,6 +398,16 @@
               <em>contained</em>, marked for a human, and the rollback run is invalidated. OpenClaw re-reads the
               tree itself rather than trusting the executor&rsquo;s claim. A success says only that the supported
               sandbox state was restored; nothing outside the sandbox is touched or claimed.</li>
+            <li><strong>Models &amp; Routing console</strong> — a capability registry that answers four
+              questions <em>separately</em>: what models exist (fingerprinted by build, not by config alias),
+              which are usable on this host, which task lanes they have actually been measured on, and what
+              authority the routed principals hold. Recommendations are deterministic and explainable — no
+              model chooses the model — and a route change is a <strong>proposal</strong>: a browser dropdown
+              never writes the policy file, and never alters autonomy, skills, tools or approval rights.
+              <div class="demo-frame" style="margin-top:.9rem">
+                <img src="assets/models-routing.webp" width="1440" height="900" loading="lazy"
+                     alt="The Models &amp; Routing console: the Security review lane shows every candidate as not eligible, with the local engineering model badged UNQUALIFIED, and a route proposal warning that only a new qualification measurement can change that — marked Not applied." />
+              </div></li>
             <li><strong>Local-model qualification</strong> — the local engineering model is now
               <em>measured</em>, not estimated. An 18-task corpus is graded by running each candidate in a
               disposable copy: 94% first-pass structural, 81% tests pass, 100% public API preserved, 72%
@@ -417,8 +428,8 @@
         <article class="card">
           <h3>🗺️ Later</h3>
           <ul>
-            <li>Trust ledger &amp; earned autonomy</li>
             <li>Local-model candidates promoted beyond shadow evaluation</li>
+            <li>Asymmetric signing / KMS — moving from tamper-evident to non-repudiation</li>
           </ul>
         </article>
       </div>

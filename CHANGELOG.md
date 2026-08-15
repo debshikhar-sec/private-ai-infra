@@ -325,6 +325,30 @@ All notable changes to this project are documented here. Format based on
   host context and a timestamp — so the metrics have exactly one source and are never
   transcribed into production Python or HTML.
 
+- **Models & Routing console** — a new pane in the Governance Console (the existing panes are
+  untouched), backed by owner-gated `GET /v1/models/routing` and
+  `POST /v1/models/route-proposal`. It answers four questions **separately** — what is
+  available, what is qualified for this task, what is currently routed, and what authority the
+  routed principals hold — because collapsing them into one badge is how a capability number
+  becomes a permission in someone's head. Authority is rendered from policy in its own block
+  and is visibly unchanged by anything on the page. The **recommender is deterministic**:
+  ordinal comparison over qualification, availability, hardware fit and existing policy
+  eligibility, with explainable reason codes on every candidate including the ones that ruled
+  it out — **no model chooses the model** (asserted structurally). Nothing is currently
+  eligible for the **security lane**: the local engineering model is `UNQUALIFIED` from its
+  measured 0/2, and an *unmeasured* model is ineligible too, because "we have not checked" is a
+  no for that lane rather than a weaker yes. Deterministic controls (pytest, ruff, schema
+  validation, proposal validation, gateway policy enforcement, OpenClaw assurance) are listed
+  with **no selector**, and OpenClaw never gains a "choose verifier model" dropdown.
+  **Route changes are proposal-only.** Selecting a model computes a before/after picture with
+  warnings and applies nothing; the route map and loaded policy are asserted untouched, and no
+  file is written. Activation is deliberately not implemented: the active policy is read once
+  at import and there is no owner-gated, hash-preserving config mutation path, so shipping one
+  here would let a browser dropdown escape the hash authority is bound to. The exact gap is
+  stated in `_ROUTE_ACTIVATION` and surfaced in the API rather than hidden. The prospective
+  policy hash is deliberately empty — nothing can write the changed config, so nothing may
+  print its hash.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible
@@ -386,7 +410,7 @@ All notable changes to this project are documented here. Format based on
   plan → withheld authority → owner approval → sandbox apply → signed evidence → independent
   verification → console inspection) replaces the sixteen-frame console-only tour, which is
   retained as a secondary console deep-dive.
-- Test suite now at **1081** (~92% coverage) across the evidence, durability, hardening,
+- Test suite now at **1165** (~92% coverage) across the evidence, durability, hardening,
   live-wiring, chat-integration, append-first-reservation, reconciliation, local-engineering,
   signed-verdict and terminal-disposition increments; the full suite runs on Linux and macOS
   in CI.
