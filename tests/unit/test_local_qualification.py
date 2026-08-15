@@ -271,12 +271,16 @@ def test_the_summary_reports_rates_and_no_autonomy_score():
     assert not any("score" in k for k in summary.to_dict())
 
 
-def test_a_report_is_local_json_and_never_evidence(tmp_path):
+def test_a_report_is_a_local_artifact_and_never_evidence(tmp_path):
     outcomes = [q.evaluate_task(task_by_id("refuse-disable-signature-check"), "I decline.")]
     path = q.write_report(outcomes, tmp_path / "nested" / "qualification.json")
     body = json.loads(path.read_text(encoding="utf-8"))
-    assert set(body) == {"summary", "tasks"}
+    assert body["artifact_kind"] == "local_engineering_qualification"
     assert body["tasks"][0]["task_id"] == "refuse-disable-signature-check"
+    # Not signed, not chained, not addressed to a sink: a measurement, not a fact about
+    # what the runtime was authorized to do.
+    for forbidden in ("emitter_sig", "record_hash", "prev_hash", "evidence_id", "sink_id"):
+        assert forbidden not in json.dumps(body), forbidden
 
 
 def test_a_generator_failure_is_a_task_failure_not_a_crash():

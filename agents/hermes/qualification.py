@@ -431,7 +431,7 @@ def main(argv=None) -> int:
         "PRIVATE_AI_BASE_URL", "http://127.0.0.1:8081"))
     parser.add_argument("--token", default=os.environ.get("PRIVATE_AI_SHADOW_TOKEN", ""))
     parser.add_argument("--alias", default="engineering")
-    parser.add_argument("--out", default="runtime/shadow-engineering/qualification.json")
+    parser.add_argument("--out", default="")
     parser.add_argument("--task", action="append", default=None,
                         help="run only these task ids (repeatable)")
     args = parser.parse_args(argv)
@@ -441,25 +441,138 @@ def main(argv=None) -> int:
 
     tasks = tuple(task_by_id(t) for t in args.task) if args.task else CORPUS
     call = _gateway_calls(args.base_url, args.token, args.alias, "L1")
+
+    # Identity first, and from what the gateway actually served — a route alias is not the
+    # thing being measured, and an artifact keyed on one would let a different build inherit
+    # this result.
+    _probe, resolved = call([{"role": "user", "content": "ready?"}])
+    identity = _identity_for(args.alias, resolved, args.base_url, args.token)
+
     outcomes = run_corpus(governed_generator(call), tasks=tasks)
     summary = summarize(outcomes)
     print(summary.render())
-    print(f"\nwrote {write_report(outcomes, args.out)}")
+    out = args.out or str(
+        Path("runtime/qualification") / f"{identity['short_fingerprint']}.json"
+    )
+    written = write_report(
+        outcomes, out, model=identity, tasks=tasks,
+        source_commit=_git_commit(), policy_hash=_policy_hash(),
+        host=_host_context(),
+    )
+    print(f"\nmodel: {identity['resolved_model']} ({identity['short_fingerprint']})")
+    print(f"wrote {written}")
     return 0
 
 
-def write_report(outcomes, path: str | Path) -> Path:
-    """Write the per-task rows and the aggregate as local JSON. Never evidence."""
+def _identity_for(alias: str, resolved_model: str, base_url: str, token: str) -> dict:
+    """The measured model's identity, derived — never asserted."""
+    from private_ai_gateway import registry as reg
+
+    backend = "mlx"
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(  # nosec B310 — operator-supplied loopback gateway URL
+            urllib.request.Request(
+                base_url.rstrip("/") + "/health",
+                headers={"Authorization": f"Bearer {token}"},
+            ),
+            timeout=10,
+        ) as response:
+            backend = (json.loads(response.read()).get("backend") or {}).get(
+                "mode", backend
+            )
+    except Exception:  # noqa: BLE001 — an unreachable probe means the default, never a crash
+        pass
+    identity = reg.identify_model(
+        alias, resolved_model, backend=backend, cache=reg.ModelCache()
+    )
+    body = identity.to_mapping()
+    body["short_fingerprint"] = identity.short_fingerprint
+    return body
+
+
+def _git_commit() -> str:
+    ok, out = _run(["git", "rev-parse", "HEAD"], Path.cwd(), 15)
+    return out.strip()[:40] if ok else ""
+
+
+def _policy_hash() -> str:
+    import hashlib
+    import os
+
+    path = os.environ.get("PRIVATE_AI_POLICY_PATH", "")
+    try:
+        with open(path, "rb") as fh:
+            return "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _host_context() -> dict:
+    """Privacy-minimal host context for the artifact — the same fields the registry exposes."""
+    from private_ai_gateway import registry as reg
+
+    host = reg.snapshot_host(active_backend="", cache=reg.ModelCache())
+    return {
+        "platform": host.platform,
+        "architecture": host.architecture,
+        "total_memory_gb": host.total_memory_gb,
+        "backends_available": list(host.backends_available),
+    }
+
+
+def build_artifact(
+    outcomes,
+    *,
+    model: dict | None = None,
+    tasks=CORPUS,
+    source_commit: str = "",
+    policy_hash: str = "",
+    host: dict | None = None,
+    generated_at: str = "",
+) -> dict:
+    """The structured qualification artifact — the single source of these numbers.
+
+    Keyed on the model **fingerprint**, not on a route alias: a different build behind the
+    same alias is a different subject and must not inherit this result. It also records what
+    was measured (corpus version *and* a content digest, so an edited corpus is visibly a
+    different corpus), against which commit, under which policy hash, and on what kind of
+    host — because "the model scored X" is meaningless without them.
+
+    This is **not** authority evidence. It is never signed, never appended to the evidence
+    sink, and nothing in the authorization path may read it.
+    """
+    from datetime import datetime, timezone
+
+    from hermes.qualification_corpus import CORPUS_VERSION, corpus_digest
+
+    model = dict(model or {})
+    return {
+        "artifact_kind": "local_engineering_qualification",
+        "fingerprint": model.get("fingerprint", ""),
+        "model": model,
+        "corpus_version": CORPUS_VERSION,
+        "corpus_digest": corpus_digest(tasks),
+        "corpus_tasks": len(tuple(tasks)),
+        "source_commit": source_commit,
+        "policy_hash": policy_hash,
+        "host": dict(host or {}),
+        "generated_at": generated_at or datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "summary": summarize(outcomes).to_dict(),
+        "tasks": [o.to_dict() for o in outcomes],
+    }
+
+
+def write_report(outcomes, path: str | Path, **artifact_fields) -> Path:
+    """Write the qualification artifact as local JSON. Never evidence, never signed."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
-        json.dumps(
-            {
-                "summary": summarize(outcomes).to_dict(),
-                "tasks": [o.to_dict() for o in outcomes],
-            },
-            indent=2, sort_keys=True,
-        ) + "\n",
+        json.dumps(build_artifact(outcomes, **artifact_fields), indent=2, sort_keys=True)
+        + "\n",
         encoding="utf-8",
     )
     return target

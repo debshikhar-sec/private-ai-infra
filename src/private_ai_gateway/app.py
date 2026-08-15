@@ -10,6 +10,7 @@ demo simulator. See backends.py.
 """
 
 import atexit
+import hashlib
 import hmac
 import importlib.resources
 import json
@@ -147,6 +148,13 @@ else:
 # a restore at a tree outside the sandbox runtime. Unset means rollback is unavailable, which
 # is the correct default: a runtime with no sandbox root has nothing it may safely restore.
 SANDBOX_RUNTIME_ROOT = os.environ.get("PRIVATE_AI_SANDBOX_RUNTIME_DIR", "")
+
+# Where recorded qualification artifacts are read from. Read-only and descriptive: these are
+# measurements of what a model can do, never evidence and never authority. No authorization
+# path may consult them (see ``registry`` and its structural test).
+QUALIFICATION_ARTIFACT_DIR = os.environ.get(
+    "PRIVATE_AI_QUALIFICATION_DIR", "runtime/qualification"
+)
 
 # Release both stores' connections and ownership locks on interpreter shutdown. (Process
 # death releases the flocks anyway; this makes a *clean* shutdown explicit.)
@@ -839,6 +847,55 @@ def _owner_only(code_path: str):
         {"error": {"message": f"{code_path} requires the owner identity",
                    "type": "permission_error", "code": "owner_required"}}
     ), 403
+
+
+@app.route("/v1/models/registry", methods=["GET"])
+def v1_models_registry():
+    """The capability picture: what can run here, and what has actually been measured.
+
+    Owner-gated and **read-only**. It describes capability and grants nothing — no autonomy,
+    no skill, no tool, no approval right. Nothing here is downloaded: the host snapshot reads
+    the local model cache and never fetches a model, so opening this page cannot trigger a
+    30 GB pull.
+    """
+    from private_ai_gateway import registry as reg
+
+    denied = _owner_only("The model registry")
+    if denied is not None:
+        return denied
+
+    cache = reg.ModelCache()
+    host = reg.snapshot_host(
+        active_backend=getattr(BACKEND, "name", ""),
+        cache=cache,
+        upstream_configured=bool(os.environ.get("PRIVATE_AI_UPSTREAM_BASE_URL")),
+    )
+    # Deliberately no per-model output cap: the cap is a property of the *principal*, not of
+    # the model, so attaching one here would be inventing metadata the config does not hold.
+    built = reg.build_registry(
+        ROUTE_MAP,
+        backend=getattr(BACKEND, "name", ""),
+        host=host,
+        cache=cache,
+        artifacts=reg.load_artifacts(QUALIFICATION_ARTIFACT_DIR),
+        default_alias=DEFAULT_MODEL_ALIAS,
+        policy_hash=_policy_file_hash(),
+    )
+    return jsonify(built.to_mapping()), 200
+
+
+def _policy_file_hash() -> str:
+    """The active policy file's hash, or ``""`` when it cannot be read.
+
+    Unlike the authority-bearing ``canonical_plan_hash`` path, this is descriptive: the
+    registry showing an empty hash is a display gap, not a governed decision, so an
+    unreadable file degrades rather than failing closed.
+    """
+    try:
+        with open(POLICY_PATH, "rb") as fh:
+            return "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
 
 
 @app.route("/v1/runs/<run_id>/disposition-basis", methods=["GET"])
