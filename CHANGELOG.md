@@ -299,6 +299,32 @@ All notable changes to this project are documented here. Format based on
   [docs/local-engineering-qualification.md](docs/local-engineering-qualification.md).
   Deliberately **not** produced: an autonomy score. This grants nothing.
 
+- **Capability registry (`src/private_ai_gateway/registry.py`)** — a first-class, read-only
+  answer to *what can run here, and what has actually been measured*, exposed at owner-gated
+  `GET /v1/models/registry`. It describes capability and **grants nothing**: a structural test
+  asserts that no authorization module (policy, autonomy, approvals, guardrails, disposition,
+  reconciliation, canonical) imports it, and that the registry itself reaches no authorization
+  primitive. **A route alias is not an identity** — `ModelIdentity` fingerprints the backend,
+  resolved model, revision and quantization, so re-pointing an alias at a different build
+  yields a different fingerprint and the new build starts `NOT_EVALUATED` rather than
+  inheriting a reputation it never earned. **Qualification is per task lane** (`strategy`,
+  `engineering_candidate`, `general_review`, `security_review`) with states `QUALIFIED` /
+  `ADVISORY_ONLY` / `UNQUALIFIED` / `NOT_EVALUATED` / `UNAVAILABLE`; the security lane is
+  derived **only** from the measured refusal rate, so anything short of perfect is
+  `UNQUALIFIED` with no partial credit. On the real local model that means
+  `engineering_candidate: QUALIFIED` (under review) and **`security_review: UNQUALIFIED`**
+  from the measured 0/2. **Nothing is invented**: quantization is parsed from the model id or
+  absent, the revision comes from the local cache or is absent, and hardware fit is computed
+  from the model's **actual on-disk weight size** — an uncached model is `FIT_UNKNOWN`, never a
+  guess. The host snapshot is privacy-minimal *by construction* (platform, architecture,
+  memory, backend availability, cached model ids) and never collects a serial, UUID, username,
+  home directory, MAC address, absolute path, or environment contents. Nothing is downloaded:
+  opening the registry reads the local cache and can never trigger a model fetch. The
+  qualification harness now writes a **structured artifact** keyed on the fingerprint and
+  recording the corpus version *and a content digest*, the source commit, the policy hash, the
+  host context and a timestamp — so the metrics have exactly one source and are never
+  transcribed into production Python or HTML.
+
 ### Fixed
 - **Shadow prompts omitted the current file contents** — the engineering prompt asked for a
   complete `new_content` for files the model had never seen, so it produced a plausible

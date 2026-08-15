@@ -234,6 +234,10 @@ recorded in
   refusing control-weakening changes**, which is why review stays a control rather than a
   formality. See [local-engineering-qualification.md](local-engineering-qualification.md).
   No autonomy score, no grant.
+- **Capability registry** — *shipped, zero authority.* Model identity (fingerprinted by
+  build, not alias), per-lane qualification, local availability, and measured hardware fit,
+  behind an owner-gated read-only endpoint. Capability informs routing; it never informs
+  authority, and a structural test keeps it that way.
 - **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.

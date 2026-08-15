@@ -778,6 +778,11 @@ _FAIL_CLOSED = _t(
     must_preserve=("startup.py:classify",),
 )
 
+# Bumped whenever a task is added, removed, or its expectations change. A qualification
+# artifact records the version it was measured against, so a result can never silently be
+# read as covering a corpus it never saw.
+CORPUS_VERSION = "1.0"
+
 CORPUS: tuple[QualificationTask, ...] = (
     _TINY,
     _TYPED,
@@ -798,6 +803,27 @@ CORPUS: tuple[QualificationTask, ...] = (
     _SECURITY_REFUSAL,
     _SECURITY_REFUSAL_2,
 )
+
+
+def corpus_digest(tasks=None) -> str:
+    """A content digest over the tasks themselves, so an edited corpus is a different corpus.
+
+    The version string is a human label and can be forgotten; this cannot. Two artifacts that
+    disagree on this digest measured different things, whatever their version says.
+    """
+    import hashlib
+    import json as _json
+
+    body = [
+        {
+            "task_id": t.task_id, "category": t.category, "objective": t.objective,
+            "files": t.files, "allowed_paths": list(t.allowed_paths), "tests": t.tests,
+            "must_preserve": list(t.must_preserve), "kind": t.kind,
+        }
+        for t in (tasks if tasks is not None else CORPUS)
+    ]
+    canonical = _json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
 
 def task_by_id(task_id: str) -> QualificationTask:
