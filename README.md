@@ -119,7 +119,10 @@ inference it wasn't allowed to run.
 
 The differentiator isn't that these controls exist — it's that they are **attacked** by
 an adversarial eval suite that fails CI on regression, and **independently re-verified**
-by a read-only assurance agent (OpenClaw) that reconciles the audit, metrics, and policy.
+by an assurance agent (OpenClaw) that reconciles the audit, metrics, and policy. It is
+**operationally read-only** over the governed system — it holds no authority and mutates
+nothing it inspects — while appending its own signed assurance verdicts to the evidence
+chain under its own key.
 Each row is a control, the attack against it, and where that attack is proven to fail:
 
 | Control | Attack it repels | Enforced in | Proven by |
@@ -372,11 +375,13 @@ runtime still cannot determine **whether that mutation actually landed**. A *fut
 apply can be undone under owner authority and independently verified; a historical one has no
 pre-image and stays irreversible, and rollback never leaves the sandbox. Runtime-wide crash-safe mutation semantics are therefore still not claimed and
 sandbox-confined mutation remains the safe execution target.
-The **trust ledger**, **earned autonomy**, and any
-rollback outside the sandbox remain future. The local engineering model is now **measured**
-rather than estimated — 94 % first-pass structural, 81 % tests-pass, 72 % zero-edit, and
-**0/2 on refusing control-weakening changes** — so it is a usable first-pass author for
-right-sized edits and is kept away from anything security-adjacent; see
+A read-only **trust history** now exists — a derived projection over the signed chain, facts
+by principal and task class, no score and nothing consuming it — but **earned autonomy** and
+any rollback outside the sandbox remain future. The local engineering model is now
+**measured** rather than estimated — across a 30-task corpus (16 engineering, 14 security):
+94 % first-pass structural, 81 % tests-pass, 43 % accepted with zero edits over the whole
+corpus, and **0/14 on refusing control-weakening changes** — so it is a usable first-pass
+author for right-sized edits and is kept away from anything security-adjacent; see
 [docs/local-engineering-qualification.md](docs/local-engineering-qualification.md). It still
 holds no apply, commit, merge, or deploy authority. Autonomy stays fixed-ceiling by
 policy — no self-approval, no earned-trust escalation; execution stays human-gated. The
@@ -577,8 +582,11 @@ docs/                     # architecture, security & threat model, orchestration
   signed `approval_decided` decision evidence when an owner approves or rejects (all
   component-level, unit-proven), and the three mutation-path records are now linked into a
   **signed evidence graph** (`approval_ref`/`execute_ref`) that OpenClaw verifies end-to-end.
-  Durable storage, runtime fail-closed integration across crashes, `ApprovalRecord.evidence_refs`
-  population, a trust ledger, and earned autonomy remain **future**. This is a governed,
+  Durable, exclusively-owned stores, startup cross-store reconciliation, terminal human
+  disposition, sandbox pre-image capture with governed rollback, and a read-only derived
+  trust history are all **shipped**. `ApprovalRecord.evidence_refs` population and **earned
+  autonomy** remain **future**, and no signed record yet names the model that served a run,
+  so runtime history cannot be attributed to a model build. This is a governed,
   human-in-authority system — **not** fully autonomous.
 
 ## License

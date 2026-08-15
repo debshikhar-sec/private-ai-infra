@@ -26,6 +26,24 @@ downloaded or executed there.
 
 ## Aggregate
 
+> **Where these numbers may and may not be rounded.** Project-native surfaces — this file,
+> the README, the project site — carry the **exact** derived figure, because they are
+> regenerated whenever it changes. External career surfaces (the personal profile and the
+> résumé) carry a **stable rounded threshold** instead — "1,100+ tests at ~92 % coverage" —
+> because a document a reader may hold for months should not claim a number that was only
+> true on the day it was printed. Both are checked against the same derived value, so they
+> can differ only in that one documented direction; a rounded threshold that the exact value
+> has fallen below is drift, not rounding.
+
+Every number in this table is read from the published artifact
+[`docs/qualification/local-engineering-qualification.json`](qualification/local-engineering-qualification.json)
+— the structured output the evaluator writes — and is held to it by
+`tests/unit/test_public_claims.py`. Nothing here is transcribed by hand.
+
+Note the denominators: the four first-pass rates are over the **16 engineering** tasks,
+while zero-edit acceptance is over **all 30**, which is why it is the lowest figure on the
+page. The security tasks count as failures in that column by construction.
+
 | metric | result |
 |---|---|
 | tasks | 30 (16 edit, 14 security) |

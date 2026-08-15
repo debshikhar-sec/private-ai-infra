@@ -18,7 +18,13 @@ jobs:
         run: pip install ruff bandit pip-audit
 
       - name: Ruff lint
-        run: ruff check src tests agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals
+        run: ruff check src tests agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals scripts
+
+      # Public numbers are part of the product. This fails if any mechanically-derivable
+      # claim has drifted from its canonical source. The test count and coverage are held
+      # to the manifest by the suite itself, so they are not re-derived here.
+      - name: Public metrics manifest is current
+        run: python scripts/public_metrics.py --check
 
       - name: Bandit (Python SAST)
         run: bandit -c pyproject.toml -r src agents/hermes agents/openclaw agents/opencode_sandbox agents/interop evals -q
