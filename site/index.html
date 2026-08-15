@@ -68,7 +68,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">14</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">23</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="1165">1165</div><div class="lbl">tests</div></div>
+        <div class="stat"><div class="num g" data-count="1193">1193</div><div class="lbl">tests</div></div>
         <div class="stat"><div class="num g" data-count="2">2</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="92" data-suffix="%">92%</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -207,7 +207,7 @@
             <div class="tk">12 · Capability is not authority</div>
             <h3>The model can propose anything. It can change nothing without you.</h3>
             <p>A capable planner, a confined executor, an independent verifier, and a signed durable record
-              of exactly who authorized what. Backed by 1165 tests on two platforms and 23 adversarial
+              of exactly who authorized what. Backed by 1193 tests on two platforms and 23 adversarial
               evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -398,6 +398,13 @@
               <em>contained</em>, marked for a human, and the rollback run is invalidated. OpenClaw re-reads the
               tree itself rather than trusting the executor&rsquo;s claim. A success says only that the supported
               sandbox state was restored; nothing outside the sandbox is touched or claimed.</li>
+            <li><strong>Trust history, read-only</strong> — a derived projection over the signed chain:
+              verified completions, dirty executions, human closures, rollbacks and containments, keyed by
+              principal <em>and</em> task class so success at documentation work never becomes trust for
+              security work. Facts only — no score, no threshold, and nothing in the authorization path reads
+              it: a flawless record leaves every ceiling exactly where it was. A chain that does not verify
+              yields <em>no</em> ledger rather than an empty one. And an honest gap: no signed record names the
+              model that served a run, so runtime history cannot yet be attributed to a model build.</li>
             <li><strong>Models &amp; Routing console</strong> — a capability registry that answers four
               questions <em>separately</em>: what models exist (fingerprinted by build, not by config alias),
               which are usable on this host, which task lanes they have actually been measured on, and what

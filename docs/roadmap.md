@@ -238,7 +238,11 @@ recorded in
   build, not alias), per-lane qualification, local availability, and measured hardware fit,
   behind an owner-gated read-only endpoint. Capability informs routing; it never informs
   authority, and a structural test keeps it that way.
-- **Trust ledger** — *future.* Derived, per-principal trust state built on the sink.
+- **Trust ledger** — *shipped read-only, grants nothing.* A derived projection over the
+  signed chain: facts by principal and task class, no score, no threshold, nothing consuming
+  it. A chain that does not verify yields no ledger rather than an empty one. **Blocked
+  dimension:** no signed record names the model that served a run, so runtime history cannot
+  be attributed to a model build — that is the concrete prerequisite for model-aware trust. Derived, per-principal trust state built on the sink.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.
 - **Hermes local training / eval-trace capture** — *future.* No training pipeline exists

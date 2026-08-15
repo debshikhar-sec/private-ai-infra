@@ -380,6 +380,17 @@
     </div>
 
     <div class="card">
+      <h3>Trust history</h3>
+      <p class="sub"><b>Qualification</b> is how a model did on a corpus we built.
+        <b>Runtime history</b> is what the governed loop actually did. They are shown apart
+        and never combined — corpus results are not production evidence. Neither grants
+        anything.</p>
+      <div id="mr-qual"><div class="empty">Connect to load qualification.</div></div>
+      <div id="mr-runtime"><div class="empty">Connect to load runtime history.</div></div>
+      <div class="sub" id="mr-trust-note"></div>
+    </div>
+
+    <div class="card">
       <h3>Deterministic controls — not model-routed</h3>
       <p class="sub">These have no model selector and never will. Each either holds or does
         not; a model's opinion about that is not evidence.</p>
@@ -657,7 +668,39 @@
 
   $("mr-propose").addEventListener("click", proposeRoute);
 
-  const refreshAll = () => { refreshDecisions(); refreshMetrics(); refreshRouting(); };
+  const refreshTrust = async () => {
+    const r = await api("/v1/trust-history");
+    if (!r.ok) {
+      $("mr-qual").innerHTML = '<div class="empty">' + r.status + " — trust history denied</div>";
+      return;
+    }
+    const b = r.body;
+    $("mr-qual").innerHTML = "<h4>QUALIFICATION</h4>" + ((b.qualification || []).map((q) => `
+      <div class="mr-row"><b>${esc(q.lane_label)}</b> · ${esc(q.route_alias)}
+        ${qBadge(q.state)}
+        <div class="sub"><code>${esc(q.model)}</code> · build ${esc(q.fingerprint)}</div>
+        <div class="sub">${esc(q.reason)}</div></div>`).join("") ||
+      '<div class="empty">no qualification runs recorded on this host</div>');
+
+    const rows = (b.runtime || []).map((t) => `
+      <div class="mr-row"><b>${esc(t.principal || "?")}</b> · ${esc(t.task_class)}
+        <div class="sub">runs ${esc(t.runs)} · verified ${esc(t.verified_complete)} ·
+          non-PASS ${esc(t.non_pass_verdicts)} · dirty ${esc(t.dirty_executions)} ·
+          closed unknown ${esc(t.closed_unknown)} · human-asserted ${esc(t.human_asserted)} ·
+          rollback ${esc(t.rollback_restored)}/${esc(t.rollback_attempted)} ·
+          contained ${esc(t.contained)}</div>
+        <div class="sub">not attributable: ${esc((t.unattributable || []).join(", "))}</div>
+      </div>`).join("");
+    $("mr-runtime").innerHTML = "<h4>RUNTIME HISTORY</h4>" + (rows ||
+      `<div class="empty">${esc(b.ledger_error || "no governed runs recorded yet")}</div>`);
+    $("mr-trust-note").textContent =
+      ((b.ledger && b.ledger.notes) || []).join(" ") +
+      " This view grants nothing: no autonomy, skill, tool or approval right depends on it.";
+  };
+
+  const refreshAll = () => {
+    refreshDecisions(); refreshMetrics(); refreshRouting(); refreshTrust();
+  };
 
   /* ---------- connect / disconnect ---------- */
   const connect = async () => {
