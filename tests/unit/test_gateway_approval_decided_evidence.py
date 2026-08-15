@@ -257,7 +257,10 @@ def test_no_execute_validated_at_decision_time(client, owner_token, monkeypatch)
     run_id, plan_hash = _plan_and_hash(client)
     _approve(client, run_id, plan_hash)  # decision only; no execute
     types = {r.envelope.record_type for r in sink.records}
-    assert types == {"approval_decided"}
+    # The plan phase records which model produced the candidate; approving it must not
+    # emit any execution authority.
+    assert types == {"candidate_attributed", "approval_decided"}
+    assert "execute_validated" not in types
     assert _execute_validated_records(sink) == []
 
 
@@ -347,7 +350,9 @@ def test_approve_then_execute_sequences_approval_decided_then_execute_validated(
         r.envelope.record_type for r in sink.records
         if r.envelope.emitter == EMITTER_GATEWAY
     ]
-    assert ordered == ["approval_decided", "execute_validated"]
+    # Generation, then decision, then authority — in that order, which is the order the
+    # three facts actually happen in.
+    assert ordered == ["candidate_attributed", "approval_decided", "execute_validated"]
 
 
 # --- 20. reject emits decision and no execute_validated ---------------------------------

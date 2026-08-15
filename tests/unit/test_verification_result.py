@@ -314,7 +314,7 @@ def test_the_whole_chain_including_the_verdict_survives_a_restart(tmp_path, wire
     run_id, approval_id = _complete_run(client)
     _emit(opened, _report(PASS, PASS), run_id, approval_id)
     before = [r.envelope.record_type for r in opened.evidence_sink.records]
-    assert before == ["approval_decided", "execute_validated", "apply_result",
+    assert before == ["candidate_attributed", "approval_decided", "execute_validated", "apply_result",
                       "verification_result"]
     opened.close()
 

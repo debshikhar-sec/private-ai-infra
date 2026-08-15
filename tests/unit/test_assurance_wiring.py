@@ -325,11 +325,18 @@ def test_wired_loop_lands_all_three_records_in_one_durable_chain(tmp_path, wired
     assert exec_ref["evidence_digest"] == durable_exec.evidence_ref().evidence_digest
     assert set(exec_ref) == {"evidence_id", "evidence_digest", "record_type", "sink_id"}
     types = [r.envelope.record_type for r in sink.records]
-    assert types == ["approval_decided", "execute_validated", "apply_result"]
+    assert types == [
+        "candidate_attributed", "approval_decided", "execute_validated", "apply_result",
+    ]
     by_type = {r.envelope.record_type: r for r in sink.records}
     for r in sink.records:
         assert r.envelope.run_id == run_id
-        assert r.envelope.approval_id == approval_id
+        if r.envelope.record_type == "candidate_attributed":
+            # Generation precedes approval, so there is no approval to bind to yet. An
+            # approval_id here would be an invented link, not a tighter one.
+            assert r.envelope.approval_id == ""
+        else:
+            assert r.envelope.approval_id == approval_id
         assert r.envelope.sink_id == assurance.DURABLE_SINK_ID
     # Signed linkage end to end: apply_result -> execute_validated -> approval_decided.
     exec_rec = by_type["execute_validated"]
@@ -395,7 +402,7 @@ def test_unwired_injected_sink_keeps_gateway_only_emit(tmp_path, monkeypatch, cl
     _, _, out = _drive_loop(client)
     assert out["applied"] is True
     types = [r.envelope.record_type for r in opened.evidence_sink.records]
-    assert types == ["approval_decided", "execute_validated"]
+    assert types == ["candidate_attributed", "approval_decided", "execute_validated"]
     opened.close()
 
 

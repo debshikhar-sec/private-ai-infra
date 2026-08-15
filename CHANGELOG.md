@@ -7,6 +7,19 @@ All notable changes to this project are documented here. Format based on
 ## [Unreleased]
 
 ### Added
+- **Signed model attribution** (`src/private_ai_gateway/attribution.py`) — the plan phase now
+  appends a signed `candidate_attributed` record naming the model build that produced the
+  candidate (registry fingerprint, backend, resolved id, revision, quantization), the policy
+  hash in force, the task class, and a digest of the candidate itself. `execute_validated`
+  carries that attribution **read back from the record**, never recomputed from the live route
+  map: re-pointing an alias between plan and execute cannot re-credit a run to a build that
+  never saw it, and a new build cannot inherit its predecessor's record. Every field is
+  server-derived — no request field reaches the payload, asserted by parametrised forgery
+  attempts and an AST guard. Runs with no such record (legacy, or no evidence sink) carry the
+  explicit `model_not_recorded` / `policy_not_recorded` shape and are never backfilled.
+  The trust ledger now keys attributed runs by fingerprint and policy hash, and reports
+  unattributable dimensions **per entry** rather than as a blanket disclaimer. It still
+  produces no score, no threshold, and nothing consumes it.
 - **Public-claims truth infrastructure** (`scripts/public_metrics.py`,
   `docs/public-metrics.json`, `tests/unit/test_public_claims.py`) — every mechanically
   checkable public number now has exactly one canonical source and is derived from it: the
