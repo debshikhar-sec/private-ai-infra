@@ -266,8 +266,17 @@ recorded in
   the reason it exists: model self-restraint is not a boundary, so the boundary is
   deterministic code outside the model. Honest limit — in this codebase *no* source-file task
   in the corpus reaches `LOW_RISK_ENGINEERING`; only documentation- and test-only changes do.
-- **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
-  autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.
+- **Earned-autonomy readiness (shadow)** — *shipped advisory, grants nothing.* Qualification,
+  deterministic task risk, attributed runtime history and evidence integrity considered
+  together for the first time, behind an owner-gated read. Every condition is a veto and there
+  is no score, so a flawless record cannot offset a protected surface. One hypothetical lane
+  (right-sized non-security engineering); all others refused by name. No authorization module
+  imports it — proven by falsification. **Nothing is eligible today**, for two independent
+  reasons: the 0/14 security result, and no corpus source-file task clearing the
+  protected-surface veto.
+- **Earned / graduated autonomy (an actual lease)** — *future.* Nothing consumes the readiness
+  result; autonomy is fixed-ceiling by policy today, with no self-approval or earned
+  escalation.
 - **Hermes local training / eval-trace capture** — *future.* No training pipeline exists
   today; Claude-to-Hermes local-model offload is future work.
 

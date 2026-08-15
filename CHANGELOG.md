@@ -7,6 +7,20 @@ All notable changes to this project are documented here. Format based on
 ## [Unreleased]
 
 ### Added
+- **Shadow earned-autonomy readiness** (`src/private_ai_gateway/eligibility.py`,
+  `POST /v1/autonomy-readiness`, console card) — the first place qualification, deterministic
+  task risk, attributed runtime history and evidence integrity are considered together, and it
+  **grants nothing**. Every condition is a veto: security lane not qualified, protected
+  surface, review-required task, insufficient attributable history, unverifiable evidence,
+  unresolved dirty run, rollback or containment failure, or a model fingerprint that changed
+  since the history was earned. There is no score and no weighting, so a flawless record
+  cannot offset a protected surface — asserted. One hypothetical lane only (right-sized
+  non-security engineering); every other lane is refused by name. No authorization module
+  imports it, proven by falsification: wiring it into `autonomy.py` turns the suite red.
+  The console shows `SHADOW / ADVISORY` with no Enable control, also asserted.
+  **Today's honest answer is that nothing is eligible**, for two independent and individually
+  sufficient reasons — the 0/14 security result, and the risk gate finding no corpus
+  source-file task low-risk enough to clear the protected-surface veto.
 - **Owner-gated route activation** (`src/private_ai_gateway/route_revision.py`,
   `POST /v1/models/route-activate`) — route changes are no longer proposal-only. The
   hand-authored `config/policy.toml` is still never written by this process; activation instead
