@@ -61,6 +61,22 @@
                   border-radius: 7px; padding: .38rem .8rem; font: inherit; font-size: .78rem;
                   font-weight: 600; cursor: pointer; }
 
+  .badge-q { display:inline-block; padding:.12rem .5rem; border-radius:999px; font-size:.72rem;
+             font-weight:700; letter-spacing:.02em; border:1px solid currentColor; }
+  .q-QUALIFIED     { color:#34d399; }
+  .q-ADVISORY_ONLY { color:#fbbf24; }
+  .q-UNQUALIFIED   { color:#f87171; }
+  .q-NOT_EVALUATED { color:#94a3b8; }
+  .q-UNAVAILABLE   { color:#64748b; }
+  .f-FITS          { color:#34d399; }
+  .f-MARGINAL      { color:#fbbf24; }
+  .f-DOES_NOT_FIT  { color:#f87171; }
+  .f-UNKNOWN       { color:#94a3b8; }
+  .mr-row { padding:.55rem 0; border-bottom:1px solid rgba(148,163,184,.14); }
+  .mr-row:last-child { border-bottom:0; }
+  .mr-warn { color:#f87171; margin:.25rem 0 0; }
+  .reasons { font-size:.72rem; color:#94a3b8; }
+
   /* ---- responsive: collapse the fixed rail on phones/tablets ---- */
   @media (max-width: 820px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr;
@@ -181,6 +197,7 @@
   <button class="nv" data-pane="tools"><span class="ic">⚒</span>Tools</button>
   <button class="nv" data-pane="agents"><span class="ic">⧉</span>Agents</button>
   <button class="nv" data-pane="metrics"><span class="ic">∿</span>Metrics</button>
+  <button class="nv" data-pane="models"><span class="ic">◈</span>Models &amp; Routing</button>
   <a class="nv" href="/chat" title="Operate: propose, approve and observe a governed run"><span class="ic">💬</span><span>Governed Chat — operate ▸</span></a>
   <div class="foot">capability is not authority — every decision below is enforced, then recorded.</div>
 </nav>
@@ -323,6 +340,53 @@
   </section>
 
   <!-- ============ METRICS ============ -->
+  <!-- ============ MODELS & ROUTING ============ -->
+  <section class="pane" id="pane-models">
+    <div class="card">
+      <h3>What is routed right now</h3>
+      <p class="sub">Read from the policy-hash-covered <code>[models.routes]</code> table — the
+        same source the gateway enforces from. Capability is shown here; <b>authority is a
+        separate axis</b> and nothing on this page changes it.</p>
+      <div id="mr-routes"><div class="empty">Connect to load the capability registry.</div></div>
+      <div class="sub" id="mr-host"></div>
+    </div>
+
+    <div class="card">
+      <h3>Qualified for which task?</h3>
+      <p class="sub">Per lane, never one global score. A model good at documentation
+        consistency is not thereby trusted with security review — and the security lane is
+        derived only from the measured refusal rate.</p>
+      <div id="mr-lanes"><div class="empty">Connect to load qualification.</div></div>
+    </div>
+
+    <div class="card">
+      <h3>Propose a route change</h3>
+      <p class="sub">Selecting a model builds a <b>proposal</b>. A browser dropdown never
+        writes the policy file, and a route change never alters autonomy, skills, tools or
+        approval rights.</p>
+      <div class="row">
+        <select id="mr-lane"></select>
+        <select id="mr-alias"></select>
+        <button id="mr-propose">Build proposal</button>
+      </div>
+      <div id="mr-proposal"></div>
+    </div>
+
+    <div class="card">
+      <h3>Authority of the routed principals</h3>
+      <p class="sub">Shown separately on purpose. Changing which model answers does not change
+        what any principal is permitted to do.</p>
+      <div id="mr-authority"><div class="empty">Connect to load authority.</div></div>
+    </div>
+
+    <div class="card">
+      <h3>Deterministic controls — not model-routed</h3>
+      <p class="sub">These have no model selector and never will. Each either holds or does
+        not; a model's opinion about that is not evidence.</p>
+      <div id="mr-deterministic"></div>
+    </div>
+  </section>
+
   <section class="pane" id="pane-metrics">
     <div class="card">
       <h3>Prometheus samples (/metrics)</h3>
@@ -492,7 +556,108 @@
     $("cardout").textContent = r.ok ? JSON.stringify(r.body, null, 2) : r.status + " — denied";
   };
 
-  const refreshAll = () => { refreshDecisions(); refreshMetrics(); };
+
+  /* ---------- models & routing ----------
+     Four separate answers, never one badge: what is available, what is qualified for the
+     task, what is routed, and what authority the principals hold. The last is rendered from
+     policy and is deliberately untouched by anything else on this page. */
+  let routing = null;
+
+  const qBadge = (state) =>
+    `<span class="badge-q q-${esc(state)}">${esc(String(state).replace(/_/g, " "))}</span>`;
+  const fBadge = (verdict) =>
+    `<span class="badge-q f-${esc(verdict)}">${esc(String(verdict).replace(/_/g, " "))}</span>`;
+
+  const refreshRouting = async () => {
+    const r = await api("/v1/models/routing");
+    if (!r.ok) {
+      $("mr-routes").innerHTML = '<div class="empty">' + r.status + " — routing denied</div>";
+      return;
+    }
+    routing = r.body;
+    const reg = routing.registry || {};
+    const host = reg.host || {};
+
+    $("mr-host").textContent =
+      `host: ${host.platform || "?"} ${host.architecture || "?"} · ` +
+      `${host.total_memory_gb ? host.total_memory_gb + " GB" : "memory unknown"} · ` +
+      `backends: ${(host.backends_available || []).join(", ")} · ` +
+      `policy ${String(reg.policy_hash || "").slice(0, 22) || "unreadable"}`;
+
+    $("mr-routes").innerHTML = (reg.models || []).map((m) => {
+      const i = m.identity || {};
+      const isDefault = i.route_alias === reg.default_alias;
+      return `<div class="mr-row">
+        <b>${esc(i.route_alias)}</b>${isDefault ? " <small>(default route)</small>" : ""}
+        &nbsp;→&nbsp;<code>${esc(i.resolved_model)}</code>
+        <div class="sub">backend ${esc(i.backend || "?")} ·
+          ${esc(i.quantization || "quantization not stated")} ·
+          build ${esc((i.revision || "unknown").slice(0, 12))} ·
+          id ${esc(String(i.fingerprint || "").slice(7, 19))}</div>
+        <div>${esc(m.availability)} &nbsp; ${fBadge(m.fit && m.fit.verdict)}
+          <span class="sub">${esc((m.fit && m.fit.reason) || "")}</span></div>
+      </div>`;
+    }).join("") || '<div class="empty">no routes configured</div>';
+
+    $("mr-lanes").innerHTML = (routing.lanes || []).map((lane) => {
+      const rows = (lane.recommendations || []).map((rec) => `
+        <div class="mr-row">
+          <b>${esc(rec.route_alias)}</b> ${qBadge(rec.qualification)}
+          ${rec.eligible ? "" : '<span class="sub">— not eligible</span>'}
+          <div class="reasons">${esc((rec.reasons || []).join(" · "))}</div>
+        </div>`).join("");
+      return `<div class="mr-row"><b>${esc(lane.label)}</b>${rows || ""}</div>`;
+    }).join("");
+
+    $("mr-authority").innerHTML = (routing.authority || []).map((a) => `
+      <div class="mr-row"><b>${esc(a.principal)}</b>
+        <div class="sub">autonomy ceiling L${esc(a.max_autonomy_level)} ·
+          models ${esc((a.allowed_models || []).join(", ") || "none")} ·
+          skills ${esc((a.allowed_skills || []).join(", ") || "none")} ·
+          tools ${esc((a.allowed_tools || []).join(", ") || "none")}</div>
+      </div>`).join("") || '<div class="empty">no agent principals configured</div>';
+
+    $("mr-deterministic").innerHTML = (routing.deterministic_controls || []).map((c) => `
+      <div class="mr-row"><b>${esc(c.name)}</b>
+        <div class="sub">${esc(c.why)}</div></div>`).join("");
+
+    $("mr-lane").innerHTML = (routing.lanes || [])
+      .map((l) => `<option value="${esc(l.lane)}">${esc(l.label)}</option>`).join("");
+    $("mr-alias").innerHTML = (reg.models || [])
+      .map((m) => `<option value="${esc(m.identity.route_alias)}">${esc(m.identity.route_alias)}</option>`)
+      .join("");
+  };
+
+  const proposeRoute = async () => {
+    const r = await api("/v1/models/route-proposal", {
+      method: "POST",
+      body: JSON.stringify({ lane: $("mr-lane").value, route_alias: $("mr-alias").value }),
+    });
+    if (!r.ok) {
+      $("mr-proposal").innerHTML = '<div class="empty">' + r.status + " — " +
+        esc((r.body && r.body.error && r.body.error.code) || "refused") + "</div>";
+      return;
+    }
+    const p = r.body;
+    const warn = (p.warnings || [])
+      .map((w) => `<div class="mr-warn">⚠ ${esc(w)}</div>`).join("");
+    $("mr-proposal").innerHTML = `
+      <div class="mr-row">
+        <div>current: <code>${esc((p.current && p.current.resolved_model) || "—")}</code></div>
+        <div>proposed: <code>${esc((p.proposed && p.proposed.resolved_model) || "—")}</code>
+          ${p.proposed ? qBadge(p.proposed.qualification) : ""}
+          ${p.proposed ? fBadge(p.proposed.fit) : ""}</div>
+        <div class="sub">policy ${esc(String(p.current_policy_hash || "").slice(0, 22))} ·
+          activation: ${esc(p.activation)}</div>
+        ${warn}
+        <div class="sub"><b>Not applied.</b> ${esc(p.note || "")}
+          Autonomy, skills, tools and approval rights are unchanged.</div>
+      </div>`;
+  };
+
+  $("mr-propose").addEventListener("click", proposeRoute);
+
+  const refreshAll = () => { refreshDecisions(); refreshMetrics(); refreshRouting(); };
 
   /* ---------- connect / disconnect ---------- */
   const connect = async () => {

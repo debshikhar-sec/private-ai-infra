@@ -884,6 +884,167 @@ def v1_models_registry():
     return jsonify(built.to_mapping()), 200
 
 
+@app.route("/v1/models/routing", methods=["GET"])
+def v1_models_routing():
+    """Everything the Models & Routing view needs, kept as four separate answers.
+
+    Deliberately *not* collapsed into one badge. "What is available", "what is qualified for
+    this task", "what is currently routed", and "what authority does the routed principal
+    hold" are four different questions, and a UI that merges them is how a capability number
+    turns into a permission in someone's head.
+
+    The authority block is included precisely so it can be shown **separately** and shown to
+    be unchanged by anything on this page.
+    """
+    from private_ai_gateway import registry as reg
+
+    denied = _owner_only("Model routing")
+    if denied is not None:
+        return denied
+
+    built = _capability_registry()
+    lanes = []
+    for lane in reg.LANES:
+        eligible = None
+        if lane == reg.LANE_ENGINEERING:
+            # Engineering candidates are authored by the shadow principal, so its own model
+            # allowlist bounds what may serve the lane at all.
+            shadow = _principal_named("shadow-engineer")
+            if shadow is not None and "*" not in shadow.allowed_models:
+                eligible = set(shadow.allowed_models)
+        lanes.append({
+            "lane": lane,
+            "label": reg.LANE_LABELS[lane],
+            "recommendations": [
+                r.to_mapping() for r in reg.recommend(built, lane, policy_eligible=eligible)
+            ],
+        })
+
+    return jsonify({
+        "registry": built.to_mapping(),
+        "lanes": lanes,
+        "deterministic_controls": [
+            {"name": name, "why": why} for name, why in reg.DETERMINISTIC_CONTROLS
+        ],
+        "authority": _routed_authority(),
+        "activation": _ROUTE_ACTIVATION,
+    }), 200
+
+
+@app.route("/v1/models/route-proposal", methods=["POST"])
+def v1_models_route_proposal():
+    """Compute a route-change **proposal**. Nothing is applied, ever, on this path.
+
+    Body: ``{lane, route_alias}``. Returns the before/after picture, the qualification and fit
+    of the proposed model, the current policy hash, and every warning that applies. A browser
+    dropdown must never mutate the policy file, so this endpoint deliberately cannot: see
+    ``_ROUTE_ACTIVATION`` for the exact gap that has to close before activation exists.
+    """
+    from private_ai_gateway import registry as reg
+
+    denied = _owner_only("Model routing")
+    if denied is not None:
+        return denied
+
+    body = request.get_json(silent=True) or {}
+    lane = str(body.get("lane", "")).strip()
+    route_alias = str(body.get("route_alias", "")).strip()
+    if lane not in reg.LANES:
+        return jsonify(
+            {"error": {"message": "Unknown task lane", "type": "invalid_request_error",
+                       "code": "unknown_lane"}}
+        ), 400
+
+    proposal = reg.propose_route(
+        _capability_registry(), lane=lane, route_alias=route_alias,
+        activation=_ROUTE_ACTIVATION["state"],
+    )
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"route_proposed:{lane}:{route_alias}", status=200,
+    )
+    logger.info(
+        f"ROUTE_PROPOSED | lane={log_safe(lane)} | alias={log_safe(route_alias)} "
+        f"| applied=false"
+    )
+    return jsonify({
+        **proposal.to_mapping(),
+        "applied": False,
+        "authority_unchanged": True,
+        "note": "a proposal only; no policy file was written and no authority changed",
+    }), 200
+
+
+# Why activation is not implemented yet, stated where the code is rather than only in a doc.
+# The active policy is read once at import (``Policy.load(POLICY_PATH)``) and ``ROUTE_MAP`` is
+# derived from it at import; there is no narrow, atomic, owner-gated mechanism that can change
+# a route while preserving policy-hash coverage, keeping the config source deterministic,
+# avoiding caller-chosen paths, and surviving a restart. Inventing a second routing source
+# here would let a browser dropdown escape the hash that authority is bound to, so this ships
+# proposal-only and the gap is named.
+_ROUTE_ACTIVATION = {
+    "state": "proposal_only",
+    "reason": "no owner-gated, hash-preserving config mutation path exists yet",
+    "gap": (
+        "activation needs a management-plane mutation that rewrites exactly the "
+        "[models.routes] table of the active policy file atomically, re-derives the policy "
+        "hash, reloads the route map, is audited, and is refused to every non-owner "
+        "principal — including the agents whose own route it would change"
+    ),
+}
+
+
+def _principal_named(name: str):
+    """A configured principal by name, or ``None`` — policy-derived, never key material."""
+    for principal in POLICY.principals():
+        if principal.name == name:
+            return principal
+    return None
+
+
+def _capability_registry():
+    """One assembled capability picture, shared by the routing views."""
+    from private_ai_gateway import registry as reg
+
+    cache = reg.ModelCache()
+    host = reg.snapshot_host(
+        active_backend=getattr(BACKEND, "name", ""),
+        cache=cache,
+        upstream_configured=bool(os.environ.get("PRIVATE_AI_UPSTREAM_BASE_URL")),
+    )
+    return reg.build_registry(
+        ROUTE_MAP,
+        backend=getattr(BACKEND, "name", ""),
+        host=host,
+        cache=cache,
+        artifacts=reg.load_artifacts(QUALIFICATION_ARTIFACT_DIR),
+        default_alias=DEFAULT_MODEL_ALIAS,
+        policy_hash=_policy_file_hash(),
+    )
+
+
+def _routed_authority() -> list[dict]:
+    """The authority each agent principal actually holds — shown *beside* routing, never merged.
+
+    Sourced from policy, not from the registry, so the page cannot imply that changing a model
+    changes a ceiling. It is here to be visibly independent.
+    """
+    out = []
+    for name in ("hermes", "opencode", "openclaw", "shadow-engineer"):
+        principal = _principal_named(name)
+        if principal is None:
+            continue
+        out.append({
+            "principal": principal.name,
+            "max_autonomy_level": autonomy_ceiling_for(principal),
+            "allowed_models": sorted(principal.allowed_models),
+            "allowed_skills": sorted(principal.allowed_skills),
+            "allowed_tools": sorted(principal.allowed_tools),
+        })
+    return out
+
+
 def _policy_file_hash() -> str:
     """The active policy file's hash, or ``""`` when it cannot be read.
 
