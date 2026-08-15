@@ -3,7 +3,7 @@
   "adversarial_evals": 23,
   "ci_platforms": 2,
   "coverage_display_pct": 92,
-  "coverage_pct": 91.93,
+  "coverage_pct": 91.85,
   "enforced_controls": 14,
   "media": {
     "tour_frames": 12,
@@ -44,5 +44,5 @@
     "zero_edit_numerator": 13,
     "zero_edit_pct": 43
   },
-  "tests": 1310
+  "tests": 1341
 }

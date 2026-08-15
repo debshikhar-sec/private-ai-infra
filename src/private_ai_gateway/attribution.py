@@ -39,7 +39,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
+
+_LOG = logging.getLogger("AuditTrail")
 
 #: The signed record type written when a candidate is generated.
 CANDIDATE_ATTRIBUTED_RECORD_TYPE = "candidate_attributed"
@@ -130,7 +133,16 @@ def attribute_candidate(
     """
     from private_ai_gateway import registry as reg
 
+    # The routes actually in force — base policy merged with any active managed revision — so
+    # a run is attributed to the model that a revision put behind the alias, not to whatever
+    # the hand-authored file alone would say.
+    resolver = getattr(gw, "effective_routes", None)
     route_map = getattr(gw, "ROUTE_MAP", {}) or {}
+    if resolver is not None:
+        try:
+            route_map = getattr(resolver(), "routes", None) or route_map
+        except Exception as exc:  # noqa: BLE001 — a plan must not fail over a revision read
+            _LOG.warning("effective route resolution failed; using the base map: %s", exc)
     resolved = route_map.get(route_alias, "")
     if not resolved:
         raise AttributionError(f"route alias {route_alias!r} resolves to no model")

@@ -35,6 +35,10 @@ PASS = "pass"  # nosec B105 — control-status enum value, not a credential
 FAIL = "fail"
 INCONCLUSIVE = "inconclusive"
 
+#: The exact reason code the gateway's limiter records (``app.py``). Compared whole, never as
+#: a substring — see :func:`check_ratelimit`.
+RATE_LIMIT_REASON = "rate_limited"
+
 
 @dataclass
 class Finding:
@@ -190,10 +194,15 @@ def check_authz_model(ev: Evidence) -> Finding:
 # ------------------------------------------------------------------------- AC-RATELIMIT
 def check_ratelimit(ev: Evidence) -> Finding:
     cid, title = "AC-RATELIMIT", "Rate-limit decisions were enforced as 429"
+    # Match the limiter's own reason code, not the substring "rate". The gateway records
+    # exactly ``rate_limited`` (app.py), and a bare substring test also matches "st*rate*gy",
+    # "gene*rate*", "accu*rate*" — so an unrelated allow whose reason merely mentioned the
+    # strategy route was judged a rate-limit decision that failed to be a 429, and this
+    # control FAILed. A security check that unrelated audit text can flip is not a check.
     events = [
         e
         for e in ev.audit.events
-        if "rate" in (e.reason or "").lower() or e.status == 429
+        if (e.reason or "").strip().lower() == RATE_LIMIT_REASON or e.status == 429
     ]
     if not events:
         return Finding(

@@ -80,6 +80,9 @@ class RunRecord:
     policy_ceiling: int
     created_at: datetime = field(default_factory=_now)
     status: RunStatus = RunStatus.OPEN
+    #: The effective policy hash in force when this run was planned. Empty means "not
+    #: recorded" (a run predating the column), never "no policy".
+    policy_hash: str = ""
 
 
 @dataclass
@@ -134,6 +137,7 @@ class AuthorityStore(Protocol):
         canonical_plan_hash: str,
         effective_autonomy: int,
         policy_ceiling: int,
+        policy_hash: str = ...,
     ) -> RunRecord: ...
 
     def get_run(self, run_id: str) -> RunRecord | None: ...
@@ -200,6 +204,7 @@ class ApprovalStore:
         canonical_plan_hash: str,
         effective_autonomy: int,
         policy_ceiling: int,
+        policy_hash: str = "",
     ) -> RunRecord:
         """Record a run. Fails closed if it would grant autonomy above the ceiling."""
         if not run_id:
@@ -218,6 +223,7 @@ class ApprovalStore:
                 canonical_plan_hash=canonical_plan_hash,
                 effective_autonomy=effective_autonomy,
                 policy_ceiling=policy_ceiling,
+                policy_hash=policy_hash,
             )
             self._runs[run_id] = run
             return run

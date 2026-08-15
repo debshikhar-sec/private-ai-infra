@@ -156,6 +156,13 @@ QUALIFICATION_ARTIFACT_DIR = os.environ.get(
     "PRIVATE_AI_QUALIFICATION_DIR", "runtime/qualification"
 )
 
+# Managed route revisions. This directory is written by the gateway; ``config/policy.toml``
+# never is. The effective configuration is base policy + active revision, and the effective
+# policy hash is derived over both — see ``route_revision``.
+ROUTE_REVISION_DIR = os.environ.get(
+    "PRIVATE_AI_ROUTE_REVISION_DIR", os.path.join(_PROJECT_ROOT, "runtime", "route-revisions")
+)
+
 # Release both stores' connections and ownership locks on interpreter shutdown. (Process
 # death releases the flocks anyway; this makes a *clean* shutdown explicit.)
 atexit.register(_OPENED_BACKEND.close)
@@ -965,6 +972,104 @@ def v1_trust_history():
     }), 200
 
 
+@app.route("/v1/models/route-activate", methods=["POST"])
+def v1_models_route_activate():
+    """Activate a route change as a managed revision. Owner only, and narrow by construction.
+
+    Writes a numbered, atomic revision to the gateway-owned store — never to
+    ``config/policy.toml``, which stays hand-authored. The new effective policy hash is
+    computed over base policy + the revision and returned, so the caller sees exactly what
+    authority will bind to. Runs already in flight are untouched.
+
+    Refused for the security lane unless the model is qualified for it. That is not a warning
+    here as it is on the proposal path: activation is the point where a warning would stop
+    being read.
+    """
+    from private_ai_gateway import registry as reg
+    from private_ai_gateway import route_revision as rev
+
+    denied = _owner_only("Route activation")
+    if denied is not None:
+        return denied
+
+    body = request.get_json(silent=True) or {}
+    lane = str(body.get("lane", "")).strip()
+    route_alias = str(body.get("route_alias", "")).strip()
+    if lane not in reg.LANES:
+        return jsonify({"error": {"message": "Unknown task lane",
+                                  "type": "invalid_request_error",
+                                  "code": "unknown_lane"}}), 400
+
+    registry = _capability_registry()
+    target = registry.by_alias(route_alias)
+    if target is None:
+        return jsonify({"error": {"message": "Unknown route alias",
+                                  "type": "invalid_request_error",
+                                  "code": "unknown_route_alias"}}), 400
+
+    standing = target.lanes.get(lane)
+    state = standing.state if standing else reg.NOT_EVALUATED
+    if lane == reg.LANE_SECURITY_REVIEW and state != reg.QUALIFIED:
+        logger.warning(
+            f"ROUTE_ACTIVATION_REFUSED | lane={log_safe(lane)} "
+            f"| alias={log_safe(route_alias)} | qualification={log_safe(state)}"
+        )
+        DECISION_LOG.record(
+            request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+            method=request.method, path=request.path, model=None,
+            decision="deny", reason="security_lane_not_qualified", status=403,
+        )
+        return jsonify({"error": {
+            "message": (
+                "This model is not qualified for security review, so it cannot be activated "
+                "for that lane. Only a new qualification measurement can change that."
+            ),
+            "type": "permission_error",
+            "code": "security_lane_not_qualified",
+            "qualification": state,
+        }}), 403
+
+    try:
+        revision = rev.build_revision(
+            _route_revision_store(),
+            base_routes=ROUTE_MAP,
+            policy_path=POLICY_PATH,
+            lane=lane,
+            route_alias=route_alias,
+            resolved_model=target.identity.resolved_model,
+            activated_by=g.principal.name,
+        )
+        _route_revision_store().append(revision)
+    except rev.RouteRevisionError as exc:
+        logger.warning(f"ROUTE_ACTIVATION_FAILED | detail={log_safe(str(exc))}")
+        return jsonify({"error": {"message": "The route revision could not be written",
+                                  "type": "server_error",
+                                  "code": "route_revision_unavailable"}}), 503
+
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"route_activated:{lane}:{route_alias}", status=200,
+    )
+    logger.info(
+        f"ROUTE_ACTIVATED | revision={revision.revision} | lane={log_safe(lane)} "
+        f"| alias={log_safe(route_alias)}"
+    )
+    return jsonify({
+        "activated": True,
+        "revision": revision.revision,
+        "lane": lane,
+        "route_alias": route_alias,
+        "resolved_model": revision.routes.get(route_alias, ""),
+        "base_policy_hash": revision.base_policy_hash,
+        "effective_policy_hash": revision.effective_policy_hash,
+        "policy_file_written": False,
+        "authority_unchanged": True,
+        "applies_to": "runs planned after this revision; runs in flight keep their own",
+        "note": revision.note,
+    }), 200
+
+
 @app.route("/v1/task-risk", methods=["POST"])
 def v1_task_risk():
     """Classify a proposed change against the protected-surface taxonomy.
@@ -1046,23 +1151,56 @@ def v1_models_route_proposal():
     }), 200
 
 
-# Why activation is not implemented yet, stated where the code is rather than only in a doc.
-# The active policy is read once at import (``Policy.load(POLICY_PATH)``) and ``ROUTE_MAP`` is
-# derived from it at import; there is no narrow, atomic, owner-gated mechanism that can change
-# a route while preserving policy-hash coverage, keeping the config source deterministic,
-# avoiding caller-chosen paths, and surviving a restart. Inventing a second routing source
-# here would let a browser dropdown escape the hash that authority is bound to, so this ships
-# proposal-only and the gap is named.
+# Activation exists now, and deliberately does not work the way the earlier gap description
+# imagined. Rewriting the hand-authored ``config/policy.toml`` from an HTTP handler was the
+# obvious plan and the wrong one: it would put a web request in charge of a file a human owns,
+# with no way to distinguish an operator's edit from a machine's. Instead the policy file stays
+# hand-authored and never written here, and activation appends a numbered, atomic revision to a
+# gateway-owned store. The effective configuration is base policy + active revision, and the
+# effective policy hash is derived over both — so the hash still covers everything in force.
+# See ``private_ai_gateway.route_revision``.
 _ROUTE_ACTIVATION = {
-    "state": "proposal_only",
-    "reason": "no owner-gated, hash-preserving config mutation path exists yet",
-    "gap": (
-        "activation needs a management-plane mutation that rewrites exactly the "
-        "[models.routes] table of the active policy file atomically, re-derives the policy "
-        "hash, reloads the route map, is audited, and is refused to every non-owner "
-        "principal — including the agents whose own route it would change"
+    "state": "owner_gated_revision",
+    "reason": "activation appends a managed, hash-covered revision; the policy file is never written",
+    "effect": (
+        "a revision takes effect for runs planned after it; runs already in flight keep the "
+        "revision they were planned under, so a route change can never retroactively "
+        "reinterpret a run someone already approved"
+    ),
+    "limits": (
+        "route table only — a revision has no field for autonomy, skills, tools, principals or "
+        "approval rights, so there is nothing to set rather than merely a check that refuses; "
+        "a model whose security lane is not qualified cannot be activated for security work"
     ),
 }
+
+
+def _route_revision_store():
+    from private_ai_gateway import route_revision as rev
+
+    return rev.RouteRevisionStore(ROUTE_REVISION_DIR)
+
+
+def effective_routes():
+    """The route table actually in force: base policy merged with the active revision.
+
+    Falls back to the base map — loudly, via the returned ``state`` — if the revision store is
+    unreadable or the policy file changed underneath a revision. A route override is never
+    applied against a policy file it was not reviewed against.
+    """
+    from private_ai_gateway import route_revision as rev
+
+    try:
+        return rev.resolve_effective_routes(
+            _route_revision_store(), base_routes=ROUTE_MAP, policy_path=POLICY_PATH
+        )
+    except rev.RouteRevisionError as exc:
+        logger.warning(f"ROUTE_REVISION_UNREADABLE | detail={log_safe(str(exc))}")
+        return rev.EffectiveRoutes(
+            routes=dict(ROUTE_MAP),
+            state=rev.ACTIVATION_NONE,
+            detail=f"revision store unreadable; the policy file is in force ({exc})",
+        )
 
 
 def _principal_named(name: str):
