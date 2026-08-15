@@ -391,6 +391,17 @@
     </div>
 
     <div class="card">
+      <h3>Earned Autonomy Readiness <span class="badge badge-warn">SHADOW / ADVISORY</span></h3>
+      <p class="sub">Whether a candidate <em>could</em> ever run unattended, computed from
+        qualification, deterministic task risk, attributed runtime history and evidence
+        integrity. Every condition is a veto — there is no score, and a strong record cannot
+        offset a protected surface. <strong>Nothing consumes this result.</strong> There is no
+        lease, no auto-approval, and deliberately no button here: execution stays human-gated.</p>
+      <div id="mr-readiness"><div class="empty">Connect to load readiness.</div></div>
+      <div class="sub" id="mr-readiness-note"></div>
+    </div>
+
+    <div class="card">
       <h3>Deterministic controls — not model-routed</h3>
       <p class="sub">These have no model selector and never will. Each either holds or does
         not; a model's opinion about that is not evidence.</p>
@@ -698,8 +709,33 @@
       " This view grants nothing: no autonomy, skill, tool or approval right depends on it.";
   };
 
+  const refreshReadiness = async () => {
+    const r = await api("/v1/autonomy-readiness", {
+      method: "POST",
+      body: JSON.stringify({ objective: "routine right-sized engineering change" }),
+    });
+    if (!r.ok) {
+      $("mr-readiness").innerHTML =
+        '<div class="empty">' + r.status + " — readiness denied</div>";
+      return;
+    }
+    const b = r.body;
+    const vetoes = (b.vetoes || []).map((v) => `
+      <div class="mr-row"><b>${esc(v.code)}</b>
+        <div class="sub">${esc(v.detail)}</div></div>`).join("");
+    $("mr-readiness").innerHTML = `
+      <div class="mr-row"><b>${esc(b.outcome)}</b>
+        <span class="badge badge-warn">${esc(b.posture)}</span>
+        <div class="sub">lane ${esc(b.lane)} · build ${esc(b.model_fingerprint || "not recorded")}</div>
+      </div>` + (vetoes ||
+      '<div class="empty">no vetoes recorded for this candidate</div>');
+    $("mr-readiness-note").textContent =
+      esc(b.note || "") + " Grants: " + esc(b.grants) +
+      ". Consumed by: " + esc(b.consumed_by) + ".";
+  };
+
   const refreshAll = () => {
-    refreshDecisions(); refreshMetrics(); refreshRouting(); refreshTrust();
+    refreshDecisions(); refreshMetrics(); refreshRouting(); refreshTrust(); refreshReadiness();
   };
 
   /* ---------- connect / disconnect ---------- */

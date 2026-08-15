@@ -148,6 +148,12 @@ def derive_ledger(authority_store, evidence_sink) -> TrustLedger:
     Fails closed on an unverifiable chain: an unreadable history is not a clean history, and
     an empty ledger would read as exactly that.
     """
+    from private_ai_gateway.agents_path import ensure_repo_agents_first
+
+    # An unrelated installed package named ``openclaw`` otherwise shadows the verifier and
+    # this endpoint 500s in a real process while passing in CI. See :mod:`agents_path`.
+    ensure_repo_agents_first()
+
     from openclaw.evidence import SinkGraphReader
 
     from private_ai_gateway.attribution import CANDIDATE_ATTRIBUTED_RECORD_TYPE

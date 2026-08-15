@@ -962,6 +962,13 @@ def v1_trust_history():
     except tl.TrustLedgerError as exc:
         error = str(exc)
         logger.warning(f"TRUST_LEDGER_UNAVAILABLE | detail={log_safe(error)}")
+    except Exception as exc:  # noqa: BLE001 — an unreadable ledger is "no ledger", not a 500
+        # This path is why the endpoint used to return 500 in a real process: a same-named
+        # installed package shadowed the verifier and raised ImportError, which the narrow
+        # except above did not cover. "No ledger" is the honest answer and the safe one —
+        # an absent history must never render as a clean one.
+        error = f"the trust history could not be derived: {exc}"
+        logger.warning(f"TRUST_LEDGER_UNAVAILABLE | detail={log_safe(str(exc))}")
 
     view = tl.build_view(_capability_registry(), ledger)
     return jsonify({
@@ -970,6 +977,83 @@ def v1_trust_history():
         "ledger_error": error,
         "grants": "nothing",
     }), 200
+
+
+@app.route("/v1/autonomy-readiness", methods=["POST"])
+def v1_autonomy_readiness():
+    """Advisory earned-autonomy readiness. Shadow only — it grants nothing and nothing reads it.
+
+    Assembles the facts other modules established (lane qualification, deterministic task
+    risk, attributed runtime history, evidence integrity) and reports whether a candidate
+    *could* ever run unattended. Every condition is a veto; there is no score. No
+    authorization path consumes this result, and a structural test keeps it that way.
+    """
+    from private_ai_gateway import eligibility as elig
+    from private_ai_gateway import registry as reg
+    from private_ai_gateway import task_risk as risk
+    from private_ai_gateway import trust_ledger as tl
+
+    denied = _owner_only("Autonomy readiness")
+    if denied is not None:
+        return denied
+
+    body = request.get_json(silent=True) or {}
+    lane = str(body.get("lane", elig.LANE_ENGINEERING_CANDIDATE)).strip()
+    route_alias = str(body.get("route_alias", "")).strip() or DEFAULT_MODEL_ALIAS
+
+    registry = _capability_registry()
+    model = registry.by_alias(route_alias)
+    identity = model.identity if model is not None else None
+    lane_state = ""
+    security_state = ""
+    if model is not None:
+        standing = model.lanes.get(lane)
+        lane_state = standing.state if standing else reg.NOT_EVALUATED
+        sec = model.lanes.get(reg.LANE_SECURITY_REVIEW)
+        security_state = sec.state if sec else reg.NOT_EVALUATED
+
+    assessment = risk.classify(
+        declared_files=body.get("declared_files") or (),
+        content=str(body.get("content", "")),
+        objective=str(body.get("objective", "")),
+        claimed_class=str(body.get("risk_class", "")),
+    )
+
+    # History is read from the derived ledger, which fails closed on an unverifiable chain.
+    facts = None
+    history_fingerprint = ""
+    evidence_verified = False
+    try:
+        ledger = tl.derive_ledger(APPROVAL_STORE, EVIDENCE_SINK)
+        evidence_verified = True
+        fingerprint = identity.fingerprint if identity is not None else ""
+        for entry in ledger.entries:
+            if entry.key.model_fingerprint == fingerprint != tl.NOT_RECORDED:
+                facts, history_fingerprint = entry.facts, entry.key.model_fingerprint
+                break
+    except Exception:  # noqa: BLE001 — any unreadable history is unverified history
+        # Fails closed on purpose, and the direction matters: an unreadable chain must read as
+        # "no usable history", never as "a clean record".
+        evidence_verified = False
+        facts, history_fingerprint = None, ""
+
+    result = elig.evaluate(
+        lane=lane,
+        security_lane_state=security_state,
+        lane_state=lane_state,
+        risk_class=assessment.risk_class,
+        trust_facts=facts,
+        model_fingerprint=identity.fingerprint if identity is not None else "",
+        history_fingerprint=history_fingerprint,
+        policy_hash=effective_routes().effective_policy_hash,
+        evidence_verified=evidence_verified,
+    )
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"autonomy_readiness:{result.outcome}", status=200,
+    )
+    return jsonify({**result.to_mapping(), "task_risk": assessment.to_mapping()}), 200
 
 
 @app.route("/v1/models/route-activate", methods=["POST"])

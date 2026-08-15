@@ -178,6 +178,9 @@ def resolve_recorded_attribution(sink, *, run_id: str) -> dict | None:
     if sink is None or not run_id:
         return None
     try:
+        from private_ai_gateway.agents_path import ensure_repo_agents_first
+
+        ensure_repo_agents_first()
         from openclaw.evidence import SinkGraphReader
     except ImportError:  # pragma: no cover — agents path is ensured before use
         return None
