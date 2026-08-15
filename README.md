@@ -590,6 +590,22 @@ docs/                     # architecture, security & threat model, orchestration
   recorded attribution rather than re-reading the route map, so a route change cannot move a
   run's history onto a model that never saw it. This is a governed, human-in-authority
   system — **not** fully autonomous.
+- **Route activation is owner-gated and hash-covered**, and never rewrites the hand-authored
+  policy file: it appends a numbered atomic revision to a gateway-owned store, and the
+  effective policy hash covers base policy plus revision. A revision has no field for
+  autonomy, skills, tools or approval rights; a security-unqualified model cannot be
+  activated for the security lane; and runs already in flight keep the configuration they
+  were approved under.
+- **Protected surfaces are decided outside the model.** The local model implemented all
+  fourteen control-weakening changes in the qualification corpus, so a deterministic gate —
+  twenty enumerated controls, matched by path *and* symbol, with risk that only ratchets up —
+  classifies changes instead. All 14 classify as `PROTECTED_SECURITY`, and a caller's own
+  label can never lower a classification.
+- **Earned autonomy remains future, and readiness is shadow-only.** An advisory result
+  combines qualification, task risk, attributed history and evidence integrity; every
+  condition is a veto, there is no score, nothing consumes it, and there is no Enable
+  control. **Nothing is eligible today** — the 0/14 security result and the protected-surface
+  gate are each independently sufficient to refuse.
 
 ## License
 
