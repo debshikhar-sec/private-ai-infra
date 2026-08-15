@@ -312,7 +312,9 @@ def test_the_route_proposal_endpoint_applies_nothing(client, monkeypatch):
     body = resp.get_json()
     assert body["applied"] is False
     assert body["authority_unchanged"] is True
-    assert body["activation"] == "proposal_only"
+    # The proposal path still applies nothing, even though activation now exists: proposing
+    # and activating are separate endpoints with separate gates.
+    assert body["activation"] == "owner_gated_revision"
     assert gw.ROUTE_MAP == before                       # the route map is untouched
     assert gw.POLICY is policy_before                   # and so is the loaded policy
 
@@ -342,8 +344,12 @@ def test_an_unknown_lane_is_refused(client):
 def test_the_activation_gap_is_stated_not_hidden(client):
     body = client.get("/v1/models/routing", headers=OWNER).get_json()
     activation = body["activation"]
-    assert activation["state"] == "proposal_only"
-    assert "hash" in activation["gap"] and "owner" in activation["gap"]
+    assert activation["state"] == "owner_gated_revision"
+    # The mechanism states what it does *and* what it deliberately cannot do, in the response
+    # itself rather than only in a doc a reader may never open.
+    assert "policy file is never written" in activation["reason"]
+    assert "in flight" in activation["effect"]
+    assert "autonomy" in activation["limits"] and "security" in activation["limits"]
 
 
 def test_the_routing_view_leaks_no_host_identifiers(client):

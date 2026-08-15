@@ -249,6 +249,14 @@ recorded in
   back from the record**, never recomputed from the live route map — so re-pointing an alias
   between plan and execute cannot re-credit a run to a build that never saw it. Runs with no
   such record stay `model_not_recorded` rather than being backfilled.
+- **Owner-gated route activation** — *shipped.* No longer proposal-only, and deliberately not
+  by rewriting `policy.toml`: the hand-authored file stays hand-authored, and activation
+  appends a numbered atomic revision to a gateway-owned store. Effective configuration is base
+  policy + active revision, and the effective policy hash covers both. A revision whose base
+  file has since been edited is **stale and not applied**. Owner-only, audited, refused for the
+  security lane unless qualified, and narrow by construction — a revision has no field for
+  autonomy, skills, tools or approval rights. Runs pin the policy hash they were planned under
+  (authority schema v2), so an activation never invalidates an approval already in flight.
 - **Protected-surface risk gate** — *shipped, advisory, grants nothing.* Three classes
   (`LOW_RISK_ENGINEERING` / `REVIEW_REQUIRED` / `PROTECTED_SECURITY`), no score, and risk that
   only ratchets up. Twenty controls are enumerated and matched by both path and symbol, so a

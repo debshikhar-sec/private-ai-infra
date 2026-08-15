@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from openclaw import checks
 from openclaw.checks import FAIL, INCONCLUSIVE, PASS, Evidence
 from openclaw.evidence import (
@@ -124,6 +125,38 @@ def test_ratelimit_fails_when_not_429():
 def test_ratelimit_inconclusive_when_absent():
     f = checks.check_ratelimit(Evidence(audit=_log([_event()])))
     assert f.status == INCONCLUSIVE
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "route_proposed:engineering_candidate:strategy",
+        "route_activated:strategy",
+        "model generated a response",
+        "accurate match",
+        "moderate confidence",
+    ],
+)
+def test_ratelimit_does_not_fire_on_words_containing_rate(reason):
+    """A word is not a reason code. "st*rate*gy" is not a rate-limit decision.
+
+    The check matched the bare substring "rate", so an ordinary 200 allow whose reason merely
+    mentioned the strategy route was judged a rate-limit decision that had failed to be a 429 —
+    turning this control FAIL and, through it, the whole assurance verdict. Found because
+    activating a route between plan and execute made every subsequent apply fail assurance.
+    A security control that unrelated audit text can flip is not a control.
+    """
+    log = _log([_event(decision="allow", reason=reason, status=200)])
+    assert checks.check_ratelimit(Evidence(audit=log)).status == INCONCLUSIVE
+
+
+def test_ratelimit_still_catches_a_real_limiter_decision():
+    """The narrowing must not cost detection: the real reason code still matches."""
+    log = _log([_event(decision="allow", reason="rate_limited", status=200)])
+    assert checks.check_ratelimit(Evidence(audit=log)).status == FAIL
+    # And a 429 is caught whatever the reason says.
+    log = _log([_event(decision="allow", reason="anything", status=429)])
+    assert checks.check_ratelimit(Evidence(audit=log)).status == FAIL
 
 
 # ------------------------------------------------------- AC-GUARDRAIL-EGRESS

@@ -7,6 +7,31 @@ All notable changes to this project are documented here. Format based on
 ## [Unreleased]
 
 ### Added
+- **Owner-gated route activation** (`src/private_ai_gateway/route_revision.py`,
+  `POST /v1/models/route-activate`) — route changes are no longer proposal-only. The
+  hand-authored `config/policy.toml` is still never written by this process; activation instead
+  appends a numbered, atomic, append-only **revision** to a gateway-owned store, and the
+  effective configuration is *base policy + active revision*. The effective policy hash is
+  derived over both, so the hash keeps covering everything in force. A revision that was
+  computed against a policy file which has since been hand-edited is reported **stale and not
+  applied**, rather than silently re-interpreted against a file nobody reviewed it against.
+  Owner-only, audited, and refused for the security lane unless the model is qualified — a
+  warning on the proposal path, a refusal here. Narrow **by construction**: a revision has no
+  field for autonomy, skills, tools, principals or approval rights, so there is nothing to set
+  rather than merely a check that refuses.
+- **Runs pin the configuration they were planned under** (authority schema v2,
+  `RunRecord.policy_hash`) — the execute path reconstructs a run's canonical plan against its
+  *recorded* policy hash, so activating a revision cannot invalidate approvals already in
+  flight. Pre-v2 rows carry `''` and recompute from live configuration exactly as before.
+
+### Fixed
+- **`AC-RATELIMIT` fired on any audit reason containing the substring "rate"** — including
+  "st*rate*gy", "gene*rate*" and "accu*rate*". An ordinary `200 allow` mentioning the strategy
+  route was judged a rate-limit decision that had failed to be a `429`, turning the control
+  FAIL and with it the whole assurance verdict for the run. Found because activating a route
+  between plan and execute made every subsequent apply fail assurance. The check now compares
+  the limiter's exact reason code (`rate_limited`), with a parametrised regression for the
+  false-positive words and a test that real limiter decisions and `429`s are still caught.
 - **Deterministic protected-surface gate** (`src/private_ai_gateway/task_risk.py`,
   `POST /v1/task-risk`) — three classes (`LOW_RISK_ENGINEERING`, `REVIEW_REQUIRED`,
   `PROTECTED_SECURITY`), no scalar score, and risk that only ever ratchets up. Twenty

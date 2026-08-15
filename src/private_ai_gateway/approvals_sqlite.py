@@ -62,7 +62,7 @@ from private_ai_gateway.sqlite_util import (
 # This store's own schema-version domain — deliberately separate from the evidence-envelope
 # SCHEMA_VERSION and from the evidence database's schema domain. Bump only via a forward
 # migration step appended to ``_MIGRATIONS``.
-AUTHORITY_SCHEMA_VERSION = 1
+AUTHORITY_SCHEMA_VERSION = 2
 
 # Individual statements (never ``executescript``, which would COMMIT our explicit migration
 # transaction out from under us). Each runs via ``conn.execute`` inside the migration txn.
@@ -111,8 +111,24 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _migrate_to_v2(conn: sqlite3.Connection) -> None:
+    """Forward migration 1 -> 2: pin the effective policy hash onto each run.
+
+    A run must be able to reconstruct its canonical plan later, and the plan covers the policy
+    hash. Once a managed route revision can change the effective configuration mid-flight,
+    recomputing that hash from *current* config would make an already-approved run
+    unreproducible. Recording it at plan time keeps the run bound to the configuration it was
+    actually approved under.
+
+    Existing rows get ``''``, which reads as "not recorded" — those runs fall back to the old
+    behaviour of recomputing from current config, exactly as they did before this column
+    existed. No historical run changes meaning.
+    """
+    conn.execute("ALTER TABLE runs ADD COLUMN policy_hash TEXT NOT NULL DEFAULT ''")
+
+
 # Forward-only migration ladder: index i upgrades schema version i -> i+1.
-_MIGRATIONS = [_migrate_to_v1]
+_MIGRATIONS = [_migrate_to_v1, _migrate_to_v2]
 
 
 # --- serialization helpers ----------------------------------------------------------
@@ -200,6 +216,8 @@ def _row_to_run(row: sqlite3.Row) -> RunRecord:
         policy_ceiling=row["policy_ceiling"],
         created_at=_text_to_dt(row["created_at"]),
         status=_run_status(row["status"]),
+        # Pre-v2 rows have no column value; `''` reads as "not recorded", which is what it is.
+        policy_hash=(row["policy_hash"] if "policy_hash" in row.keys() else ""),
     )
 
 
@@ -348,6 +366,7 @@ class SqliteApprovalStore:
         canonical_plan_hash: str,
         effective_autonomy: int,
         policy_ceiling: int,
+        policy_hash: str = "",
     ) -> RunRecord:
         """Record a run. Fails closed if it would grant autonomy above the ceiling."""
         if not run_id:
@@ -363,6 +382,7 @@ class SqliteApprovalStore:
             canonical_plan_hash=canonical_plan_hash,
             effective_autonomy=effective_autonomy,
             policy_ceiling=policy_ceiling,
+            policy_hash=policy_hash,
         )
         # The existence check and the insert share one BEGIN IMMEDIATE transaction, so the
         # read that authorizes the write is atomic with it (no cross-process TOCTOU window).
@@ -373,8 +393,8 @@ class SqliteApprovalStore:
                 raise ApprovalError(f"run {run_id!r} already exists")
             self._conn.execute(
                 "INSERT INTO runs (run_id, principal_id, canonical_plan_hash, "
-                "effective_autonomy, policy_ceiling, created_at, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "effective_autonomy, policy_ceiling, created_at, status, policy_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run.run_id,
                     run.principal_id,
@@ -383,6 +403,7 @@ class SqliteApprovalStore:
                     run.policy_ceiling,
                     _dt_to_text(run.created_at),
                     run.status.value,
+                    run.policy_hash,
                 ),
             )
         return run

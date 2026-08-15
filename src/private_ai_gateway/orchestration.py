@@ -126,7 +126,12 @@ _PLAN_PRINCIPAL = "hermes"
 
 
 def _policy_hash(gw) -> str:
-    """Deterministic hash of the active policy file (Policy exposes no version/hash).
+    """Deterministic hash of the configuration actually in force.
+
+    That is the hand-authored policy file **plus** any active managed route revision, because
+    a route change that the hash did not cover would let configuration drift out from under
+    the authority bound to it. With no revision the value is the plain file hash, so existing
+    runs and existing evidence are unaffected.
 
     ``policy_hash`` is authority-bearing, so if the active policy file cannot be read this
     fails closed — no fallback/placeholder value is ever substituted. The caller aborts
@@ -140,7 +145,16 @@ def _policy_hash(gw) -> str:
         raise OrchestrationUnavailable(
             f"cannot read policy file for canonical plan hashing ({path!r}): {exc}"
         ) from exc
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+    file_hash = "sha256:" + hashlib.sha256(data).hexdigest()
+
+    resolver = getattr(gw, "effective_routes", None)
+    if resolver is None:
+        return file_hash
+    try:
+        effective = resolver()
+    except Exception:  # noqa: BLE001 — an unreadable revision store must not break hashing
+        return file_hash
+    return getattr(effective, "effective_policy_hash", "") or file_hash
 
 
 def _proposal_target_resources() -> list[str]:
@@ -151,8 +165,15 @@ def _proposal_target_resources() -> list[str]:
     return act.load_proposal(str(DEFAULT_PROPOSAL)).declared_files
 
 
-def _assemble_canonical_plan(gw, objective: str, proposal: dict):
-    """Build the CanonicalPlan for a proposed code.apply -> (plan, effective, ceiling)."""
+def _assemble_canonical_plan(gw, objective: str, proposal: dict, *, policy_hash: str = ""):
+    """Build the CanonicalPlan for a proposed code.apply -> (plan, effective, ceiling).
+
+    ``policy_hash`` may be pinned by the caller. At plan time it is derived from the live
+    configuration; at execute time the *run's recorded* hash is passed instead, so the plan
+    reconstructs against the configuration the owner approved rather than whatever is
+    configured now. Without that, activating a route revision would silently invalidate every
+    approval already in flight.
+    """
     executor = proposal["executor"]
     requested = int(proposal["level"])
     principal = gw.POLICY.find_principal(executor)
@@ -172,7 +193,7 @@ def _assemble_canonical_plan(gw, objective: str, proposal: dict):
         requested_autonomy=requested,
         effective_autonomy=effective,
         policy_version=_POLICY_VERSION,
-        policy_hash=_policy_hash(gw),
+        policy_hash=policy_hash or _policy_hash(gw),
         resource_root_id=_RESOURCE_ROOT_ID,
         target_resources=_proposal_target_resources(),
         environment=_PLAN_ENVIRONMENT,
@@ -201,6 +222,9 @@ def _register_plan_run(gw, run_id: str, objective: str, result: dict) -> None:
         canonical_plan_hash=digest,
         effective_autonomy=effective,
         policy_ceiling=ceiling,
+        # Pin the configuration this run was planned under, so an activation that lands
+        # afterwards cannot make an already-approved plan unreproducible.
+        policy_hash=_policy_hash(gw),
     )
     result["canonical_plan_hash"] = digest
     result["canonical_plan"] = plan.mapping
@@ -551,7 +575,7 @@ def _execute_refusal(run_id: str, reason_code: str) -> dict:
     }
 
 
-def _recompute_execute_digest(gw, session, objective: str) -> str:
+def _recompute_execute_digest(gw, session, objective: str, *, run_id: str = "") -> str:
     """Reconstruct the canonical plan deterministically at execute and return its digest.
 
     Uses only deterministic, policy-derived inputs. The executor is *discovered* from the
@@ -559,6 +583,12 @@ def _recompute_execute_digest(gw, session, objective: str) -> str:
     skill/level) — never a model call, never a client-supplied value. Fails closed if no
     capable executor exists, so a plan that cannot be faithfully reconstructed can never be
     validated for execution.
+
+    The policy hash comes from the **run's own record** when it has one, so a route revision
+    activated after this run was approved does not change what the plan reconstructs to. A run
+    predating that column recomputes from live configuration exactly as before — which is also
+    what happens if the record is missing, and the existing hash-mismatch refusal still catches
+    any real divergence.
     """
     from hermes.session import EXEC_LEVEL, EXEC_SKILL
 
@@ -573,7 +603,14 @@ def _recompute_execute_digest(gw, session, objective: str) -> str:
         "level": EXEC_LEVEL,
         "objective": objective,
     }
-    plan, _effective, _ceiling = _assemble_canonical_plan(gw, objective, proposal)
+    pinned = ""
+    store = getattr(gw, "APPROVAL_STORE", None)
+    if store is not None and run_id:
+        run = store.get_run(run_id)
+        pinned = getattr(run, "policy_hash", "") or ""
+    plan, _effective, _ceiling = _assemble_canonical_plan(
+        gw, objective, proposal, policy_hash=pinned
+    )
     return plan.digest
 
 
@@ -651,7 +688,7 @@ def _run_execute(gw, session, objective: str, run_id: str, approval_id: str) -> 
 
     # Authority-bearing: recompute the canonical hash from deterministic inputs only, before
     # any mutation. Fails closed (OrchestrationUnavailable -> 503) if it cannot be rebuilt.
-    digest = _recompute_execute_digest(gw, session, objective)
+    digest = _recompute_execute_digest(gw, session, objective, run_id=run_id)
 
     # Step 7B.1 — append-first: validate, append the durable execution reservation, then
     # consume, all inside this approval's critical section. Ordering matters twice over.
