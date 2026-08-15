@@ -1,5 +1,9 @@
 # Product evolution — from a governance lab to an authority plane
 
+*Last validated: 2026-08-14. Every external statistic on this page was re-read from its
+primary source on that date; two that the cited source did not contain were withdrawn (see
+Sources).*
+
 > **Thesis:** AI *capability* is not AI *authority*. A model may reason about anything;
 > what it is allowed to **reach, run, and emit** is decided out-of-band of the prompt, by
 > policy bound to an identity, and is independently re-verified. This document is the
@@ -30,9 +34,14 @@ content guardrails across many model providers. They are very good at *traffic*.
 mostly silent on *authority*: which identity is allowed to use which model, at what
 autonomy, with what blast radius when its credential leaks.
 
-That gap is not theoretical. A 2026 survey of 900+ practitioners found **93% of AI-agent
-projects still run on unscoped API keys** and **74% of agents end up with more access than
-they need**. The standards bodies have noticed — OWASP shipped a dedicated *Top 10 for
+That gap is not theoretical, and the honest numbers are about over-permissioning rather than
+key hygiene alone. Entro Security's non-human-identity census found **97% of non-human
+identities carry excessive privileges**, and Obsidian Security found **90% of deployed AI
+agents are over-permissioned**. On the credential side, a March 2026 CSA / Strata Identity
+survey of **285** IT and security professionals found **44% use or plan to use static API
+keys** for agent authentication and **43% username/password**, while only **21%** keep a
+real-time registry of active agents and only **28%** can trace an agent action back to a
+human sponsor. The standards bodies have noticed — OWASP shipped a dedicated *Top 10 for
 Agentic Applications* in December 2025, and the identity world is racing to fit agents
 into SPIFFE/SVID workload identity, OAuth 2.1 scoped delegation (RFC 8707 resource
 indicators), and the composed AIMS framework. The wedge for this project is the thing the
@@ -45,7 +54,7 @@ gateways punt on: **enforcement-first, identity-bound, locally verifiable author
 | Primary job | route + observe + cache across providers | **decide and prove authority** for each call |
 | Identity model | API key → project/budget | principal → model allowlist + **L0–L6 autonomy ceiling** |
 | Guardrails | prompt-injection / PII scanners (often paid tier) | egress secret-redaction + autonomy/authz **before** inference |
-| Trust posture | "trust the gateway" | adversarial evals + an **independent read-only verifier** reconcile audit ↔ metrics ↔ policy |
+| Trust posture | "trust the gateway" | adversarial evals + an **independent verifier** — operationally read-only over the governed system, appending its own signed verdicts — reconcile audit ↔ metrics ↔ policy |
 | Deployment | managed cloud / self-host | local-first, loopback-only, Apple Silicon (today) |
 
 This is **not** a LiteLLM competitor and the docs should never pretend otherwise — it has
@@ -84,7 +93,7 @@ shrinking blast radius, not a feature wishlist.
 ### Now — close the credential gap (ASI03, ASI06)
 - **Key expiry & rotation.** Today's keys are static SHA-256 hashes; add per-principal
   `expires` + a rotation runbook so a leaked key dies on a clock. Directly answers the
-  "93% unscoped, never-rotated key" reality.
+  "44% still on static API keys" reality.
 - **Response hardening** *(shipped in this change)*: per-request correlation id
   (`X-Request-Id`) tied to the decision audit, plus strict security headers — so every
   governed response is traceable and uncacheable.
@@ -141,7 +150,20 @@ shrinking blast radius, not a feature wishlist.
 - [OWASP Top 10 for Agentic Applications (2026)](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) · [risk list mirror](https://www.promptfoo.dev/docs/red-team/owasp-agentic-ai/)
 - [OWASP GenAI: Top 10 for Agentic AI release](https://genai.owasp.org/2025/12/09/owasp-genai-security-project-releases-top-10-risks-and-mitigations-for-agentic-ai-security/)
 - [SPIFFE: securing the identity of agentic AI](https://www.hashicorp.com/en/blog/spiffe-securing-the-identity-of-agentic-ai-and-non-human-actors) · [SPIFFE meets OAuth2](https://riptides.io/blog-post/spiffe-meets-oauth2-current-landscape-for-secure-workload-identity-in-the-agentic-ai-era/)
-- [Agent authentication & delegated access — OAuth scoped tokens (2026)](https://zylos.ai/research/2026-04-11-agent-authentication-delegated-access-oauth-scoped-tokens) · [CSA: AI agent IAM gap (93% unscoped keys)](https://labs.cloudsecurityalliance.org/wp-content/uploads/2026/03/CSA_research_note_okta_ai_agent_iam_framework_enterprise_gap_20260318-csa-styled.pdf)
+- [Agent authentication & delegated access — OAuth scoped tokens (2026)](https://zylos.ai/research/2026-04-11-agent-authentication-delegated-access-oauth-scoped-tokens)
+- Over-permissioning and credential posture — all figures read from the primary note and its
+  cited studies, not from secondary summaries:
+  [CSA research note: the AI-agent IAM enterprise gap (March 2026)](https://labs.cloudsecurityalliance.org/wp-content/uploads/2026/03/CSA_research_note_okta_ai_agent_iam_framework_enterprise_gap_20260318-csa-styled.pdf)
+  — carries the CSA/Strata Identity survey (n=285, Feb–Mar 2026: 44% static API keys, 43%
+  username/password, 21% real-time agent registry, 28% sponsor traceability), and cites
+  [Entro Security, *2025 State of Non-Human Identities*](https://entro.security/resources/2025-state-of-non-human-identities)
+  (97% of NHIs over-privileged) and
+  [Obsidian Security, *2025 AI Agent Security Landscape*](https://www.obsidiansecurity.com/blog/ai-agent-market-landscape)
+  (90% of deployed agents over-permissioned).
+  *Retracted 2026-08-14:* an earlier revision of this page attributed "93% unscoped API keys"
+  and "74% of agents have more access than they need" to a 900+ practitioner survey. The
+  cited note contains neither figure and is not a 900-practitioner survey; both are withdrawn
+  rather than re-sourced, and the numbers above are what the primary material actually says.
 - [AgentVigil: black-box red-teaming for indirect prompt injection](https://arxiv.org/abs/2505.05849) · [LLM red teaming in 2026](https://kili-technology.com/blog/llm-red-teaming-in-2026)
 - AI gateway landscape: [Top 5 AI gateways 2026](https://guptadeepak.com/tools/top-5-ai-gateways-2026/) · [LiteLLM vs Portkey/Kong/Cloudflare](https://contabo.com/blog/litellm-vs-ai-gateways/)
 - [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)

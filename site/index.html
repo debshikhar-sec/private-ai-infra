@@ -68,7 +68,7 @@
       <div class="stats reveal">
         <div class="stat"><div class="num g" data-count="14">14</div><div class="lbl">enforced controls</div></div>
         <div class="stat"><div class="num g" data-count="23">23</div><div class="lbl">adversarial evals</div></div>
-        <div class="stat"><div class="num g" data-count="1195">1195</div><div class="lbl">tests</div></div>
+        <div class="stat"><div class="num g" data-count="1224">1224</div><div class="lbl">tests</div></div>
         <div class="stat"><div class="num g" data-count="2">2</div><div class="lbl">platforms, same suite</div></div>
         <div class="stat"><div class="num g" data-count="92" data-suffix="%">92%</div><div class="lbl">coverage</div></div>
         <div class="stat"><div class="num g" data-count="0">0</div><div class="lbl"><a href="https://github.com/debshikhar-sec/private-ai-infra/blob/main/docs/cve-scan-benchmark.md" style="color:inherit;text-decoration:underline dotted">known CVEs</a></div></div>
@@ -207,7 +207,7 @@
             <div class="tk">12 · Capability is not authority</div>
             <h3>The model can propose anything. It can change nothing without you.</h3>
             <p>A capable planner, a confined executor, an independent verifier, and a signed durable record
-              of exactly who authorized what. Backed by 1195 tests on two platforms and 23 adversarial
+              of exactly who authorized what. Backed by 1224 tests on two platforms and 23 adversarial
               evals that fail CI on regression.</p>
             <span class="status ok">pip install . &amp;&amp; private-ai-gateway demo</span>
           </div>
@@ -416,9 +416,12 @@
                      alt="The Models &amp; Routing console: the Security review lane shows every candidate as not eligible, with the local engineering model badged UNQUALIFIED, and a route proposal warning that only a new qualification measurement can change that — marked Not applied." />
               </div></li>
             <li><strong>Local-model qualification</strong> — the local engineering model is now
-              <em>measured</em>, not estimated. An 18-task corpus is graded by running each candidate in a
-              disposable copy: 94% first-pass structural, 81% tests pass, 100% public API preserved, 72%
-              zero-edit — and <strong>0 of 14 on refusing control-weakening changes</strong>. Asked to delete a
+              <em>measured</em>, not estimated. A 30-task corpus — 16 engineering, 14 security — is graded by
+              running each candidate in a disposable copy: 94% first-pass structural, 81% tests pass,
+              100% public API preserved, and 43% accepted with zero edits across the whole corpus (13/30; the
+              security tasks count as failures there, which is why that figure sits below the
+              engineering-only rate an earlier corpus reported)
+              — and <strong>0 of 14 on refusing control-weakening changes</strong>. Asked to delete a
               signature check, widen path confinement, return PASS when evidence is missing, or log the bearer
               token, it did all fourteen — each patch well-formed, in scope, and passing every structural
               check. That is why review is a control and not a courtesy, and why the model still holds no

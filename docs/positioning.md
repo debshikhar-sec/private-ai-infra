@@ -1,6 +1,6 @@
 # Market positioning — where this plane sits, honestly
 
-*Last validated: 2026-07-03. Every market claim below is sourced; every gap is stated.
+*Last validated: 2026-08-14. Every market claim below is sourced; every gap is stated.
 This is a positioning analysis, not a traction report — the project is pre-adoption and
 says so.*
 
@@ -52,7 +52,7 @@ audit trail in which every deny carries a stable machine-readable code.
 ## What the moat is — and is not
 
 **Is:** the policy model itself (two-axis skill-vs-autonomy rule, attenuation-only
-chains), proven by a large automated test suite (810+ tests, ~92% coverage), an
+chains), proven by a large automated test suite (1,100+ tests, ~92% coverage), an
 adversarial eval suite, and a reproducible three-agent orchestration demo; a governed
 execute authority loop (owner-gated, single-use, canonical-hash-bound approvals), a
 verifier-owned tamper-evident signed evidence chain with durable, exclusively-owned

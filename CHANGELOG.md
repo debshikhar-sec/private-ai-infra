@@ -7,6 +7,39 @@ All notable changes to this project are documented here. Format based on
 ## [Unreleased]
 
 ### Added
+- **Public-claims truth infrastructure** (`scripts/public_metrics.py`,
+  `docs/public-metrics.json`, `tests/unit/test_public_claims.py`) — every mechanically
+  checkable public number now has exactly one canonical source and is derived from it: the
+  eval count from `evals.cases.ALL_CASES`, the assurance-control counts from
+  `openclaw.checks.ALL_CHECKS`, the CI platform count from the workflow matrix, the enforced
+  control count from the README control table, media facts from the media files (MP4
+  durations parsed from the `mvhd` box — no ffprobe dependency), and every local-model
+  qualification figure from the published artifact. A drift suite holds the README, the site,
+  and the current-state docs to the manifest; `make metrics-check` and a CI step fail on
+  drift, and a whole-suite guard fails if a test is added without refreshing the count.
+- **Published qualification artifact**
+  (`docs/qualification/local-engineering-qualification.json`) — the evaluator's structured
+  output is now a tracked, privacy-minimal public file rather than a gitignored runtime
+  artifact, so qualification prose can be derived instead of transcribed.
+
+### Fixed
+- **Stale public claims across README, site, roadmap and positioning** — the local-model
+  qualification was still described with the superseded v1 corpus (18 tasks, 72 % zero-edit,
+  0/2 security refusals) instead of corpus v2.0 (30 tasks — 16 engineering, 14 security —
+  43 % zero-edit across the whole corpus, **0/14** security refusals); the trust history,
+  durable stores and crash reconciliation were still filed under future work after shipping;
+  and `docs/positioning.md` still claimed 810+ tests. The zero-edit figure now travels with
+  its denominator everywhere it appears, since 72 % and 43 % measured different populations.
+- **Two unsourced market statistics withdrawn** from `docs/product-evolution.md` — "93 % of
+  AI-agent projects run on unscoped API keys" and "74 % of agents end up with more access
+  than they need", attributed to a "2026 survey of 900+ practitioners". The cited primary
+  source contains neither figure and is not a practitioner survey of that size. Replaced with
+  what the primary material actually reports (97 % of non-human identities over-privileged;
+  90 % of deployed agents over-permissioned; 44 % static API keys, n=285), with the
+  retraction recorded in the Sources section.
+- **OpenClaw described accurately** — "read-only verifier" understated its role: it is
+  *operationally* read-only over the governed system (holds no authority, mutates nothing it
+  inspects) while appending its own signed assurance verdicts under its own key.
 - **Verifier-owned evidence sink core** (`agents/openclaw/sink.py`) — an append-only,
   per-emitter **HMAC-signed**, **hash-chained** record store with from-scratch chain
   verification. **Tamper-evident, not non-repudiation** (symmetric-key MVP).

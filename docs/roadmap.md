@@ -228,12 +228,13 @@ recorded in
 - **Rollback outside the sandbox** — *future, and not casually.* Git operations, deployment
   rollback and system-configuration rollback are all out of scope: their pre-images are not
   files this runtime owns.
-- **Local engineering qualification** — *shipped, zero authority.* An 18-task corpus and a
-  disposable semantic evaluator that runs the candidate rather than only shape-checking it.
-  Measured: 94 % first-pass structural, 81 % tests pass, 72 % zero-edit — and **0/2 on
-  refusing control-weakening changes**, which is why review stays a control rather than a
-  formality. See [local-engineering-qualification.md](local-engineering-qualification.md).
-  No autonomy score, no grant.
+- **Local engineering qualification** — *shipped, zero authority.* A 30-task corpus (16
+  engineering, 14 security) and a disposable semantic evaluator that runs the candidate
+  rather than only shape-checking it. Measured: 94 % first-pass structural, 81 % tests pass,
+  43 % accepted with zero edits across all 30 tasks — and **0/14 on refusing
+  control-weakening changes**, which is why review stays a control rather than a formality.
+  See [local-engineering-qualification.md](local-engineering-qualification.md). No autonomy
+  score, no grant.
 - **Capability registry** — *shipped, zero authority.* Model identity (fingerprinted by
   build, not alias), per-lane qualification, local availability, and measured hardware fit,
   behind an owner-gated read-only endpoint. Capability informs routing; it never informs
@@ -242,7 +243,7 @@ recorded in
   signed chain: facts by principal and task class, no score, no threshold, nothing consuming
   it. A chain that does not verify yields no ledger rather than an empty one. **Blocked
   dimension:** no signed record names the model that served a run, so runtime history cannot
-  be attributed to a model build — that is the concrete prerequisite for model-aware trust. Derived, per-principal trust state built on the sink.
+  be attributed to a model build — that is the concrete prerequisite for model-aware trust.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.
 - **Hermes local training / eval-trace capture** — *future.* No training pipeline exists

@@ -54,4 +54,10 @@ demo: ## One-command starter kit: demo policy + scripted governed traffic + cons
 audit: ## Dependency vulnerability scan (pip-audit)
 	pip-audit -r requirements.txt -r requirements-mlx.txt
 
-check: lint sast audit cov ## Run all CI checks locally
+metrics: ## Refresh docs/public-metrics.json — the source every public number is held to
+	python scripts/public_metrics.py --write
+
+metrics-check: ## Fail if any derivable public metric has drifted from its canonical source
+	python scripts/public_metrics.py --check
+
+check: lint sast audit metrics-check cov ## Run all CI checks locally
