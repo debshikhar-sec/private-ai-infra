@@ -965,6 +965,42 @@ def v1_trust_history():
     }), 200
 
 
+@app.route("/v1/task-risk", methods=["POST"])
+def v1_task_risk():
+    """Classify a proposed change against the protected-surface taxonomy.
+
+    Read-only and advisory: it reports what a change *is*, and grants nothing. The local model
+    scored 0/14 on refusing control-weakening changes, so this classification is made out here
+    in deterministic code rather than asked of a model — and a caller's own ``risk_class`` can
+    only make the answer stricter, never laxer.
+    """
+    from private_ai_gateway import task_risk as risk
+
+    denied = _owner_only("Task risk")
+    if denied is not None:
+        return denied
+
+    body = request.get_json(silent=True) or {}
+    assessment = risk.classify(
+        declared_files=body.get("declared_files") or (),
+        content=str(body.get("content", "")),
+        objective=str(body.get("objective", "")),
+        claimed_class=str(body.get("risk_class", "")),
+    )
+    DECISION_LOG.record(
+        request_id=getattr(g, "request_id", ""), principal=g.principal.name,
+        method=request.method, path=request.path, model=None,
+        decision="allow", reason=f"task_risk:{assessment.risk_class}", status=200,
+    )
+    return jsonify({
+        **assessment.to_mapping(),
+        "note": (
+            "advisory classification only; nothing in this system consumes it as authority, "
+            "and no autonomous execution is granted anywhere"
+        ),
+    }), 200
+
+
 @app.route("/v1/models/route-proposal", methods=["POST"])
 def v1_models_route_proposal():
     """Compute a route-change **proposal**. Nothing is applied, ever, on this path.

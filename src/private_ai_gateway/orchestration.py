@@ -206,6 +206,13 @@ def _register_plan_run(gw, run_id: str, objective: str, result: dict) -> None:
     result["canonical_plan"] = plan.mapping
     _emit_candidate_attributed(gw, run_id=run_id, proposal=proposal)
 
+    # Classify the proposed change against the protected-surface taxonomy and surface it on
+    # the plan, so the human deciding this approval can see what it touches. Advisory only:
+    # nothing consumes it, and it neither grants nor withholds authority.
+    from private_ai_gateway import task_risk as risk
+
+    result["task_risk"] = risk.classify_proposal(proposal, objective=objective).to_mapping()
+
 
 def _emit_candidate_attributed(gw, *, run_id: str, proposal: dict) -> None:
     """Record which model produced this candidate, at the moment it produced it.

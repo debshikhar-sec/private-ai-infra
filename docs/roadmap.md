@@ -249,6 +249,15 @@ recorded in
   back from the record**, never recomputed from the live route map — so re-pointing an alias
   between plan and execute cannot re-credit a run to a build that never saw it. Runs with no
   such record stay `model_not_recorded` rather than being backfilled.
+- **Protected-surface risk gate** — *shipped, advisory, grants nothing.* Three classes
+  (`LOW_RISK_ENGINEERING` / `REVIEW_REQUIRED` / `PROTECTED_SECURITY`), no score, and risk that
+  only ratchets up. Twenty controls are enumerated and matched by both path and symbol, so a
+  change to a signature check is protected whether the file is called `sink.py` or
+  `helper.py`. All **14** security-corpus tasks classify as protected, pinned as a
+  regression, and a caller's own label can never lower a classification. The measured 0/14 is
+  the reason it exists: model self-restraint is not a boundary, so the boundary is
+  deterministic code outside the model. Honest limit — in this codebase *no* source-file task
+  in the corpus reaches `LOW_RISK_ENGINEERING`; only documentation- and test-only changes do.
 - **Earned / graduated autonomy** — *future.* Consumes the ledger; **not** implemented —
   autonomy is fixed-ceiling by policy today, with no self-approval or earned escalation.
 - **Hermes local training / eval-trace capture** — *future.* No training pipeline exists

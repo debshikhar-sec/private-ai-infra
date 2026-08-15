@@ -7,6 +7,22 @@ All notable changes to this project are documented here. Format based on
 ## [Unreleased]
 
 ### Added
+- **Deterministic protected-surface gate** (`src/private_ai_gateway/task_risk.py`,
+  `POST /v1/task-risk`) — three classes (`LOW_RISK_ENGINEERING`, `REVIEW_REQUIRED`,
+  `PROTECTED_SECURITY`), no scalar score, and risk that only ever ratchets up. Twenty
+  protected surfaces are enumerated — authentication, authorization, approval, policy,
+  autonomy, routing authority, evidence, signing/key custody, identity, canonical-plan
+  binding, replay protection, sandbox/path confinement, secret handling, rate limiting,
+  reconciliation, disposition, rollback authority, containment, arbitrary command execution,
+  and the ingress prompt boundary — each matched by both path and symbol vocabulary, because
+  a proposal names its files whatever it likes. **All 14 security-corpus tasks classify as
+  `PROTECTED_SECURITY`** and are pinned as a parametrised regression; a caller-supplied
+  `risk_class` can raise the classification but never lower it. The default for anything
+  unrecognised is `REVIEW_REQUIRED`, not low risk — low risk must be earned by positively
+  matching docs/tests-only paths. Qualification is not consulted: a model measured excellent
+  at engineering is still not eligible for a protected surface, asserted structurally.
+  Advisory only — the plan result carries the classification for the human deciding the
+  approval, and nothing consumes it as authority.
 - **Signed model attribution** (`src/private_ai_gateway/attribution.py`) — the plan phase now
   appends a signed `candidate_attributed` record naming the model build that produced the
   candidate (registry fingerprint, backend, resolved id, revision, quantization), the policy

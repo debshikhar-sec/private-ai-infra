@@ -377,13 +377,39 @@ def test_restore_is_reachable_only_through_the_governed_rollback_executor():
     in `opencode_sandbox.rollback`, which refuses to run without a signed reservation the
     gateway issued under an owner approval. This pins that caller set: the gateway never
     restores directly, and no other module reaches the primitive at all.
+
+    The scan is by AST rather than by text: `restore_into` also appears as a *string* in the
+    protected-surface vocabulary of `task_risk`, which names the primitive precisely so that
+    changes to it are always classified as protected. Naming a dangerous primitive in order to
+    guard it is the opposite of calling it, and a text match cannot tell the two apart.
     """
+    import ast
+
     repo = Path(__file__).resolve().parents[2]
+
+    def _references(path: Path) -> bool:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover — not a Python module we own
+            return False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id == "restore_into":
+                return True
+            if isinstance(node, ast.Attribute) and node.attr == "restore_into":
+                return True
+            if isinstance(node, ast.FunctionDef) and node.name == "restore_into":
+                return True
+            if isinstance(node, ast.ImportFrom) and any(
+                a.name == "restore_into" for a in node.names
+            ):
+                return True
+        return False
+
     hits = sorted(
         str(p.relative_to(repo))
         for base in ("src", "agents")
         for p in (repo / base).rglob("*.py")
-        if "restore_into" in p.read_text(encoding="utf-8")
+        if _references(p)
     )
     assert hits == [
         "agents/opencode_sandbox/preimage.py",
