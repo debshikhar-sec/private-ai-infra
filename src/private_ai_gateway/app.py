@@ -1080,7 +1080,80 @@ def v1_autonomy_readiness():
         method=request.method, path=request.path, model=None,
         decision="allow", reason=f"autonomy_readiness:{result.outcome}", status=200,
     )
-    return jsonify({**result.to_mapping(), "task_risk": assessment.to_mapping()}), 200
+    return jsonify({
+        **result.to_mapping(),
+        "task_risk": assessment.to_mapping(),
+        "prospective_lease": _prospective_lease_view(
+            identity=identity,
+            declared_files=body.get("declared_files") or (),
+            objective=str(body.get("objective", "")),
+            content=str(body.get("content", "")),
+            attributable_runs=int(getattr(facts, "verified_complete", 0) or 0),
+            evidence_verified=evidence_verified,
+        ),
+    }), 200
+
+
+def _prospective_lease_view(
+    *, identity, declared_files, objective, content, attributable_runs, evidence_verified
+) -> dict:
+    """What a first bounded lease *would* look like, and what would refuse it today.
+
+    Rendered beside readiness rather than merged into it, because they answer different
+    questions: readiness is about the build's standing, the lease is about this change's
+    scope. Merging them would produce one green-ish badge, which is the failure mode this
+    whole surface exists to avoid.
+
+    There is deliberately no control here that issues anything. The view is a sentence about
+    a hypothetical, and the blockers list is the useful half.
+    """
+    from private_ai_gateway import lanes as lane_mod
+    from private_ai_gateway import lease as lease_mod
+
+    routes = effective_routes()
+    fingerprint = identity.fingerprint if identity is not None else ""
+    decision_lane = lane_mod.classify_change(
+        declared_files=declared_files, objective=objective, content=content
+    )
+    spec_id = decision_lane.lane_id or lane_mod.GENERATED_METRICS_REFRESH.lane_id
+    subject = lease_mod.propose(
+        principal="opencode",
+        model_fingerprint=fingerprint,
+        lane_id=spec_id,
+        policy_hash=routes.effective_policy_hash,
+        policy_revision=str(routes.revision or ""),
+        qualification_artifact=_qualification_artifact_name(fingerprint),
+    )
+    shadow = lease_mod.would_grant(
+        subject,
+        model_fingerprint=fingerprint,
+        lane_id=decision_lane.lane_id,
+        policy_hash=routes.effective_policy_hash,
+        policy_revision=str(routes.revision or ""),
+        declared_files=declared_files,
+        objective=objective,
+        content=content,
+        qualification_artifact=subject.qualification_artifact,
+        attributable_runs=attributable_runs,
+        evidence_verified=evidence_verified,
+    )
+    return {
+        "lease": subject.to_mapping(),
+        "shadow_decision": shadow.to_mapping(),
+        "lane": decision_lane.to_mapping(),
+        "enable_control": None,
+        "note": (
+            "No lease exists. This is what one would bind and what would refuse it. "
+            "Nothing issues, stores, or consumes a lease."
+        ),
+    }
+
+
+def _qualification_artifact_name(fingerprint: str) -> str:
+    from private_ai_gateway import registry as reg
+
+    artifact = reg.load_artifacts(QUALIFICATION_ARTIFACT_DIR).get(fingerprint)
+    return artifact.path if artifact else ""
 
 
 @app.route("/v1/lanes", methods=["GET"])
