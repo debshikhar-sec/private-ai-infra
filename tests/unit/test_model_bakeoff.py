@@ -22,6 +22,22 @@ MODEL = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit"
 OTHER = "mlx-community/Qwen3.6-27B-OptiQ-4bit"
 
 
+def _host(**over):
+    """A fixed host that has MLX.
+
+    Explicit rather than sampled: two of these tests originally used the real host snapshot
+    and passed on macOS while failing on the Ubuntu CI leg, where MLX is absent and every
+    lane collapses to UNAVAILABLE. A qualification test must measure the artifact, not the
+    runner it happens to execute on.
+    """
+    base = dict(
+        platform="Darwin", architecture="arm64", total_memory_bytes=128 * 1024 ** 3,
+        backends_available=("demo", "mlx"), active_backend="mlx",
+    )
+    base.update(over)
+    return reg.HostSnapshot(**base)
+
+
 def fingerprint_of(model_id: str) -> str:
     """The key the registry will look the artifact up under.
 
@@ -120,6 +136,7 @@ def test_the_newer_strategy_artifact_cannot_shadow_the_engineering_lane(artifact
     built = reg.build_registry(
         {"engineering": MODEL},
         backend="mlx",
+        host=_host(),
         cache=reg.ModelCache(directory / "nope"),
         artifacts=reg.load_artifacts(directory),
         strategy_artifacts=reg.load_artifacts(directory, kind=reg.KIND_STRATEGY),
@@ -146,6 +163,7 @@ def test_the_strategy_lane_is_not_derived_from_engineering_numbers(artifacts):
     built = reg.build_registry(
         {"strategy": MODEL},
         backend="mlx",
+        host=_host(),
         cache=reg.ModelCache(directory / "nope"),
         artifacts=reg.load_artifacts(directory),
         strategy_artifacts=reg.load_artifacts(directory, kind=reg.KIND_STRATEGY),
@@ -200,7 +218,7 @@ def test_the_comparison_lists_every_measured_build(artifacts):
     view = reg.compare_qualifications(
         engineering=reg.load_artifacts(directory),
         strategy={},
-        cache=reg.ModelCache(directory / "nope"),
+        cache=reg.ModelCache(directory / "nope"), host=_host(),
     )
     assert [r["resolved_model"] for r in view["rows"]] == sorted([MODEL, OTHER])
 
@@ -211,7 +229,7 @@ def test_the_comparison_publishes_no_aggregate_and_no_ranking(artifacts):
     )
     view = reg.compare_qualifications(
         engineering=reg.load_artifacts(directory), strategy={},
-        cache=reg.ModelCache(directory / "nope"),
+        cache=reg.ModelCache(directory / "nope"), host=_host(),
     )
     assert view["aggregate"] is None
     flat = json.dumps(view)
@@ -232,7 +250,7 @@ def test_a_strictly_better_engineering_build_that_never_refuses_is_not_promoted(
     )
     view = reg.compare_qualifications(
         engineering=reg.load_artifacts(directory), strategy={},
-        cache=reg.ModelCache(directory / "nope"),
+        cache=reg.ModelCache(directory / "nope"), host=_host(),
     )
     for row in view["rows"]:
         assert row["lanes"][reg.LANE_SECURITY_REVIEW]["state"] == reg.UNQUALIFIED
@@ -245,7 +263,7 @@ def test_a_build_with_no_strategy_run_reports_null_not_zero(artifacts):
     directory = artifacts(_engineering_artifact(MODEL))
     view = reg.compare_qualifications(
         engineering=reg.load_artifacts(directory), strategy={},
-        cache=reg.ModelCache(directory / "nope"),
+        cache=reg.ModelCache(directory / "nope"), host=_host(),
     )
     assert view["rows"][0]["strategy"] is None
 
@@ -257,14 +275,14 @@ def test_the_comparison_only_carries_declared_metric_fields(artifacts):
     directory = artifacts(body)
     view = reg.compare_qualifications(
         engineering=reg.load_artifacts(directory), strategy={},
-        cache=reg.ModelCache(directory / "nope"),
+        cache=reg.ModelCache(directory / "nope"), host=_host(),
     )
     assert "experimental_vibe_score" not in json.dumps(view)
 
 
 def test_the_comparison_reads_nothing_when_there_is_nothing(tmp_path):
     view = reg.compare_qualifications(
-        engineering={}, strategy={}, cache=reg.ModelCache(tmp_path)
+        engineering={}, strategy={}, cache=reg.ModelCache(tmp_path), host=_host()
     )
     assert view["rows"] == []
     assert view["aggregate"] is None
