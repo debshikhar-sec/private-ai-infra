@@ -226,7 +226,11 @@ verified. Merged today:
   end-to-end with the gateway-issued `run_id` / `approval_id`.
 - **Gateway emits signed `execute_validated` authorization evidence** — the gateway can now
   emit a signed `execute_validated` record when execution authority is granted. The record
-  is emitted after approval validation and `mark_used`, before `session.execute`; the
+  is appended as the durable execution reservation after approval validation and **before**
+  `mark_used` — the current Step 7B.1 ordering is validate → reserve (`execute_validated`)
+  → `mark_used` → mutate, so a crash between the reservation and consumption leaves a
+  classifiable state rather than a spent approval with no trace. (Through Step 5 the record
+  was emitted after `mark_used`; that ordering is superseded.) The
   payload contains `canonical_plan_hash` and `validated=true`, while `run_id` and
   `approval_id` remain in the evidence envelope. The default no-sink behavior is
   backward-compatible, and `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before

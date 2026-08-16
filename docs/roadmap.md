@@ -97,7 +97,8 @@ capability second.
 - **Gateway `execute_validated` authorization evidence emit** — when execution authority is
   granted, the gateway can now emit a signed `execute_validated` record into an injected
   `EvidenceSink` (`src/private_ai_gateway/orchestration.py`, `app.py`). The record is
-  emitted after approval validation and `mark_used`, before `session.execute`; the payload
+  appended as the durable execution reservation after approval validation and **before**
+  `mark_used` (Step 7B.1: validate → reserve → consume → mutate); the payload
   contains `canonical_plan_hash` and `validated=true`, while `run_id` and `approval_id`
   remain in the evidence envelope. The default no-sink behavior is backward-compatible, and
   `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode denies before mutation if authorization

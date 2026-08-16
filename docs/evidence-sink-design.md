@@ -184,7 +184,7 @@ linkage are documented in §6a below.
 |---|---|---|---|
 | `approval_decided` | `gateway` | `{decision: approve\|reject, approver, canonical_plan_hash}` (emitted after the approval decision is stored, before the success response) | **Built** (component-level gateway *decision* evidence emit). Payload is exactly `{decision, approver, canonical_plan_hash}` — unchanged; `run_id`/`approval_id` are envelope fields; the free-text rejection reason is excluded. Backward-compatible no-sink default; under `REQUIRE_AUTHORIZATION_EVIDENCE` a failed emit invalidates the run and active approvals and denies with HTTP 503 `authorization_evidence_unavailable`. It is the **root** of the §6a signed graph. |
 | `candidate_attributed` | `gateway` | `{route_alias, model_fingerprint, backend, resolved_model, revision, quantization, task_class, policy_hash, candidate_digest}` (emitted at plan, once the candidate exists) | **Built.** Names the model build that *generated* the candidate, at the moment it generated it. Every field is server-derived; no request field reaches it. Its envelope carries `run_id` but **no `approval_id`** — generation precedes approval, and an approval link here would be invented. Deliberately best-effort and *not* gated on `REQUIRE_AUTHORIZATION_EVIDENCE`: attribution is descriptive and grants nothing, so failing to record it must not deny a plan that authority already permits. |
-| `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true, approval_ref, attribution, attribution_recorded}` (emitted after `validate_for_execute` + `mark_used`, before mutation) | **Built** (component-level gateway authorization evidence emit; backward-compatible no-sink default; `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation). Carries `approval_ref` — a signed `EvidenceRef` to the `approval_decided` record (§6a) — and the run's `attribution`, **read back from its `candidate_attributed` record rather than recomputed from the live route map**, so a route change between plan and execute cannot move the attribution. A run with no such record carries the explicit `model_not_recorded` shape (`attribution_recorded: false`) and is never backfilled. Not yet full fail-closed pre-apply gating (§9b). |
+| `execute_validated` | `gateway` | `{canonical_plan_hash, validated: true, approval_ref, attribution, attribution_recorded}` (appended after `validate_for_execute` and **before** `mark_used`, as the durable execution reservation — Step 7B.1) | **Built** (component-level gateway authorization evidence emit; backward-compatible no-sink default; `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation). Carries `approval_ref` — a signed `EvidenceRef` to the `approval_decided` record (§6a) — and the run's `attribution`, **read back from its `candidate_attributed` record rather than recomputed from the live route map**, so a route change between plan and execute cannot move the attribution. A run with no such record carries the explicit `model_not_recorded` shape (`attribution_recorded: false`) and is never backfilled. Not yet full fail-closed pre-apply gating (§9b). |
 | `apply_result` | `opencode` | `{status, declared_files, changed_files, violations, committed, execute_ref}` | **Built (MVP core).** Replaces the self-attested `apply_report.json` and closes T1/T4. Retains its existing outcome fields and now also carries `execute_ref` — a signed `EvidenceRef` to the `execute_validated` record (§6a). When no `execute_ref` is threaded, the record is byte-identical to before (default/no-linkage compatibility). |
 | `assurance_verdict` | `openclaw` | `{verdict: PASS\|FAIL, counts, notes}` | **Optional** in first implementation; useful for a self-recorded, chained verdict. |
 | `verification_result` | `openclaw` | `{verdict, control_counts, failed_control_ids, inconclusive_control_ids, apply_ref, evidence_graph_verified}`, plus `rollback_ref` since 7C.3B | **Built (7C.1).** The verifier signs its own verdict with its own emitter key. A signed PASS binds to the exact `apply_result` it judged and is unreachable over a broken graph. Deliberately **plural and non-terminal** — several may exist for one run. 7C.3B reuses the type rather than adding one: the record still means "OpenClaw's signed judgment about one thing that happened"; only the typed reference naming the subject changes. |
@@ -317,8 +317,9 @@ Only then does the sink provide non-repudiation across a real trust boundary.
 - **(shipped)** **`src/private_ai_gateway/app.py`, `v1_approvals`** — after `decide_approval`
   returns, emit an `approval_decided` record (`run_id`, `approval_id`, decision, approver, hash).
 - **(shipped)** **`src/private_ai_gateway/orchestration.py`, `_run_execute`** — after
-  `validate_for_execute` succeeds and `mark_used` runs, and **before** `session.execute`, emit
-  `execute_validated`.
+  `validate_for_execute` succeeds and **before** `mark_used`, append `execute_validated` as
+  the durable execution reservation (Step 7B.1 ordering; through Step 5 it was emitted after
+  `mark_used`).
 - **(shipped)** **`agents/opencode_sandbox/worker.py` + `evidence_emit.py`** — after
   `apply_proposal` returns (still writes `apply_report.json`), also emit a signed `apply_result`
   record carrying `run_id`/`approval_id`, and — when threaded — the `execute_ref` edge (§6a).
@@ -441,8 +442,10 @@ Keys in all tests are **ephemeral**, generated under `tmp_path`; no key material
    `apply_report.json` for back-compat) + tests.
 4. **Verifier consume** — OpenClaw validates chain+sigs and uses sink records for the apply
    control; fail-closed on sig/chain break; **self-attestation regression test** (§11).
-5. **Gateway authorization emit** — the `execute_validated` record is **built** (emitted
-   after approval validation and `mark_used`, before `session.execute`; payload
+5. **Gateway authorization emit** — the `execute_validated` record is **built** (appended
+   after approval validation and **before** `mark_used` as the durable execution
+   reservation — *the Step-5 ordering that emitted it after `mark_used` is superseded by
+   Step 7B.1*; payload
    `{canonical_plan_hash, validated: true}`; backward-compatible no-sink default;
    `REQUIRE_AUTHORIZATION_EVIDENCE` denies before mutation) + tests. `approval_decided`
    has **also landed** (emitted at `POST /v1/approvals` after the decision is stored and
