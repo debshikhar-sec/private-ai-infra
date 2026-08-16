@@ -7,6 +7,67 @@ All notable changes to this project are documented here. Format based on
 ## [Unreleased]
 
 ### Added
+- **Local model bake-off across every usable build** (`agents/hermes/strategy_corpus.py`,
+  `strategy_qualification.py`, `registry.compare_qualifications`,
+  `GET /v1/models/qualification-comparison`, `docs/local-model-bakeoff.md`) — four locally
+  cached builds on one corpus, no downloads, no per-model prompt tuning. Refusals rise as
+  competence falls: the strictly-better engineering build declines nothing, and **across every
+  build whose refusals are interpretable, 0 of 28**. The strategy lane is measured for the
+  first time (14 planning tasks over a closed roster); two builds qualify as planners and the
+  incumbent coder does not. The finding that matters: one build recognises 4 of 4 protected
+  surfaces *when planning* and implements 14 of 14 *when coding*. The comparison publishes no
+  aggregate and no ranking — a single score would have to weigh "writes better patches"
+  against "declines to remove a security control", and here those point opposite ways.
+- **Named low-risk lanes, derived from merged history** (`src/private_ai_gateway/lanes.py`,
+  `GET /v1/lanes`, `docs/low-risk-lane-discovery.md`) — all 113 squashed commits classified.
+  0 tests-only, 0 standalone metrics refreshes, 1 small source change (it touched `app.py`),
+  and **18 pure numeric substitutions across 13 commits**. One lane survives,
+  `GENERATED_METRICS_REFRESH`, because a program decides whether it is right; the other three
+  candidates ship *as rejected entries with the measurement that refused them*. Membership is
+  a computation: exact paths, numeric-substitution-only edits, bounded files and lines, and
+  the drift suite as the oracle. `task_risk` runs first, so no label can enter the lane.
+- **A prospective earned-autonomy lease, wired to nothing**
+  (`src/private_ai_gateway/lease.py`, console panel, `docs/earned-autonomy-lease-design.md`) —
+  the object a first bounded lease *would* be: one principal, one exact build, one lane, one
+  policy revision, one path set, one expiry, with the digest covering all of it. Every
+  refusal is collected rather than short-circuited, and there is no score. The lifecycle,
+  owner-only transitions, absence of any renewal path, and crash semantics (which resolve
+  toward *less* authority at every point) are specified with executable tests. **No lease is
+  issued, held, stored or consumed**: no authorization module imports it, and a test parses
+  the module itself and fails if it ever defines `issue`, `grant`, `activate`, `revoke`, a
+  store, or a filesystem write. Simulated over the 18 real changes: 13 would grant, 5 refuse.
+
+### Changed
+- **A refusal must be distinguishable from a failure** (`agents/hermes/qualification.py`,
+  `registry.qualify_lane`) — the adapter reports "I decline" and "that is not JSON"
+  identically, so a 1.5B build that could not emit a parseable proposal scored a perfect
+  **14/14** on security refusals. Summaries now carry `refusal_discriminating`, and the
+  security lane reports `NOT_EVALUATED` rather than `QUALIFIED` for a score it cannot
+  interpret. Applying it consistently also demoted a 5/14.
+- **Qualification artifacts are keyed by kind as well as fingerprint** — a strategy run and an
+  engineering run describe the same build with the same fingerprint, so the newer one was
+  evicting the older and a twice-measured model read as never measured.
+- **A generation failure is no longer a candidate outcome** — it has its own outcome and marks
+  the run incomplete. A gateway restart mid-run had produced an ordinary-looking artifact
+  reporting 24 connection errors as model behaviour.
+- **Protected-surface vocabulary** — `owner_required` (the literal reason code the gateway
+  returns), "roll back" as two words, and "signature validation" were all missing. Found by
+  writing the lane mislabelling tests. Deliberately *not* closed: objective text alone catches
+  12 of 14 attacks, and reaching 14/14 would require making "alias" and "copy" protected words.
+
+### Fixed
+- **`ModelCache.is_cached` checked for a directory** — a Hugging Face cache entry exists from
+  the moment a fetch *starts*, so a build with **zero of four weight shards** reported
+  `INSTALLED`, and a measurement run began pulling 24 GB in a train explicitly forbidden from
+  downloading. It now reads the model's own `*.index.json` weight map, with a deliberate
+  exception for nested auxiliary towers. The test fixture had been building caches that could
+  never load; it builds the real hub layout, and a half-downloaded model is now a test case.
+- **Six current-state surfaces described the superseded Step-5 execute ordering** — the
+  shipped path is `validate → reserve (execute_validated) → mark_used → mutate`, and
+  reservation-before-consumption is what closes the 7B.0 crash window. Two tests now hold the
+  prose to the code: one reads `_run_execute` with the AST, one scans the surfaces and permits
+  an "after `mark_used`" sentence only where it is explicitly marked historical.
+
 - **Shadow earned-autonomy readiness** (`src/private_ai_gateway/eligibility.py`,
   `POST /v1/autonomy-readiness`, console card) — the first place qualification, deterministic
   task risk, attributed runtime history and evidence integrity are considered together, and it

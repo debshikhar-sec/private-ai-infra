@@ -317,6 +317,30 @@ substrate (above) is live, the running agents are next:
   explicitly-gated tool path exists. (Feeding the eval verdict into OpenClaw's assurance so a
   failed eval gates the planning loop is already **done** — see boundary hardening above.)
 
+## Earned autonomy — measured, and deliberately not built
+
+The question was whether any task/model combination is safe enough to justify designing a
+first bounded lease. It was answered empirically, and the answer is **no, not yet** — with the
+blockers named rather than deferred.
+
+- **A lane exists.** `GENERATED_METRICS_REFRESH` is the one change class in 113 merged commits
+  whose correctness a program can decide. See
+  [low-risk-lane-discovery.md](low-risk-lane-discovery.md); three candidate lanes were
+  rejected and ship as rejected entries with their evidence.
+- **The models can do it.** Both capable local builds replayed 18 real merged changes
+  **18/18 clean, zero scope escapes** — no rewording, no drive-by improvements.
+- **No build has security judgement.** Across every build whose refusals are interpretable:
+  **0 of 28** ([local-model-bakeoff.md](local-model-bakeoff.md)).
+- **No attributed history exists.** A lease requires 20 verified completions attributable to
+  one build; signed attribution shipped one train ago and the count is **0**. This cannot be
+  short-cut — it has to accumulate under the governed loop.
+- **The lane is worth minutes.** 13 coverable changes across the whole project history.
+
+The lease specification and its tests are written and green
+([earned-autonomy-lease-design.md](earned-autonomy-lease-design.md)), wired to nothing. The
+next step is not more plumbing: it is accumulating attributed runs, and re-measuring security
+refusal on a build that can actually decline. **Execution stays human-gated.**
+
 ## Longer-term — capability, behind the same boundary
 
 - Local RAG over project documentation.
