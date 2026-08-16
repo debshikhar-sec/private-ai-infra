@@ -1083,6 +1083,22 @@ def v1_autonomy_readiness():
     return jsonify({**result.to_mapping(), "task_risk": assessment.to_mapping()}), 200
 
 
+@app.route("/v1/lanes", methods=["GET"])
+def v1_lanes():
+    """The low-risk lane catalogue, including the lanes that were rejected and why.
+
+    Owner-gated and read-only. The rejected entries are served alongside the accepted ones on
+    purpose: the next person to propose an autonomy lane will propose one of them, and the
+    measurement that refused it should arrive with the question.
+    """
+    from private_ai_gateway import lanes as lane_mod
+
+    denied = _owner_only("The lane catalogue")
+    if denied is not None:
+        return denied
+    return jsonify(lane_mod.catalogue()), 200
+
+
 @app.route("/v1/models/route-activate", methods=["POST"])
 def v1_models_route_activate():
     """Activate a route change as a managed revision. Owner only, and narrow by construction.
