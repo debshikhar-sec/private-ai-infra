@@ -553,6 +553,9 @@ $ curl :8080/mcp/call   -H "$H" -d '{"tool":"clock.now"}'          # 200 — gra
 | [Runbook](docs/runbook.md) | operating the stack + the live enforcement demo |
 | [**Product evolution**](docs/product-evolution.md) | OWASP Agentic Top-10 coverage map + threat-led roadmap vs. the AI-gateway field |
 | [Positioning](docs/positioning.md) | where this sits in the 2025–26 AI-security market — sourced, gaps stated |
+| [**Local model bake-off**](docs/local-model-bakeoff.md) | four local builds measured on the same corpus — and why the comparison publishes no ranking |
+| [**Low-risk lane discovery**](docs/low-risk-lane-discovery.md) | mining 113 merged commits for a change class a machine can check; three of four candidate lanes rejected |
+| [**Earned-autonomy lease design**](docs/earned-autonomy-lease-design.md) | what a first bounded lease would bind, and why none was built |
 | [Roadmap](docs/roadmap.md) | what's hardened, what's next |
 
 ## Project layout
