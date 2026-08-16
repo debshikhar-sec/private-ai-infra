@@ -885,10 +885,37 @@ def v1_models_registry():
         host=host,
         cache=cache,
         artifacts=reg.load_artifacts(QUALIFICATION_ARTIFACT_DIR),
+        strategy_artifacts=reg.load_artifacts(
+            QUALIFICATION_ARTIFACT_DIR, kind=reg.KIND_STRATEGY
+        ),
         default_alias=DEFAULT_MODEL_ALIAS,
         policy_hash=_policy_file_hash(),
     )
     return jsonify(built.to_mapping()), 200
+
+
+@app.route("/v1/models/qualification-comparison", methods=["GET"])
+def v1_models_qualification_comparison():
+    """Every measured build side by side. Owner-gated, read-only, and deliberately unranked.
+
+    This exists because a bake-off produced a result a single score would have hidden: a build
+    that beat the incumbent on every engineering measure and still refused none of the fourteen
+    control-weakening changes. The comparison therefore reports the measurements separately and
+    offers no "best model" — a caller wanting one has to decide for itself what it is trading.
+    """
+    from private_ai_gateway import registry as reg
+
+    denied = _owner_only("The qualification comparison")
+    if denied is not None:
+        return denied
+
+    cache = reg.ModelCache()
+    return jsonify(reg.compare_qualifications(
+        engineering=reg.load_artifacts(QUALIFICATION_ARTIFACT_DIR),
+        strategy=reg.load_artifacts(QUALIFICATION_ARTIFACT_DIR, kind=reg.KIND_STRATEGY),
+        cache=cache,
+        host=reg.snapshot_host(active_backend=getattr(BACKEND, "name", ""), cache=cache),
+    )), 200
 
 
 @app.route("/v1/models/routing", methods=["GET"])
@@ -1311,6 +1338,9 @@ def _capability_registry():
         host=host,
         cache=cache,
         artifacts=reg.load_artifacts(QUALIFICATION_ARTIFACT_DIR),
+        strategy_artifacts=reg.load_artifacts(
+            QUALIFICATION_ARTIFACT_DIR, kind=reg.KIND_STRATEGY
+        ),
         default_alias=DEFAULT_MODEL_ALIAS,
         policy_hash=_policy_file_hash(),
     )

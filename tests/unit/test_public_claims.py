@@ -452,15 +452,88 @@ def test_docs_describe_the_reservation_ordering_not_the_superseded_one(path):
         )
 
 
-def test_qualification_artifact_carries_no_host_identifiers():
-    """The published artifact is a public file. It must stay privacy-minimal."""
-    raw = _text(pm.QUALIFICATION_ARTIFACT)
-    for pattern in (r"/Users/", r"/home/", r"[0-9A-F]{8}-[0-9A-F]{4}-", r"\b[0-9a-f]{2}(:[0-9a-f]{2}){5}\b"):
-        assert not re.search(pattern, raw), f"published artifact leaks {pattern!r}"
+_PRIVACY_PATTERNS = (
+    r"/Users/",
+    r"/home/",
+    r"[0-9A-F]{8}-[0-9A-F]{4}-",
+    r"\b[0-9a-f]{2}(:[0-9a-f]{2}){5}\b",
+)
+_ALLOWED_HOST_KEYS = {"architecture", "backends_available", "platform", "total_memory_gb"}
+
+
+def _published_artifacts():
+    paths = [pm.QUALIFICATION_ARTIFACT]
+    if pm.BAKEOFF_DIR.is_dir():
+        paths.extend(sorted(pm.BAKEOFF_DIR.glob("*.json")))
+    return paths
+
+
+@pytest.mark.parametrize("path", _published_artifacts(), ids=lambda p: p.name)
+def test_published_artifacts_carry_no_host_identifiers(path):
+    """Every published artifact is a public file. It must stay privacy-minimal.
+
+    Parametrised over the whole published set rather than the one canonical file: the
+    bake-off added seven more artifacts, and a privacy check that only covers the original
+    is a check that stops working the moment it matters.
+    """
+    raw = _text(path)
+    for pattern in _PRIVACY_PATTERNS:
+        assert not re.search(pattern, raw), f"{path.name} leaks {pattern!r}"
     art = json.loads(raw)
-    assert set(art["host"]) <= {
-        "architecture",
-        "backends_available",
-        "platform",
-        "total_memory_gb",
-    }
+    assert set(art.get("host") or {}) <= _ALLOWED_HOST_KEYS
+
+
+# --- the bake-off write-up ------------------------------------------------------------------
+
+BAKEOFF_DOC = REPO_ROOT / "docs" / "local-model-bakeoff.md"
+
+
+def test_every_bakeoff_engineering_number_is_in_the_document(manifest):
+    """The write-up's table is checked against the artifacts, not trusted.
+
+    Thirty-odd numbers across four builds is exactly the size of table where one transposed
+    digit survives every review — and the numbers carrying the argument are the ones a
+    careless edit would smooth over.
+    """
+    text = _text(BAKEOFF_DOC)
+    builds = manifest["bakeoff"]["builds"]
+    assert builds, "no bake-off artifacts are published"
+    for key, build in builds.items():
+        engineering = build.get("engineering")
+        if not engineering:
+            continue
+        assert build["resolved_model"].split("/")[-1] in text, key
+        refusals = (
+            f"{engineering['security_refusal_correct']} / "
+            f"{engineering['security_refusal_total']}"
+        )
+        assert refusals in text, f"{key}: refusal score {refusals} is not in the write-up"
+        for field in ("structural_valid_pct", "tests_pass_pct", "zero_edit_pct"):
+            assert f"{engineering[field]} %" in text, f"{key}: {field} is not in the write-up"
+
+
+def test_the_combined_refusal_claim_matches_the_artifacts(manifest):
+    combined = manifest["bakeoff"]["combined_security_refusals"]
+    assert combined is not None
+    text = _text(BAKEOFF_DOC)
+    assert f"{combined['correct']} of {combined['total']}" in text
+
+
+def test_a_non_discriminating_refusal_score_is_never_reported_as_qualified(manifest):
+    """The 14/14 must be published with its caveat attached, wherever it appears."""
+    text = _text(BAKEOFF_DOC)
+    suspect = [
+        key for key, build in manifest["bakeoff"]["builds"].items()
+        if build.get("engineering")
+        and build["engineering"].get("refusal_discriminating") is False
+    ]
+    if not suspect:
+        pytest.skip("no build recorded a non-discriminating refusal score")
+    assert "indistinguishable from failure" in text or "cannot tell" in text
+    assert "⚠" in text, "the flagged score is not visibly marked in the table"
+
+
+def test_the_bakeoff_document_publishes_no_ranking(manifest):
+    text = _text(BAKEOFF_DOC).lower()
+    for forbidden in ("best model", "winner", "overall score", "leaderboard"):
+        assert forbidden not in text

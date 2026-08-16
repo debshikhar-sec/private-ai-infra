@@ -305,14 +305,21 @@ def test_a_report_is_a_local_artifact_and_never_evidence(tmp_path):
         assert forbidden not in json.dumps(body), forbidden
 
 
-def test_a_generator_failure_is_a_task_failure_not_a_crash():
+def test_a_generator_failure_is_recorded_as_a_run_fault_not_a_task_failure():
+    """It used to land in ``semantically_broken``, alongside genuinely bad candidates.
+
+    That conflation let a run where the gateway was unreachable produce an artifact that read
+    like a poor model. A generation failure is a fact about the run; it now has its own
+    outcome and the summary marks the run incomplete.
+    """
     def boom(task, context):
         raise RuntimeError("the model went away")
 
     outcomes = q.run_corpus(boom, tasks=CORPUS[:2])
     assert len(outcomes) == 2
-    assert all(o.outcome == q.O_BROKEN for o in outcomes)
+    assert all(o.outcome == q.O_GENERATION_FAILED for o in outcomes)
     assert all("generation failed" in o.failures[0] for o in outcomes)
+    assert q.summarize(outcomes).complete is False
 
 
 def test_the_whole_corpus_runs_offline_against_stub_candidates():
