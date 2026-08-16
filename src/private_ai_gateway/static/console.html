@@ -402,6 +402,17 @@
     </div>
 
     <div class="card">
+      <h3>Prospective lease <span class="badge badge-warn">PROSPECTIVE / SHADOW</span></h3>
+      <p class="sub">What a first bounded lease <em>would</em> bind, and what would refuse it
+        today. Shown beside readiness rather than merged into it: readiness is about the
+        build's standing, a lease is about one change's scope, and collapsing them produces a
+        single green-ish badge. <strong>No lease exists.</strong> Nothing issues, stores or
+        consumes one, and the blockers list below is the useful half.</p>
+      <div id="mr-lease"><div class="empty">Connect to load the prospective lease.</div></div>
+      <div class="sub" id="mr-lease-note"></div>
+    </div>
+
+    <div class="card">
       <h3>Deterministic controls — not model-routed</h3>
       <p class="sub">These have no model selector and never will. Each either holds or does
         not; a model's opinion about that is not evidence.</p>
@@ -732,6 +743,45 @@
     $("mr-readiness-note").textContent =
       esc(b.note || "") + " Grants: " + esc(b.grants) +
       ". Consumed by: " + esc(b.consumed_by) + ".";
+    renderLease(b.prospective_lease);
+  };
+
+  const renderLease = (p) => {
+    if (!p) {
+      $("mr-lease").innerHTML = '<div class="empty">no prospective lease view</div>';
+      return;
+    }
+    const lease = p.lease || {};
+    const shadow = p.shadow_decision || {};
+    const blockers = (shadow.refusals || []).map((r) => `
+      <div class="mr-row"><b>${esc(r.code)}</b>
+        <div class="sub">${esc(r.detail)}</div></div>`).join("");
+    const bounds = [
+      ["lane", lease.lane_id],
+      ["build", lease.model_fingerprint || "not recorded"],
+      ["policy", lease.policy_hash],
+      ["revision", lease.policy_revision || "none active"],
+      ["paths", (lease.allowed_paths || []).length + " exact paths"],
+      ["scope", (lease.max_files || 0) + " files / " + (lease.max_changed_lines || 0) + " lines"],
+      ["tools", (lease.tools || []).length ? (lease.tools || []).join(", ") : "none"],
+      ["network", lease.network],
+      ["expires", lease.expires_at],
+      ["history required", (lease.min_attributable_runs || 0) + " attributed runs"],
+      ["qualification", lease.qualification_artifact || "none on file"],
+    ].map(([k, v]) => `<div class="mr-row"><b>${esc(k)}</b>
+        <div class="sub">${esc(String(v ?? ""))}</div></div>`).join("");
+    $("mr-lease").innerHTML = `
+      <div class="mr-row"><b>${esc(shadow.decision || "WOULD_REFUSE")}</b>
+        <span class="badge badge-warn">${esc(shadow.posture || "")}</span>
+        <div class="sub">lease digest ${esc((shadow.lease_digest || "").slice(0, 26))}…</div>
+      </div>
+      <h4>WOULD BIND</h4>${bounds}
+      <h4>BLOCKERS</h4>${blockers ||
+        '<div class="empty">nothing blocks this change — and it still would not run, ' +
+        'because no lease has been issued</div>'}`;
+    $("mr-lease-note").textContent =
+      (p.note || "") + " Grants: " + esc(shadow.grants || "nothing") +
+      ". Consumed by: " + esc(shadow.consumed_by || "nothing") + ".";
   };
 
   const refreshAll = () => {
