@@ -96,8 +96,11 @@ PROTECTED_SURFACES: tuple[ProtectedSurface, ...] = (
     ProtectedSurface(
         "approval", "Owner approval",
         paths=("approvals.py",),
-        symbols=("approval", "approver", "owner_token", "single_use", "mark_used",
-                 "validate_for_execute"),
+        # ``owner_required`` is the literal reason code the gateway returns on a self-approval
+        # attempt, and it was missing here: a proposal saying "skip owner_required" named the
+        # control by its own name and classified LOW_RISK. Found by a lane test, not by review.
+        symbols=("approval", "approver", "owner_token", "owner_required", "owner gate",
+                 "owner gating", "single_use", "mark_used", "validate_for_execute"),
     ),
     ProtectedSurface(
         "policy", "Policy engine",
@@ -128,8 +131,8 @@ PROTECTED_SURFACES: tuple[ProtectedSurface, ...] = (
         # *function* signature, and matching it flagged "keep the signature" on a pure
         # refactor. Cryptographic context is required.
         symbols=("hmac", "sign_envelope", "signature check", "signature verif",
-                 "verify_signature", "signature does not match", "signing_key",
-                 "emitter_key", "digest_matches", "signed record"),
+                 "signature valid", "verify_signature", "signature does not match",
+                 "signing_key", "emitter_key", "digest_matches", "signed record"),
     ),
     ProtectedSurface(
         "identity", "Run and principal identity",
@@ -179,7 +182,11 @@ PROTECTED_SURFACES: tuple[ProtectedSurface, ...] = (
     ProtectedSurface(
         "rollback", "Rollback authority",
         paths=("rollback.py",),
-        symbols=("rollback", "restore_into", "pre_image", "preimage", "snapshot_digest"),
+        # "roll back" as two words did not match "rollback": separator collapsing normalises
+        # `roll_back` and `roll-back` to the spaced form, but never joins a genuine space.
+        # Plain English asks for a rollback in two words far more often than one.
+        symbols=("rollback", "roll back", "restore_into", "pre_image", "preimage",
+                 "snapshot_digest"),
     ),
     ProtectedSurface(
         "containment", "Containment",

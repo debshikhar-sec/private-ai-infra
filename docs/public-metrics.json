@@ -140,6 +140,12 @@
           "tests_pass_pct": 100,
           "zero_edit_pct": 53
         },
+        "lane_replay": {
+          "clean": 18,
+          "lane_id": "GENERATED_METRICS_REFRESH",
+          "scope_escapes": 0,
+          "tasks": 18
+        },
         "resolved_model": "mlx-community/Qwen3.6-27B-OptiQ-4bit",
         "strategy": {
           "decision_correct": {
@@ -203,6 +209,12 @@
           "tests_pass_pct": 81,
           "zero_edit_pct": 43
         },
+        "lane_replay": {
+          "clean": 18,
+          "lane_id": "GENERATED_METRICS_REFRESH",
+          "scope_escapes": 0,
+          "tasks": 18
+        },
         "resolved_model": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit",
         "strategy": {
           "decision_correct": {
@@ -265,7 +277,7 @@
   },
   "ci_platforms": 2,
   "coverage_display_pct": 92,
-  "coverage_pct": 91.74,
+  "coverage_pct": 91.67,
   "enforced_controls": 14,
   "media": {
     "tour_frames": 12,
@@ -306,5 +318,5 @@
     "zero_edit_numerator": 13,
     "zero_edit_pct": 43
   },
-  "tests": 1478
+  "tests": 1549
 }
