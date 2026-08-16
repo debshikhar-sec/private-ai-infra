@@ -171,7 +171,8 @@ reaches its verdict by reading artifacts authored by the very components it veri
   required (`agents/openclaw/evidence.py`, `checks.py`, `worker.py`).
 - **The gateway emits signed `execute_validated` authorization evidence.** When execution
   authority is granted, the gateway can now emit a signed `execute_validated` record into an
-  injected `EvidenceSink`, after approval validation and `mark_used`, before `session.execute`
+  injected `EvidenceSink` as the durable execution reservation — after approval validation
+  and **before** `mark_used` (Step 7B.1: validate → reserve → consume → mutate)
   (`src/private_ai_gateway/orchestration.py`, `app.py`). The payload contains
   `canonical_plan_hash` and `validated=true`, while `run_id` and `approval_id` remain in the
   evidence envelope. The default no-sink behavior is backward-compatible, and

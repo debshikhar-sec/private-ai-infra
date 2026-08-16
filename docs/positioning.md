@@ -74,8 +74,9 @@ signed OpenCode `apply_result` emission, OpenClaw consuming and validating that 
 evidence from an injected sink (component-level verification — unit-proven, so unsigned
 `apply_result.json` alone is insufficient when signed evidence is required), the gateway
 emitting a signed `execute_validated` authorization record when execution authority is
-granted (component-level gateway authorization evidence emit — after approval validation
-and `mark_used`, before `session.execute`, with a backward-compatible no-sink default and a
+granted (component-level gateway authorization evidence emit — appended as the durable
+execution reservation after approval validation and **before** `mark_used`, per the Step
+7B.1 ordering `validate → reserve → consume → mutate`, with a backward-compatible no-sink default and a
 `REQUIRE_AUTHORIZATION_EVIDENCE` strict mode that denies before mutation), the gateway
 emitting a signed `approval_decided` decision record when an owner approves or rejects
 (component-level decision evidence emit — after the decision is stored and before the success

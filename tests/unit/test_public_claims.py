@@ -20,6 +20,7 @@ Two deliberate limits keep this from becoming brittle:
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -368,6 +369,87 @@ def test_openclaw_control_count_is_not_conflated(manifest):
     counts = manifest["openclaw_controls"]
     assert counts["baseline"] != manifest["enforced_controls"]
     assert counts["with_signed_evidence"] >= counts["baseline"]
+
+
+# --------------------------------------------------------------------------------------
+# Step 7B.1 execute ordering
+#
+# The reservation-before-consumption ordering is a crash-safety property, not a stylistic
+# one, so the prose describing it is held to the code. Two tests, deliberately separate:
+# the first pins what the code does, the second pins what the docs say it does. If someone
+# reorders the implementation, the first fails; if someone restores the pre-7B.1 sentence,
+# the second fails. Neither can be satisfied by editing the other's subject.
+# --------------------------------------------------------------------------------------
+
+ORDERING_SURFACES = (
+    README,
+    ROADMAP,
+    POSITIONING,
+    SITE,
+    REPO_ROOT / "docs" / "security-model.md",
+    REPO_ROOT / "docs" / "orchestration.md",
+    REPO_ROOT / "docs" / "evidence-sink-design.md",
+)
+
+#: An ordering claim that puts the emit *after* consumption. ``before`` may not appear in
+#: between, so "after validate_for_execute … before mark_used" is not a match.
+_EMIT_AFTER_CONSUME = re.compile(
+    r"after(?:(?!\bbefore\b)[^.]){0,80}?`mark_used`", re.IGNORECASE
+)
+
+#: Markers that make a stale-ordering sentence a legitimate historical statement.
+_SUPERSESSION = re.compile(r"supersed|step[\s-]*5|7B\.0|previously|used to", re.IGNORECASE)
+
+
+def test_execute_reservation_is_appended_before_the_approval_is_consumed():
+    """The code, not the prose, is the authority for the 7B.1 ordering."""
+    source = (REPO_ROOT / "src" / "private_ai_gateway" / "orchestration.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    run_execute = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_run_execute"
+    )
+
+    def _first_line(predicate) -> int:
+        return min(
+            node.lineno
+            for node in ast.walk(run_execute)
+            if isinstance(node, ast.Call) and predicate(node)
+        )
+
+    emit = _first_line(
+        lambda c: isinstance(c.func, ast.Name) and c.func.id == "_emit_execute_validated"
+    )
+    consume = _first_line(
+        lambda c: isinstance(c.func, ast.Attribute) and c.func.attr == "mark_used"
+    )
+    assert emit < consume, (
+        "the execute_validated reservation must be appended before mark_used consumes the "
+        "approval; reordering reopens the 7B.0 crash window (W4)"
+    )
+
+
+@pytest.mark.parametrize("path", ORDERING_SURFACES, ids=lambda p: p.name)
+def test_docs_describe_the_reservation_ordering_not_the_superseded_one(path):
+    text = " ".join(_text(path).split())
+    if "execute_validated" not in text or "mark_used" not in text:
+        pytest.skip(f"{path.name} does not describe the execute ordering")
+
+    # ``\W`` absorbs the emphasis markup surfaces use — "**before** `mark_used`".
+    assert re.search(r"before\W{0,4}`mark_used`", text, re.IGNORECASE), (
+        f"{path.name} describes execute_validated but never states that it is appended "
+        "before mark_used"
+    )
+
+    for match in _EMIT_AFTER_CONSUME.finditer(text):
+        window = text[max(0, match.start() - 240) : match.end() + 240]
+        assert _SUPERSESSION.search(window), (
+            f"{path.name} states the superseded ordering without marking it historical: "
+            f"...{match.group(0)}..."
+        )
 
 
 def test_qualification_artifact_carries_no_host_identifiers():
