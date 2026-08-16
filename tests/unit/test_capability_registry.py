@@ -43,19 +43,43 @@ def cache(tmp_path):
     return reg.ModelCache(root)
 
 
-def _install(cache: reg.ModelCache, model_id: str, *, revision="abc123", size=1024):
-    """Install a fake cached model.
+def _install(
+    cache: reg.ModelCache, model_id: str, *, revision="abc123", size=1024,
+    shards=1, present=None, index=True,
+):
+    """Install a fake cached model in the real hub layout.
 
     The blob is created **sparse** via ``truncate``: ``st_size`` reports the full apparent
     size, which is all the fit calculation reads, without allocating a byte. Materializing a
     60 GB blob to test DOES_NOT_FIT is how a fixture kills a CI runner.
+
+    The snapshot directory is built with the same shape the hub uses — ``refs/main`` naming
+    a revision, ``snapshots/<rev>/`` holding symlinks into ``blobs/`` — because the previous
+    fixture created only ``blobs/`` and so declared a model "cached" under conditions that
+    could never load. ``present`` installs fewer shards than the index declares, which is
+    what a half-finished download actually looks like.
     """
+    present = shards if present is None else present
     entry = cache.root / ("models--" + model_id.replace("/", "--"))
     (entry / "refs").mkdir(parents=True, exist_ok=True)
     (entry / "refs" / "main").write_text(revision, encoding="utf-8")
-    (entry / "blobs").mkdir(exist_ok=True)
-    with open(entry / "blobs" / "weights", "wb") as fh:
-        fh.truncate(size)
+    blobs = entry / "blobs"
+    blobs.mkdir(exist_ok=True)
+    snapshot = entry / "snapshots" / revision
+    snapshot.mkdir(parents=True, exist_ok=True)
+
+    names = [f"model-{i + 1:05d}-of-{shards:05d}.safetensors" for i in range(shards)]
+    for position, name in enumerate(names):
+        blob = blobs / f"blob{position}"
+        with open(blob, "wb") as fh:
+            fh.truncate(size // shards if shards else size)
+        if position < present:
+            (snapshot / name).symlink_to(blob)
+    if index:
+        (snapshot / "model.safetensors.index.json").write_text(
+            json.dumps({"weight_map": {f"layer.{i}": n for i, n in enumerate(names)}}),
+            encoding="utf-8",
+        )
     return entry
 
 
@@ -209,6 +233,51 @@ def test_a_cached_model_is_installed(cache):
     _install(cache, QWEN)
     identity = reg.identify_model("engineering", QWEN, backend="mlx", cache=cache)
     assert reg.availability_of(identity, _host(), cache) == reg.AVAIL_INSTALLED
+
+
+def test_a_half_downloaded_model_is_not_installed(cache):
+    """The bug a live bake-off found: a directory is not a model.
+
+    A hub cache entry exists from the moment a fetch begins. The registry reported
+    ``INSTALLED`` for a build with zero of its four weight shards on disk, a run was
+    scheduled against it on that basis, and the run started pulling 24 GB — in a train whose
+    explicit constraint was that nothing may be downloaded.
+    """
+    _install(cache, QWEN, shards=4, present=0)
+    identity = reg.identify_model("engineering", QWEN, backend="mlx", cache=cache)
+    assert cache.snapshot_status(QWEN) == reg.SNAPSHOT_INCOMPLETE
+    assert reg.availability_of(identity, _host(), cache) == reg.AVAIL_NOT_INSTALLED
+
+
+def test_a_model_missing_one_shard_of_many_is_not_installed(cache):
+    _install(cache, QWEN, shards=8, present=7)
+    identity = reg.identify_model("engineering", QWEN, backend="mlx", cache=cache)
+    assert reg.availability_of(identity, _host(), cache) == reg.AVAIL_NOT_INSTALLED
+
+
+def test_every_declared_shard_present_is_installed(cache):
+    _install(cache, QWEN, shards=8, present=8)
+    identity = reg.identify_model("engineering", QWEN, backend="mlx", cache=cache)
+    assert cache.snapshot_status(QWEN) == reg.SNAPSHOT_COMPLETE
+    assert reg.availability_of(identity, _host(), cache) == reg.AVAIL_INSTALLED
+
+
+def test_a_single_file_model_without_an_index_is_installed(cache):
+    """Not every model ships a shard index; absence of one is not evidence of absence."""
+    _install(cache, QWEN, shards=1, present=1, index=False)
+    assert cache.snapshot_status(QWEN) == reg.SNAPSHOT_COMPLETE
+
+
+def test_a_refs_pointer_with_no_snapshot_is_incomplete(cache):
+    entry = cache.root / ("models--" + QWEN.replace("/", "--"))
+    (entry / "refs").mkdir(parents=True)
+    (entry / "refs" / "main").write_text("deadbeef", encoding="utf-8")
+    assert cache.snapshot_status(QWEN) == reg.SNAPSHOT_INCOMPLETE
+
+
+def test_snapshot_status_of_an_unreadable_cache_is_unknown(tmp_path):
+    missing = reg.ModelCache(tmp_path / "not-here")
+    assert missing.snapshot_status(QWEN) == reg.SNAPSHOT_UNKNOWN
 
 
 def test_an_uncached_model_is_not_installed_and_is_never_fetched(cache):

@@ -156,6 +156,84 @@ def qualification_facts() -> dict:
     }
 
 
+BAKEOFF_DIR = REPO_ROOT / "docs" / "qualification" / "bakeoff"
+
+
+def bakeoff_facts() -> dict:
+    """Canonical source: the published bake-off artifacts, one per measured build.
+
+    The bake-off write-up is a table of thirty-odd numbers across four builds and two corpora.
+    Typing that table by hand would reintroduce exactly the drift this script exists to stop —
+    and the numbers most likely to be typed wrong are the ones that make the argument.
+
+    Keyed by short fingerprint, because a route alias is not an identity and two builds of the
+    same family must never merge into one row.
+    """
+    if not BAKEOFF_DIR.is_dir():
+        return {"builds": {}, "combined_security_refusals": None}
+
+    def pct(rate) -> int | None:
+        return None if rate is None else round(float(rate) * 100)
+
+    builds: dict[str, dict] = {}
+    for path in sorted(BAKEOFF_DIR.glob("*.json")):
+        art = json.loads(path.read_text(encoding="utf-8"))
+        model = art.get("model") or {}
+        key = model.get("short_fingerprint") or ""
+        if not key:
+            continue
+        row = builds.setdefault(key, {"resolved_model": model.get("resolved_model", "")})
+        summary = art.get("summary") or {}
+        kind = art.get("artifact_kind") or ""
+        # Dispatched explicitly on kind. An earlier version treated "not strategy" as
+        # engineering, so the lane-replay artifacts overwrote the engineering rows of the two
+        # builds that had one — and the combined refusal figure silently became 0 of 0.
+        if kind == "local_strategy_qualification":
+            row["strategy"] = {
+                name: {"held": stat["held"], "measured": stat["measured"]}
+                for name, stat in (summary.get("qualities") or {}).items()
+            }
+        elif kind == "low_risk_lane_replay":
+            row["lane_replay"] = {
+                "lane_id": art.get("lane_id", ""),
+                "tasks": summary.get("tasks"),
+                "clean": summary.get("clean"),
+                "scope_escapes": summary.get("scope_escapes"),
+            }
+        elif kind == "local_engineering_qualification":
+            row["engineering"] = {
+                "structural_valid_pct": pct(summary.get("structural_valid_rate")),
+                "tests_pass_pct": pct(summary.get("tests_pass_rate")),
+                "lint_pass_pct": pct(summary.get("lint_pass_rate")),
+                "api_preserved_pct": pct(summary.get("api_preserved_rate")),
+                "zero_edit_pct": pct(summary.get("zero_edit_rate")),
+                "security_refusal_correct": summary.get("security_refusal_correct"),
+                "security_refusal_total": summary.get("security_refusal_total"),
+                "refusal_discriminating": summary.get("refusal_discriminating", True),
+            }
+
+    # Combined across the builds whose refusals are *interpretable*. A build that cannot
+    # produce a valid proposal contributes nothing to a claim about security judgement, so
+    # including its perfect score would make the combined figure flattering and meaningless.
+    interpretable = [
+        b["engineering"] for b in builds.values()
+        if b.get("engineering") and b["engineering"].get("refusal_discriminating")
+    ]
+    combined = None
+    if interpretable:
+        combined = {
+            "correct": sum(b["security_refusal_correct"] or 0 for b in interpretable),
+            "total": sum(b["security_refusal_total"] or 0 for b in interpretable),
+            "builds": len(interpretable),
+        }
+
+    return {
+        "builds": builds,
+        "combined_security_refusals": combined,
+        "builds_measured": len(builds),
+    }
+
+
 def _mp4_duration_seconds(path: Path) -> float:
     """Read a duration straight out of the MP4 ``mvhd`` box.
 
@@ -276,6 +354,7 @@ def build(include_suite: bool = False, previous: dict | None = None) -> dict:
         "openclaw_controls": openclaw_control_counts(),
         "ci_platforms": ci_platform_count(),
         "qualification": qualification_facts(),
+        "bakeoff": bakeoff_facts(),
         "media": media_facts(),
     }
 
